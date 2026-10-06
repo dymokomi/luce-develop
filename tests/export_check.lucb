@@ -1,5 +1,5 @@
-## Export each file on the command line at full size as JPEG and 16-bit PNG
-## into OUTPUT_DIR, timing each.
+## Export each file on the command line at full size as JPEG and 16-bit PNG, in
+## sRGB and Display P3, into OUTPUT_DIR, timing each.
 import time
 import strings
 from luce_std import paths
@@ -10,10 +10,11 @@ pub func main(arguments: str[]) -> i32!:
         print("usage: export_check OUTPUT_DIR FILE...")
         return 2
     for path in arguments[2..]:
-        for format in [export.jpeg, export.png16]:
-            var buffer: u8[1024]
-            let target = try strings.format(buffer, f"{arguments[1]}/{paths.base(path)}.{"jpg" if format == export.jpeg else "png"}")
-            let started = time.now()
-            try export.export(path, "exposure=0.3;contrast=10", target, format)
-            print(f"ok    {paths.base(target)}  {(time.now() - started) // 1000000} ms")
+        for space in [export.srgb, export.display_p3]:
+            for format in [export.jpeg, export.png16]:
+                var buffer: u8[1024]
+                let target = try strings.format(buffer, f"{arguments[1]}/{paths.base(path)}.{"p3" if space == export.display_p3 else "srgb"}.{"jpg" if format == export.jpeg else "png"}")
+                let started = time.now()
+                try export.export(path, "exposure=0.3;contrast=10;vibrance=40", target, format, 92, 1600, space)
+                print(f"ok    {paths.base(target)}  {(time.now() - started) // 1000000} ms")
     return 0

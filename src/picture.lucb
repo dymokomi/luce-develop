@@ -117,15 +117,20 @@ pub struct Picture:
         memory.copy(out.data, self.data, self.data.length)
         return out
 
-    ## The picture as a baseline JPEG (4:2:0) of `quality` 1–100, appended to `output`.
-    pub func encode_jpeg(output: Buffer*, quality: i64 = 85) -> !:
-        try jpeg.encode_rgba8(self.data, self.columns, self.rows, output, jpeg.EncodeOptions(quality = quality))
+    ## The picture as a baseline JPEG (4:2:0) of `quality` 1–100, appended to
+    ## `output`, carrying the ICC profile `profile` when it is not empty.
+    pub func encode_jpeg(output: Buffer*, quality: i64 = 85, profile: const u8[]? = none) -> !:
+        var options = jpeg.EncodeOptions(quality = quality)
+        if let embedded = profile:
+            options.icc_profile = embedded
+        try jpeg.encode_rgba8(self.data, self.columns, self.rows, output, options)
 
-    ## Write the picture to `path` as a JPEG of `quality`.
-    pub func save_jpeg(path: str, quality: i64 = 85) -> !:
+    ## Write the picture to `path` as a JPEG of `quality`, with `profile` embedded
+    ## when one is given.
+    pub func save_jpeg(path: str, quality: i64 = 85, profile: const u8[]? = none) -> !:
         var output = Buffer()
         defer output.close()
-        try self.encode_jpeg(&output, quality)
+        try self.encode_jpeg(&output, quality, profile)
         let terminated = try strings.copy(path)
         defer strings.release(terminated)
         try files.write((c.str)terminated, output.data[..<output.used])

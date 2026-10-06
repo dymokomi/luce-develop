@@ -43,6 +43,8 @@ struct Develop:
     var aspect: f64
     ## Output (0..1) to source (0..1): geometry.frame_map.
     var map: geometry.Matrix
+    ## The display the view renders for (its primaries; sRGB's curve encodes either).
+    var output: view.Output
 
 func radius(u: f64, v: f64, aspect: f64) -> f64:
     let x = (u - 0.5) * 2.0 * aspect
@@ -198,7 +200,7 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
     c = with_lens(d, c, su, sv)
     c = with_tone(d, c)
     c = with_color(d, c)
-    c = view.display(d.shown, c, d.to_display)
+    c = view.display(d.shown, c, d.to_display, d.output)
     c = with_curves(d, c)
     c = with_vignette(d, c, u, v)
     return with_grain(d, c, u, v)
@@ -230,31 +232,32 @@ func render_row(context: void*, y: usize) -> !:
                 job.words[at * 4 + channel] = (u16)(encoded * 65535.0 + 0.5)
             job.words[at * 4 + 3] = 65535
 
-func rendering(source: const Scene*, settings: const Settings*) -> Rendering!:
+func rendering(source: const Scene*, settings: const Settings*, output: view.Output) -> Rendering!:
     # The output is the crop at the scene's scale.
     let (out_width, out_height) = geometry.output_size(settings, (f64)source.width(), (f64)source.height())
     let width = (usize)out_width
     let height = (usize)out_height
     let develop = Develop(matrix = try source.matrix(settings), tables = tables.build(settings),
-                          shown = (View)(i64)settings.get(.view), to_display = view.working_to_display(),
+                          shown = (View)(i64)settings.get(.view), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     return Rendering(develop = develop, source = source, width = width, height = height)
 
-## `scene` developed with `settings` into an 8-bit sRGB picture of its size, on
+## `scene` developed with `settings` for `output` (sRGB or Display P3 primaries,
+## sRGB's curve) into an 8-bit picture of its size, on
 ## every processor.
-pub func render(source: const Scene*, settings: Settings) -> Picture!:
-    var job = try rendering(source, &settings)
+pub func render(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> Picture!:
+    var job = try rendering(source, &settings, output)
     var out = try Picture.create(job.width, job.height)
     errdefer out.close()
     job.bytes = out.bytes()
     try parallel.parallel(job.height, (void*)&job, render_row)
     return out
 
-## `scene` developed with `settings` into 16-bit sRGB RGBA (alpha opaque), rows
+## `scene` developed with `settings` for `output` into 16-bit RGBA (alpha opaque), rows
 ## packed, on every processor; the caller frees it.
-pub func render16(source: const Scene*, settings: Settings) -> u16[]!:
-    var job = try rendering(source, &settings)
+pub func render16(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> u16[]!:
+    var job = try rendering(source, &settings, output)
     job.words = try new u16[job.width * job.height * 4] --- in memory.heap
     errdefer free(job.words) in memory.heap
     try parallel.parallel(job.height, (void*)&job, render_row)

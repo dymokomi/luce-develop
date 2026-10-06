@@ -80,8 +80,10 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 - **The CPU path.** `process.render(scene, settings)` and `render16` are the
   same develop on the CPU, rows spread over every processor, with the view
   evaluated exactly.
-- **Export.** `export.export(source, settings, target, format, quality, edge)`
-  develops at full size (or a long edge) and writes JPEG or 16-bit PNG: about
+- **Export.** `export.export(source, settings, target, format, quality, edge, space)`
+  develops at full size (or a long edge) for sRGB or Display P3 (`space`; the
+  view renders for that display's primaries) and writes JPEG or 16-bit PNG with
+  the matching ICC profile (luce-color's `icc.write_named_profile`): about
   2 s for a 24 MP raw, demosaic included. `scene.open(path, 0)` is a full-size
   scene.
 - **Parity.** `tests/parity.lucb` holds the GPU to the CPU for every tool. Both

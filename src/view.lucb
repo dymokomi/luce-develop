@@ -25,11 +25,30 @@ pub let lut_size: usize = 64
 pub let shaper_low: f64 = -12.0
 pub let shaper_high: f64 = 12.0
 
+## The display a view shows for: its primaries, all with a D65 white and (for
+## encoding) sRGB's curve. The viewer shows sRGB; an export may ask for Display P3.
+pub enum Output as i64:
+    srgb = 0
+    display_p3 = 1
+
+func primaries_of(output: Output) -> xyz.Primaries:
+    return xyz.display_p3 if output == Output.display_p3 else xyz.srgb
+
 ## The working space to display matrix (AP1, D60 → sRGB primaries, D65), row-major.
 pub func working_to_display() -> f64[9]:
+    return working_to_output(Output.srgb)
+
+## The working space to `output`'s linear RGB (AP1, D60 → its primaries, D65), row-major.
+pub func working_to_output(output: Output) -> f64[9]:
+    let primaries = primaries_of(output)
     let to_xyz = xyz.rgb_to_xyz(xyz.aces_ap1)
-    let adapted = xyz.multiply(xyz.adapt(xyz.aces_ap1.white, xyz.srgb.white), to_xyz)
-    return xyz.multiply(xyz.xyz_to_rgb(xyz.srgb), adapted).m
+    let adapted = xyz.multiply(xyz.adapt(xyz.aces_ap1.white, primaries.white), to_xyz)
+    return xyz.multiply(xyz.xyz_to_rgb(primaries), adapted).m
+
+## `output`'s luminance weights: Y of its red, green and blue.
+func luminance_of(output: Output) -> f64[3]:
+    let m = xyz.rgb_to_xyz(primaries_of(output)).m
+    return [m[3], m[4], m[5]]
 
 ## sRGB (D65) to the working space, row-major: what non-raw sources and luce-raw's
 ## sRGB matrices are turned by.
@@ -53,10 +72,16 @@ pub let aces_lift: f64 = 2.0
 
 var aces_sdr: aces.OutputTransform
 var aces_once: sync.Once
+var aces_p3: aces.OutputTransform
+var aces_p3_once: sync.Once
 
 func build_aces():
     aces_sdr = aces.OutputTransform.create(100.0, xyz.srgb) catch failure:
         trap("the ACES 2.0 SDR transform could not be built")
+
+func build_aces_p3():
+    aces_p3 = aces.OutputTransform.create(100.0, xyz.display_p3) catch failure:
+        trap("the ACES 2.0 SDR P3 transform could not be built")
 
 ## The Standard view's tone curve, set as a camera renders: scene grey (0.18)
 ## shows at 0.25 (sRGB 136), scene 1.0 at 0.7, and it reaches the display's
@@ -69,18 +94,25 @@ func filmic(x: f64) -> f64:
 func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
     return [m[0] * r + m[1] * g + m[2] * b, m[3] * r + m[4] * g + m[5] * b, m[6] * r + m[7] * g + m[8] * b]
 
-## Scene light `rgb` (AP1) shown through `view`: display-linear sRGB, 0..1.
-pub func display(view: View, rgb: f64[3], to_display: f64[9]) -> f64[3]:
+## Scene light `rgb` (AP1) shown through `view` on `output`: display-linear in
+## its primaries, 0..1. `to_display` is `working_to_output(output)`.
+pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = Output.srgb) -> f64[3]:
     if view == View.aces:
-        aces_once.run(build_aces)
         # AP1 in, a stop brighter: ACES shows scene grey at 10 nits, a stop darker
         # than a camera's rendering, and photographs are exposed for cameras. Out:
-        # Rec.709-primary display light, 1.0 the SDR white.
-        return aces_sdr.apply_ap1([rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift])
+        # display light in the output's primaries (the transform's limiting
+        # primaries), 1.0 the SDR white.
+        let lifted: f64[3] = [rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift]
+        if output == Output.display_p3:
+            aces_p3_once.run(build_aces_p3)
+            return aces_p3.apply_ap1(lifted)
+        aces_once.run(build_aces)
+        return aces_sdr.apply_ap1(lifted)
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
-    let y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
+    let weights = luminance_of(output) if output != Output.srgb else [0.2126, 0.7152, 0.0722]
+    let y = weights[0] * c[0] + weights[1] * c[1] + weights[2] * c[2]
     if not (y > 0.0):
         return [0.0, 0.0, 0.0]
     # Out of the display's gamut: toward the luminance until no component is negative.
