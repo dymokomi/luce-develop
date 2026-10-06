@@ -13,6 +13,9 @@
 ## settings. darktable's ashift does the same job with a lens-shift model; this is
 ## its approach, not its code.
 ##
+## Crop then takes a rectangle of that frame (`crop_*`, fractions of it), and the
+## output is that rectangle at its own size (`output_size`).
+##
 ## Everything else reads one 3×3 matrix, `frame_map`: from output coordinates
 ## (0..1 of the output) to source coordinates (0..1 of the photo), homogeneous.
 from luce_std import math
@@ -103,9 +106,35 @@ func rectangle_inside(quad: f64[8], cx: f64, cy: f64, half_width: f64, half_heig
                 return false
     return true
 
+## The crop rectangle of the frame: left, top, right, bottom (0..1), at least a
+## hundredth wide and high.
+pub func crop_of(settings: const Settings*) -> (f64, f64, f64, f64):
+    let left = settings.get(.crop_left)
+    let top = settings.get(.crop_top)
+    let right = math.max(settings.get(.crop_right), left + 0.01)
+    let bottom = math.max(settings.get(.crop_bottom), top + 0.01)
+    return (left, top, math.min(right, 1.0), math.min(bottom, 1.0))
+
+## The output's size for `settings` on a `width` × `height` photo: the crop's
+## share of the frame, which has the photo's size.
+pub func output_size(settings: const Settings*, width: f64, height: f64) -> (f64, f64):
+    let (left, top, right, bottom) = crop_of(settings)
+    return (math.max(1.0, math.round(width * (right - left))), math.max(1.0, math.round(height * (bottom - top))))
+
 ## The map from output coordinates (0..1) to source coordinates (0..1) for
-## `settings` on a `width` × `height` photo: the identity when untouched.
-pub func frame_map(settings: const Settings*, width: f64, height: f64) -> Matrix:
+## `settings` on a `width` × `height` photo, cropped unless `cropped` is false
+## (the crop tool shows the whole frame): the identity when untouched.
+pub func frame_map(settings: const Settings*, width: f64, height: f64, cropped: bool = true) -> Matrix:
+    let framed = frame_without_crop(settings, width, height)
+    if not cropped:
+        return framed
+    let (left, top, right, bottom) = crop_of(settings)
+    if left == 0.0 and top == 0.0 and right == 1.0 and bottom == 1.0:
+        return framed
+    let crop: Matrix = [right - left, 0.0, left, 0.0, bottom - top, top, 0.0, 0.0, 1.0]
+    return multiply(framed, crop)
+
+func frame_without_crop(settings: const Settings*, width: f64, height: f64) -> Matrix:
     let identity: Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
     let turn = turn_of(settings)
     let aspect = settings.get(.geometry_aspect) / 100.0
@@ -302,6 +331,19 @@ test "guides on a tilted photo solve back to the tilt":
     let turn = solve_turn(guides, width, height)
     assert(math.abs(turn.tilt * 180.0 / math.pi - 12.0) < 0.3, "the tilt was not recovered")
     assert(math.abs(turn.roll) < 0.01 and turn.pan == 0.0)
+
+test "a crop maps the output onto its rectangle of the frame":
+    var settings = defaults()
+    settings.set(.crop_left, 0.25)
+    settings.set(.crop_right, 0.75)
+    settings.set(.crop_top, 0.5)
+    let map = frame_map(&settings, 6000.0, 4000.0)
+    let (x, y) = project(map, 0.0, 0.0)
+    assert(math.abs(x - 0.25) < 1.0e-12 and math.abs(y - 0.5) < 1.0e-12)
+    let (x2, y2) = project(map, 1.0, 1.0)
+    assert(math.abs(x2 - 0.75) < 1.0e-12 and math.abs(y2 - 1.0) < 1.0e-12)
+    let (w, h) = output_size(&settings, 6000.0, 4000.0)
+    assert(w == 3000.0 and h == 2000.0)
 
 test "crop to fit keeps the frame inside the corrected photo":
     var settings = defaults()

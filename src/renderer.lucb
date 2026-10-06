@@ -94,8 +94,9 @@ pub struct Renderer:
     ## The format of the targets drawn into: the window's when none.
     var format: gpu.Format?
     ## Whether draws apply the geometry; off while guides are drawn on the photo
-    ## as it was taken.
+    ## as it was taken. Whether they apply the crop; off while it is chosen.
     var geometry_shown: bool
+    var crop_shown: bool
     ## For the histogram: a pipeline drawing into 8-bit textures, and the bins.
     var probe_pipeline: gpu.Pipeline?
     var bins: i64[1024]
@@ -171,6 +172,25 @@ pub struct Renderer:
     pub func show_geometry(on: bool):
         self.geometry_shown = on
 
+    ## Apply the crop, or show the whole frame for choosing it.
+    pub func show_crop(on: bool):
+        self.crop_shown = on
+
+    ## The output's size as drawn: the crop of the scene (all of it while the
+    ## crop or the geometry is off).
+    func output_size() -> (f64, f64):
+        let width = (f64)self.shown.width()
+        let height = (f64)self.shown.height()
+        if not self.geometry_shown or not self.crop_shown:
+            return (width, height)
+        return geometry.output_size(&self.settings, width, height)
+
+    ## The output's width and height in scene pixels, for placing it.
+    pub func output_width() -> f64:
+        return self.output_size().0
+    pub func output_height() -> f64:
+        return self.output_size().1
+
     ## Develop with `look`'s settings from the next draw on.
     pub func set_look(look: interop.Reference[Look]) -> !:
         self.set_settings((try look.get()).value())
@@ -199,11 +219,12 @@ pub struct Renderer:
         let scale = size.pixel_width / size.width if size.width > 0.0 else 1.0
         let m = try self.shown.matrix(&self.settings)
         let identity: geometry.Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        let map = geometry.frame_map(&self.settings, (f64)self.shown.width(), (f64)self.shown.height()) if self.geometry_shown else identity
+        let map = geometry.frame_map(&self.settings, (f64)self.shown.width(), (f64)self.shown.height(), self.crop_shown) if self.geometry_shown else identity
+        let (out_width, out_height) = self.output_size()
         var uniforms: f32[32] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
-            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)((f64)self.shown.width() / (f64)self.shown.height()),
+            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)(out_width / out_height),
             (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
         let images: gpu.Texture[3] = [scene_texture, tables_texture, view_texture]
         try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
@@ -216,10 +237,10 @@ pub struct Renderer:
         let device = self.device else return
         if not self.has_image():
             return
-        let longer = self.shown.width() if self.shown.width() > self.shown.height() else self.shown.height()
-        let scale = math.min(1.0, 256.0 / (f64)longer)
-        let width = math.max(1.0, math.round((f64)self.shown.width() * scale))
-        let height = math.max(1.0, math.round((f64)self.shown.height() * scale))
+        let (full_width, full_height) = self.output_size()
+        let scale = math.min(1.0, 256.0 / math.max(full_width, full_height))
+        let width = math.max(1.0, math.round(full_width * scale))
+        let height = math.max(1.0, math.round(full_height * scale))
         if self.probe_pipeline == none:
             let shader = self.shader else return
             self.probe_pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace, gpu.Format.rgba8)
@@ -342,12 +363,12 @@ pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format, geometry_shown = true)
+    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format, geometry_shown = true, crop_shown = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
-    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1, geometry_shown = true) in memory.heap catch failure:
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1, geometry_shown = true, crop_shown = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

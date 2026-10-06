@@ -231,12 +231,14 @@ func render_row(context: void*, y: usize) -> !:
             job.words[at * 4 + 3] = 65535
 
 func rendering(source: const Scene*, settings: const Settings*) -> Rendering!:
-    let width = (usize)source.width()
-    let height = (usize)source.height()
+    # The output is the crop at the scene's scale.
+    let (out_width, out_height) = geometry.output_size(settings, (f64)source.width(), (f64)source.height())
+    let width = (usize)out_width
+    let height = (usize)out_height
     let develop = Develop(matrix = try source.matrix(settings), tables = tables.build(settings),
                           shown = (View)(i64)settings.get(.view), to_display = view.working_to_display(),
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
-                          aspect = (f64)width / (f64)height, map = geometry.frame_map(settings, (f64)width, (f64)height))
+                          aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     return Rendering(develop = develop, source = source, width = width, height = height)
 
 ## `scene` developed with `settings` into an 8-bit sRGB picture of its size, on
