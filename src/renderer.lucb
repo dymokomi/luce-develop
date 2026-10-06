@@ -12,7 +12,7 @@ import sync
 import thread
 from luce_gpu import gpu
 from luce_std import math
-from settings import Settings, View, defaults
+from settings import Settings, View, Look, defaults
 from scene import Scene
 import scene
 import tables
@@ -158,6 +158,10 @@ pub struct Renderer:
         return self.shown.shot_temperature
     pub func shot_tint() -> f64:
         return self.shown.shot_tint
+
+    ## Develop with `look`'s settings from the next draw on.
+    pub func set_look(look: interop.Reference[Look]) -> !:
+        self.set_settings((try look.get()).value())
 
     ## Develop with `settings` from the next draw on.
     pub func set_settings(settings: Settings):
