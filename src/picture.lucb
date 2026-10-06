@@ -1,0 +1,192 @@
+## Pictures: display-ready 8-bit RGBA images (sRGB, straight alpha), what previews,
+## thumbnails and a viewer's first sight of a photo are made of. A Picture can
+## shrink itself in linear light, apply an EXIF orientation, and save itself as a
+## JPEG. Luce holds one as an object (`picture_type`); Base uses it as a value it
+## closes.
+import c
+import interop
+import memory
+import ownership
+import strings
+from luce_std import files
+from luce_color import transfer
+from luce_jpeg import jpeg
+from luce_raster.binary import Buffer
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+
+## The largest side a picture may have.
+pub let picture_maximum: usize = 16384
+
+pub struct Picture:
+    var columns: usize
+    var rows: usize
+    ## RGBA, rows packed, top-down.
+    var data: u8[]
+
+    ## A `width` by `height` picture of transparent black.
+    pub static func create(width: usize, height: usize) -> Picture!:
+        if width == 0 or height == 0 or width > picture_maximum or height > picture_maximum:
+            error(invalid, "picture dimensions must be in 1..16384")
+        let data = try new u8[width * height * 4] in memory.heap
+        return Picture(columns = width, rows = height, data = data)
+
+    pub func width() -> i64:
+        return (i64)self.columns
+
+    pub func height() -> i64:
+        return (i64)self.rows
+
+    ## The RGBA bytes, rows packed, top-down.
+    pub func pixels() -> const u8[]:
+        return self.data
+
+    ## The pixels for writing.
+    pub func bytes() -> u8[]:
+        return self.data
+
+    ## A copy no larger than `long_edge` on its longer side, averaged in linear
+    ## light; the same size when it already fits.
+    pub func shrunk(long_edge: usize) -> Picture!:
+        let longer = self.columns if self.columns > self.rows else self.rows
+        if long_edge == 0 or longer <= long_edge:
+            return try self.copied()
+        let width = max_one(self.columns * long_edge // longer)
+        let height = max_one(self.rows * long_edge // longer)
+        var out = try Picture.create(width, height)
+        errdefer out.close()
+        var decode: f32[256]
+        for level in 0..<(usize)256:
+            decode[level] = (f32)transfer.srgb_decode((f64)level / 255.0)
+        let encode = try new u8[4096] in memory.heap
+        defer free(encode) in memory.heap
+        transfer.srgb_byte_table(encode)
+        for y in 0..<height:
+            let y0 = y * self.rows // height
+            let y1 = max_above(y0, (y + 1) * self.rows // height)
+            for x in 0..<width:
+                let x0 = x * self.columns // width
+                let x1 = max_above(x0, (x + 1) * self.columns // width)
+                var sum: f32[4]
+                for sy in y0..<y1:
+                    var at = (sy * self.columns + x0) * 4
+                    for _sx in x0..<x1:
+                        sum[0] += decode[self.data[at]]
+                        sum[1] += decode[self.data[at + 1]]
+                        sum[2] += decode[self.data[at + 2]]
+                        sum[3] += (f32)self.data[at + 3]
+                        at += 4
+                let weight = 1.0f32 / (f32)((x1 - x0) * (y1 - y0))
+                let target = (y * width + x) * 4
+                out.data[target] = encode[(usize)(sum[0] * weight * 4095.0f32 + 0.5f32)]
+                out.data[target + 1] = encode[(usize)(sum[1] * weight * 4095.0f32 + 0.5f32)]
+                out.data[target + 2] = encode[(usize)(sum[2] * weight * 4095.0f32 + 0.5f32)]
+                out.data[target + 3] = (u8)(sum[3] * weight + 0.5f32)
+        return out
+
+    ## A copy turned upright from EXIF `orientation` (1–8; anything else is 1):
+    ## 2 mirrored, 3 turned half way, 4 flipped, 5 transposed, 6 turned a quarter
+    ## clockwise, 7 transversed, 8 turned a quarter counterclockwise.
+    pub func oriented(orientation: u64) -> Picture!:
+        if orientation < 2 or orientation > 8:
+            return try self.copied()
+        let swap = orientation >= 5
+        let width = self.rows if swap else self.columns
+        let height = self.columns if swap else self.rows
+        var out = try Picture.create(width, height)
+        let w = self.columns
+        let h = self.rows
+        for dy in 0..<height:
+            for dx in 0..<width:
+                let (sx, sy) = match orientation:
+                    2 => (w - 1 - dx, dy)
+                    3 => (w - 1 - dx, h - 1 - dy)
+                    4 => (dx, h - 1 - dy)
+                    5 => (dy, dx)
+                    6 => (dy, h - 1 - dx)
+                    7 => (w - 1 - dy, h - 1 - dx)
+                    _ => (w - 1 - dy, dx)
+                let source_at = (sy * w + sx) * 4
+                let target_at = (dy * width + dx) * 4
+                memory.copy(out.data[target_at..<target_at + 4], self.data[source_at..<source_at + 4], 4)
+        return out
+
+    func copied() -> Picture!:
+        var out = try Picture.create(self.columns, self.rows)
+        memory.copy(out.data, self.data, self.data.length)
+        return out
+
+    ## The picture as a baseline JPEG (4:2:0) of `quality` 1–100, appended to `output`.
+    pub func encode_jpeg(output: Buffer*, quality: i64 = 85) -> !:
+        try jpeg.encode_rgba8(self.data, self.columns, self.rows, output, jpeg.EncodeOptions(quality = quality))
+
+    ## Write the picture to `path` as a JPEG of `quality`.
+    pub func save_jpeg(path: str, quality: i64 = 85) -> !:
+        var output = Buffer()
+        defer output.close()
+        try self.encode_jpeg(&output, quality)
+        let terminated = try strings.copy(path)
+        defer strings.release(terminated)
+        try files.write((c.str)terminated, output.data[..<output.used])
+
+    pub func close():
+        if self.data.length > 0:
+            free(self.data) in memory.heap
+        var empty: u8[]
+        self.data = empty
+        self.columns = 0
+        self.rows = 0
+
+    func trace(visit: func(ownership.Object*, void*) -> unit, context: void*):
+        _ = self
+        _ = visit
+        _ = context
+
+pub let picture_type: interop.Type[Picture] = interop.Type[Picture]("Picture", Picture.close, Picture.trace, closeable = true)
+
+## A picture handed to Luce, which owns it from then on.
+pub func adopt(picture: Picture) -> interop.Reference[Picture]!:
+    var held = picture
+    let stored = new Picture(columns = held.columns, rows = held.rows, data = held.data) in memory.heap catch failure:
+        held.close()
+        error(failure.code, failure.message)
+    return try interop.Reference[Picture].adopt(stored, picture_type, memory.heap)
+
+func max_one(value: usize) -> usize:
+    return value if value > 0 else 1
+
+func max_above(low: usize, value: usize) -> usize:
+    return value if value > low else low + 1
+
+test "shrinking averages in linear light and keeps the aspect":
+    var picture = try Picture.create(4, 2)
+    defer picture.close()
+    for at in 0..<(usize)8:
+        let level: u8 = 255 if at % 2 == 0 else 0
+        picture.data[at * 4] = level
+        picture.data[at * 4 + 1] = level
+        picture.data[at * 4 + 2] = level
+        picture.data[at * 4 + 3] = 255
+    var small = try picture.shrunk(2)
+    defer small.close()
+    assert(small.width() == 2 and small.height() == 1)
+    # Half white, half black is linear 0.5: sRGB 188, not 128.
+    assert(small.data[0] >= 187 and small.data[0] <= 188)
+    assert(small.data[3] == 255)
+
+test "orientation 6 turns a quarter clockwise":
+    var picture = try Picture.create(2, 1)
+    defer picture.close()
+    picture.data[0] = 10
+    picture.data[4] = 20
+    var turned = try picture.oriented(6)
+    defer turned.close()
+    assert(turned.width() == 1 and turned.height() == 2)
+    assert(turned.data[0] == 10 and turned.data[4] == 20)
+    var back = try picture.oriented(8)
+    defer back.close()
+    assert(back.data[0] == 20 and back.data[4] == 10)
+    var mirrored = try picture.oriented(2)
+    defer mirrored.close()
+    assert(mirrored.data[0] == 20)

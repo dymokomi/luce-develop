@@ -1,0 +1,34 @@
+## Preview every file named on the command line at 512 px, report the time and
+## size, and write each preview next to the output directory given first.
+import c
+import strings
+import time
+from luce_std import files
+from luce_std import paths
+from luce_develop import source
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length < 3:
+        print("usage: previews OUTPUT_DIR FILE...")
+        return 2
+    let output = arguments[1]
+    var failed = 0
+    for path in arguments[2..]:
+        let terminated = try strings.copy(path)
+        defer strings.release(terminated)
+        let data = try files.read((c.str)terminated)
+        defer data.release()
+        let started = time.now()
+        var picture = source.preview(data.value, 512) catch failure:
+            print(f"FAIL  {paths.base(path)}: {failure.message}")
+            failed += 1
+            continue
+        defer picture.close()
+        let spent = (time.now() - started) // 1000000
+        let named = try paths.join(output, paths.base(path))
+        defer named.release()
+        var buffer: u8[1024]
+        let target = try strings.format(buffer, f"{named.value}.jpg")
+        try picture.save_jpeg(target, 85)
+        print(f"ok    {paths.base(path)}  {source.kind_name(source.kind(data.value))}  {picture.width()}x{picture.height()}  {spent} ms")
+    return 1 if failed > 0 else 0

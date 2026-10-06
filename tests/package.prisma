@@ -1,0 +1,13 @@
+#prisma 4.0
+def package "luce-develop-tests" {
+    str kind = "tool"
+    str language = "luce-base"
+
+    def dependency "luce-develop" {
+        str path = ".."
+    }
+
+    def dependency "luce-std" {
+        str path = "../../luce-std"
+    }
+}

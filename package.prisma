@@ -1,0 +1,50 @@
+#prisma 4.0
+def package "luce-develop" {
+    str owner = "dymokomi"
+    str version = "0.1.0"
+    str kind = "package"
+    str language = "luce-base"
+    str description = "Photo development for Luce: camera RAWs and JPEG/PNG/TIFF/HEIC sources, quick oriented previews, and a scene-linear develop pipeline with a GPU renderer for viewers and a CPU path for export."
+    str readme = "README.md"
+    str[] public = ["source", "picture"]
+
+    def dependency "luce-raw" {
+        str owner = "dymokomi"
+        str path = "../luce-raw"
+    }
+
+    def dependency "luce-jpeg" {
+        str owner = "dymokomi"
+        str path = "../luce-jpeg"
+    }
+
+    def dependency "luce-png" {
+        str owner = "dymokomi"
+        str path = "../luce-png"
+    }
+
+    def dependency "luce-tiff" {
+        str owner = "dymokomi"
+        str path = "../luce-tiff"
+    }
+
+    def dependency "luce-heic" {
+        str owner = "dymokomi"
+        str path = "../luce-heic"
+    }
+
+    def dependency "luce-raster" {
+        str owner = "dymokomi"
+        str path = "../luce-raster"
+    }
+
+    def dependency "luce-color" {
+        str owner = "dymokomi"
+        str path = "../luce-color"
+    }
+
+    def dependency "luce-std" {
+        str owner = "dymokomi"
+        str path = "../luce-std"
+    }
+}

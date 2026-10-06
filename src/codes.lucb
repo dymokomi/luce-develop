@@ -1,0 +1,8 @@
+## luce-develop's error codes, re-exported by the public modules.
+
+## A caller's argument is outside what the operation takes.
+pub let invalid: ErrorCode = ErrorCode.package(1)
+## The file is of a kind luce-develop does not read.
+pub let unsupported: ErrorCode = ErrorCode.package(2)
+## The file is damaged or truncated.
+pub let corrupt: ErrorCode = ErrorCode.package(3)

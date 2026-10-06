@@ -1,0 +1,216 @@
+## Sources: the photo files luce-develop reads, told apart by their bytes, and
+## their quick previews — display-ready pictures for a library's thumbnails and a
+## viewer's first sight, made without developing the whole image. A camera raw's
+## preview is the largest JPEG the camera embedded (a half-size develop when it
+## has none); a JPEG decodes straight from its DCT at 1/2–1/8 size; PNG, TIFF and
+## HEIC decode whole and shrink.
+import c
+import interop
+import memory
+import strings
+from luce_std import files
+from luce_std import paths
+from luce_color import transfer
+from luce_raw import raw
+from luce_jpeg import jpeg
+from luce_png import png
+from luce_tiff import tiff
+from luce_heic import heic
+from luce_raster.model import Raster, SampleType
+from picture import Picture, adopt
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+pub let unsupported: ErrorCode = codes.unsupported
+pub let corrupt: ErrorCode = codes.corrupt
+
+## What a file holds, as far as luce-develop reads it.
+pub enum Kind as u8:
+    unknown = 0
+    raw = 1
+    jpeg = 2
+    png = 3
+    tiff = 4
+    heic = 5
+
+## The kind of the file whose bytes are `data`.
+pub func kind(data: const u8[]) -> Kind:
+    if data.length >= 3 and data[0] == 0xFF and data[1] == 0xD8 and data[2] == 0xFF:
+        return .jpeg
+    if data.length >= 8 and data[0] == 0x89 and data[1] == 'P' and data[2] == 'N' and data[3] == 'G':
+        return .png
+    if raw.detect(data) or raw.recognize(data):
+        return .raw
+    if data.length >= 12 and data[4] == 'f' and data[5] == 't' and data[6] == 'y' and data[7] == 'p':
+        let brand = (str)data[8..<12]
+        if brand == "heic" or brand == "heix" or brand == "mif1" or brand == "msf1" or brand == "heim" or brand == "heis" or brand == "avif":
+            return .heic
+    if data.length >= 4 and ((data[0] == 'I' and data[1] == 'I' and data[2] == 42 and data[3] == 0) or (data[0] == 'M' and data[1] == 'M' and data[2] == 0 and data[3] == 42)):
+        return .tiff
+    return .unknown
+
+## A short name for `kind`: "RAW", "JPEG", "PNG", "TIFF", "HEIC" or "".
+pub func kind_name(found: Kind) -> str:
+    return match found:
+        .raw => "RAW"
+        .jpeg => "JPEG"
+        .png => "PNG"
+        .tiff => "TIFF"
+        .heic => "HEIC"
+        _ => ""
+
+## Whether a file named `name` is one an importer should look at, by its
+## extension (any case): camera raws, JPEG, PNG, TIFF and HEIC/HEIF.
+pub func is_photo_name(name: str) -> bool:
+    let extension = paths.extension(name)
+    if extension.length < 2 or extension.length > 6:
+        return false
+    var lower: u8[8]
+    var at: usize = 0
+    for byte in extension.bytes[1..]:
+        lower[at] = byte + 32 if byte >= 'A' and byte <= 'Z' else byte
+        at += 1
+    let found = (str)lower[..<at]
+    let known: str[21] = ["dng", "raf", "nef", "nrw", "cr2", "cr3", "arw", "srf", "sr2", "orf", "rw2", "rwl", "pef", "iiq", "3fr",
+                          "jpg", "jpeg", "png", "tif", "tiff", "heic"]
+    for name_known in known:
+        if found == name_known:
+            return true
+    return found == "heif" or found == "hif"
+
+## A display-ready preview of the photo in `data`, upright, its longer side at
+## most `long_edge` (and close to it when the file allows). `orientation` is the
+## photo's EXIF orientation (1–8); 0 takes the one the file itself states where
+## luce-develop reads it (raws and TIFFs), else none.
+pub func preview(data: const u8[], long_edge: usize, orientation: u64 = 0) -> Picture!:
+    if long_edge == 0:
+        error(invalid, "a preview needs a size")
+    match kind(data):
+        .raw:
+            return try raw_preview(data, long_edge, orientation)
+        .jpeg:
+            var decoded = try jpeg_picture(data, long_edge)
+            defer decoded.close()
+            return try finish(&decoded, long_edge, orientation)
+        .png, .tiff, .heic:
+            return try raster_preview(data, long_edge, orientation)
+        _:
+            error(unsupported, "this is not a photo luce-develop reads")
+
+## The preview of the file at `path` (see `preview`), handed to Luce.
+pub func open_preview(path: str, long_edge: i64, orientation: i64 = 0) -> interop.Reference[Picture]!:
+    if long_edge <= 0 or orientation < 0 or orientation > 8:
+        error(invalid, "a preview needs a size and an orientation of 0 to 8")
+    let terminated = try strings.copy(path)
+    defer strings.release(terminated)
+    let data = try files.read((c.str)terminated)
+    defer data.release()
+    return try adopt(try preview(data.value, (usize)long_edge, (u64)orientation))
+
+## Shrink, then turn upright.
+func finish(decoded: const Picture*, long_edge: usize, orientation: u64) -> Picture!:
+    var small = try decoded.shrunk(long_edge)
+    defer small.close()
+    return try small.oriented(orientation)
+
+func raw_preview(data: const u8[], long_edge: usize, orientation: u64) -> Picture!:
+    if let embedded = try raw.preview(data):
+        let longer = embedded.width if embedded.width > embedded.height else embedded.height
+        # A thumbnail much smaller than asked for (Leica's DNGs carry 160 px) is
+        # passed over for a develop.
+        if longer * 4 >= long_edge * 3 or not raw.detect(data):
+            var decoded = try jpeg_picture(embedded.jpeg, long_edge)
+            defer decoded.close()
+            return try finish(&decoded, long_edge, orientation if orientation != 0 else embedded.orientation)
+    # No usable JPEG inside: a quick half-size develop, already upright.
+    if not raw.detect(data):
+        error(unsupported, "this camera raw is not supported")
+    let owned = try new u8[data.length] --- in memory.heap
+    memory.copy(owned, data, data.length)
+    var image = Raster(encoded = owned)
+    defer image.close()
+    let options = raw.Options(quality = .fast, half = true)
+    try raw.probe(&image, options)
+    try raw.decode(&image, options)
+    var decoded = try raster_picture(&image)
+    defer decoded.close()
+    return try decoded.shrunk(long_edge)
+
+## A JPEG decoded at the smallest DCT scale still at least `long_edge` on its
+## longer side.
+func jpeg_picture(data: const u8[], long_edge: usize) -> Picture!:
+    let found = try jpeg.info(data)
+    var scale: usize = 8
+    while scale > 1:
+        let width = found.scaled_width(scale)
+        let height = found.scaled_height(scale)
+        if (width if width > height else height) >= long_edge:
+            break
+        scale = scale // 2
+    var out = try Picture.create(found.scaled_width(scale), found.scaled_height(scale))
+    errdefer out.close()
+    try jpeg.decode_rgba8(data, out.bytes(), jpeg.Options(scale = scale))
+    return out
+
+func raster_preview(data: const u8[], long_edge: usize, orientation: u64) -> Picture!:
+    let owned = try new u8[data.length] --- in memory.heap
+    memory.copy(owned, data, data.length)
+    var image = Raster(encoded = owned)
+    defer image.close()
+    match kind(data):
+        .png:
+            try png.probe(&image)
+            try image.allocate()
+            try png.decode(&image)
+        .tiff:
+            try tiff.probe(&image)
+            try image.allocate()
+            for index in 0..<image.chunks.length:
+                try tiff.decode_chunk(&image, index)
+        _:
+            try heic.probe(&image)
+            try image.allocate()
+            try heic.decode(&image, threads = 0)
+    var decoded = try raster_picture(&image)
+    defer decoded.close()
+    let stated = orientation if orientation != 0 else image.orientation
+    return try finish(&decoded, long_edge, stated)
+
+## A decoded raster as 8-bit sRGB: gray, gray and alpha, RGB or RGBA channels,
+## integers in their own units, floats scene-linear (clipped to 0..1).
+func raster_picture(image: const Raster*) -> Picture!:
+    let count = image.channels.length
+    if count == 0 or count > 4:
+        error(unsupported, "this image's channels are not gray or RGB")
+    var out = try Picture.create(image.width, image.height)
+    errdefer out.close()
+    let kind_of = image.channels[0].kind
+    let linear = kind_of == SampleType.float16 or kind_of == SampleType.float32 or kind_of == SampleType.float64
+    let scale = 1.0 / 65535.0 if kind_of == SampleType.uint16 else (1.0 / 255.0 if kind_of == SampleType.uint8 else 1.0)
+    let pixels = out.bytes()
+    for at in 0..<image.width * image.height:
+        let source = image.pixels[at * count..<(at + 1) * count]
+        let target = pixels[at * 4..<at * 4 + 4]
+        let gray = count <= 2
+        for channel in 0..<(usize)3:
+            let value = source[0 if gray else channel] * scale
+            target[channel] = transfer.srgb_byte(value) if linear else encoded_byte(value)
+        let has_alpha = count == 2 or count == 4
+        target[3] = encoded_byte(source[count - 1] * scale) if has_alpha else 255
+    return out
+
+func encoded_byte(value: f64) -> u8:
+    if not (value > 0.0):
+        return 0
+    if value >= 1.0:
+        return 255
+    return (u8)(value * 255.0 + 0.5)
+
+test "kinds are told by their bytes and names":
+    let jpeg_head: u8[4] = [0xFF, 0xD8, 0xFF, 0xE0]
+    assert(kind(jpeg_head) == Kind.jpeg)
+    let png_head: u8[8] = [0x89, 'P', 'N', 'G', 13, 10, 26, 10]
+    assert(kind(png_head) == Kind.png)
+    assert(kind(b"hello world!") == Kind.unknown)
+    assert(is_photo_name("DSCF1234.RAF") and is_photo_name("L1001234.DNG") and is_photo_name("a.jpeg"))
+    assert(not is_photo_name("notes.txt") and not is_photo_name("raf"))
