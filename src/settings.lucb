@@ -1,10 +1,31 @@
-## A photo's develop settings: every parameter of the pipeline, its default and
-## range, and a short text form ("exposure=0.7;contrast=20") that names only
-## what differs from the defaults, for catalogs and copy and paste. A Settings
-## is a plain value; Luce reads and writes its fields directly.
+## A photo's develop settings: one value for every parameter of
+## parameters.lucb, and five tone curves. They have a short text form
+## ("exposure=0.7;contrast=20;curve_rgb=0,0 0.3,0.25 1,1") that names only what
+## differs from the defaults, for catalogs and copy and paste. Base code reads a
+## value by its Parameter; Luce holds a Look, an object with get and set by name,
+## and builds its controls from the parameter table.
+##
+## What the parameters do, by section (ranges are in parameters.lucb):
+##   White Balance    temperature (kelvin; 0 = as shot, tint then ignored), tint
+##   Exposure & Tone  exposure (stops); contrast, highlights, shadows, whites,
+##                    blacks: a tone curve on luminance (tone.lucb)
+##   Levels           input black and white, gamma, output black and white, on
+##                    the display's encoded values
+##   Color            vibrance and saturation, in Oklab
+##   Color Mixer      hue, saturation and luminance of eight hue bands
+##   Color Grading    hue, saturation and luminance for shadows, midtones,
+##                    highlights and the whole; balance and blending
+##   Black & White    on/off, how much each hue band counts toward the grey,
+##                    a tint
+##   Lens             vignetting correction and where it starts
+##   Effects          a post-crop vignette; film grain
+##   View             the view transform (View)
 import interop
+import memory
+import ownership
 from luce_std import math
 from luce_std.collections import Buffer
+from parameters import Parameter, ParameterSpec, parameters, parameter_count
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -18,103 +39,140 @@ pub enum View as i64:
     ## No tone mapping: scene values clipped to the display, for checking.
     linear = 2
 
+## The tone curves, in text-form order: all channels, red, green, blue, luma.
+pub let curve_count: usize = 5
+pub let curve_names: str[5] = ["curve_rgb", "curve_red", "curve_green", "curve_blue", "curve_luma"]
+## The most points a curve takes.
+pub let curve_points: usize = 16
+
+## A tone curve through up to 16 points, x rising, both in 0..1 of the display's
+## encoded values. No points is the identity.
+pub struct Curve:
+    pub var count: usize
+    pub var xs: f64[16]
+    pub var ys: f64[16]
+
+    ## The curve at `x`: a monotone cubic (Fritsch–Carlson) between its points,
+    ## level beyond them, as luce-ui's CurveEditor draws it.
+    pub func evaluate(x: f64) -> f64:
+        if self.count == 0:
+            return x
+        if self.count == 1 or x <= self.xs[0]:
+            return self.ys[0]
+        let last = self.count - 1
+        if x >= self.xs[last]:
+            return self.ys[last]
+        var at: usize = 0
+        while at + 1 < last and x >= self.xs[at + 1]:
+            at += 1
+        let h = self.xs[at + 1] - self.xs[at]
+        let t = (x - self.xs[at]) / h
+        let m0 = self.tangent(at) * h
+        let m1 = self.tangent(at + 1) * h
+        let t2 = t * t
+        let t3 = t2 * t
+        return (2.0 * t3 - 3.0 * t2 + 1.0) * self.ys[at] + (t3 - 2.0 * t2 + t) * m0 + (-2.0 * t3 + 3.0 * t2) * self.ys[at + 1] + (t3 - t2) * m1
+
+    func slope(at: usize) -> f64:
+        return (self.ys[at + 1] - self.ys[at]) / math.max(self.xs[at + 1] - self.xs[at], 1.0e-9)
+
+    func tangent(at: usize) -> f64:
+        if at == 0:
+            return self.slope(0)
+        if at == self.count - 1:
+            return self.slope(at - 1)
+        let before = self.slope(at - 1)
+        let after = self.slope(at)
+        if before * after <= 0.0:
+            return 0.0
+        # The harmonic mean keeps the curve from overshooting between points.
+        return 2.0 / (1.0 / before + 1.0 / after)
+
 pub struct Settings:
-    ## White balance: kelvin and Adobe-style tint; temperature 0 keeps the
-    ## camera's as-shot balance (and ignores tint).
-    pub var temperature: f64
-    pub var tint: f64
-    ## Exposure in stops.
-    pub var exposure: f64
-    ## Tone, each -100..100: contrast about middle grey, then the tonal ranges.
-    pub var contrast: f64
-    pub var highlights: f64
-    pub var shadows: f64
-    pub var whites: f64
-    pub var blacks: f64
-    ## Color, each -100..100, in Oklab: vibrance favors the colors that have
-    ## little; saturation scales every color's chroma.
-    pub var vibrance: f64
-    pub var saturation: f64
-    ## The view transform (View).
-    pub var view: i64
+    var values: f64[parameter_count]
+    var curves: Curve[5]
 
-## One setting's name, range and default, in text-form order.
-struct Field:
-    let name: str
-    let low: f64
-    let high: f64
+    pub func get(which: Parameter) -> f64:
+        return self.values[(usize)which]
 
-let fields: Field[11] = [
-    Field("temperature", 0.0, 50000.0), Field("tint", -150.0, 150.0), Field("exposure", -6.0, 6.0),
-    Field("contrast", -100.0, 100.0), Field("highlights", -100.0, 100.0), Field("shadows", -100.0, 100.0),
-    Field("whites", -100.0, 100.0), Field("blacks", -100.0, 100.0), Field("vibrance", -100.0, 100.0),
-    Field("saturation", -100.0, 100.0), Field("view", 0.0, 2.0)]
+    ## Set `which`, kept inside its range.
+    pub func set(which: Parameter, value: f64):
+        let spec = parameters[(usize)which]
+        self.values[(usize)which] = math.clamp(value if math.is_finite(value) else spec.default, spec.low, spec.high)
 
-## The settings a photo starts with: as shot, untouched, the Standard view
-## (ACES 2.0 becomes the default once luce-color has it).
+    pub func curve(at: usize) -> const Curve*:
+        return &self.curves[at]
+
+    ## Set curve `at` (see curve_names) to points `xs`, `ys`, sorted by x and
+    ## clamped to 0..1; at most 16; two points at the corners are the identity.
+    pub func set_curve(at: usize, xs: const f64[], ys: const f64[]) -> !:
+        if at >= curve_count or xs.length != ys.length or xs.length > curve_points:
+            error(invalid, "a curve takes up to 16 points, as many x as y")
+        var curve: Curve
+        for index in 0..<xs.length:
+            var place = curve.count
+            let x = math.clamp(xs[index], 0.0, 1.0)
+            while place > 0 and curve.xs[place - 1] > x:
+                curve.xs[place] = curve.xs[place - 1]
+                curve.ys[place] = curve.ys[place - 1]
+                place -= 1
+            curve.xs[place] = x
+            curve.ys[place] = math.clamp(ys[index], 0.0, 1.0)
+            curve.count += 1
+        if curve.count == 2 and curve.xs[0] == 0.0 and curve.ys[0] == 0.0 and curve.xs[1] == 1.0 and curve.ys[1] == 1.0:
+            curve.count = 0
+        self.curves[at] = curve
+
+    ## Whether every curve is the identity.
+    pub func curves_untouched() -> bool:
+        for curve in self.curves:
+            if curve.count > 0:
+                return false
+        return true
+
+## The settings a photo starts with: as shot, untouched, the ACES 2.0 view.
 pub func defaults() -> Settings:
-    return Settings(view = (i64)View.standard)
-
-func read(settings: const Settings*, at: usize) -> f64:
-    return match at:
-        0 => settings.temperature
-        1 => settings.tint
-        2 => settings.exposure
-        3 => settings.contrast
-        4 => settings.highlights
-        5 => settings.shadows
-        6 => settings.whites
-        7 => settings.blacks
-        8 => settings.vibrance
-        9 => settings.saturation
-        _ => (f64)settings.view
-
-func write(settings: Settings*, at: usize, value: f64):
-    match at:
-        0: settings.temperature = value
-        1: settings.tint = value
-        2: settings.exposure = value
-        3: settings.contrast = value
-        4: settings.highlights = value
-        5: settings.shadows = value
-        6: settings.whites = value
-        7: settings.blacks = value
-        8: settings.vibrance = value
-        9: settings.saturation = value
-        _: settings.view = (i64)value
-
-## `settings` with every value inside its range (a temperature below 1667 K,
-## other than 0, becomes 1667).
-pub func clamped(settings: Settings) -> Settings:
-    var out = settings
-    for at in 0..<fields.length:
-        let value = read(&out, at)
-        write(&out, at, math.clamp(value if math.is_finite(value) else 0.0, fields[at].low, fields[at].high))
-    if out.temperature > 0.0 and out.temperature < 1667.0:
-        out.temperature = 1667.0
+    var out: Settings
+    for at in 0..<parameter_count:
+        out.values[at] = parameters[at].default
     return out
 
+## The parameter named `name`, or none.
+pub func named(name: str) -> Parameter?:
+    for at in 0..<parameter_count:
+        if parameters[at].name == name:
+            return (Parameter)(u8)at
+    return none
+
 ## The text form of `settings`: name=value pairs for what differs from the
-## defaults, separated by semicolons; "" when nothing does.
-pub func text_of(settings: Settings, out: Buffer*) -> !:
+## defaults, separated by semicolons; "" when nothing does. A curve is its points,
+## "x,y" pairs separated by spaces.
+pub func text_of(settings: const Settings*, out: Buffer*) -> !:
     out.clear()
     let base = defaults()
-    for at in 0..<fields.length:
-        let value = read(&settings, at)
-        if value == read(&base, at):
+    for at in 0..<parameter_count:
+        let value = settings.values[at]
+        if value == base.values[at]:
             continue
         if out.length() > 0:
             try out.put_byte(';')
-        try out.put_text(fields[at].name)
+        try out.put_text(parameters[at].name)
         try out.put_byte('=')
         try put_decimal(out, value)
-
-## The text form of `settings`, for Luce.
-pub func encode(settings: Settings) -> interop.Owned[str]!:
-    var out: Buffer
-    defer out.destroy()
-    try text_of(settings, &out)
-    return try interop.copy_text(out.text())
+    for at in 0..<curve_count:
+        let curve = settings.curves[at]
+        if curve.count == 0:
+            continue
+        if out.length() > 0:
+            try out.put_byte(';')
+        try out.put_text(curve_names[at])
+        try out.put_byte('=')
+        for point in 0..<curve.count:
+            if point > 0:
+                try out.put_byte(' ')
+            try put_decimal(out, curve.xs[point])
+            try out.put_byte(',')
+            try put_decimal(out, curve.ys[point])
 
 ## Settings from their text form; unknown names and malformed pairs are passed
 ## over, so text from a newer version still opens.
@@ -134,11 +192,42 @@ pub func parse(text: str) -> Settings:
         if equals == pair.length:
             continue
         let name = (str)pair[..<equals]
-        let value = decimal((str)pair[equals + 1..]) else continue
-        for at in 0..<fields.length:
-            if fields[at].name == name:
-                write(&out, at, value)
-    return clamped(out)
+        let value = (str)pair[equals + 1..]
+        if let which = named(name):
+            if let number = decimal(value):
+                out.set(which, number)
+            continue
+        for at in 0..<curve_count:
+            if curve_names[at] == name:
+                parse_curve(&out, at, value)
+    if out.get(.temperature) > 0.0 and out.get(.temperature) < 1667.0:
+        out.set(.temperature, 1667.0)
+    return out
+
+func parse_curve(settings: Settings*, at: usize, text: str):
+    var xs: f64[16]
+    var ys: f64[16]
+    var count: usize = 0
+    let bytes = text.bytes
+    var first: usize = 0
+    while first < bytes.length and count < curve_points:
+        var end = first
+        while end < bytes.length and bytes[end] != ' ':
+            end += 1
+        let point = bytes[first..<end]
+        first = end + 1
+        var comma: usize = 0
+        while comma < point.length and point[comma] != ',':
+            comma += 1
+        if comma == point.length:
+            return
+        let x = decimal((str)point[..<comma]) else return
+        let y = decimal((str)point[comma + 1..]) else return
+        xs[count] = x
+        ys[count] = y
+        count += 1
+    settings.set_curve(at, xs[..<count], ys[..<count]) catch failure:
+        return
 
 ## `value` with up to four decimals, trailing zeros dropped.
 func put_decimal(out: Buffer*, value: f64) -> !:
@@ -185,24 +274,138 @@ func decimal(text: str) -> f64?:
             scale *= 10.0
             at += 1
             digits += 1
-    let value = (f64)whole / scale
     if digits == 0 or at != bytes.length:
         return none
-    return sign * value
+    return sign * (f64)whole / scale
+
+# mark: Luce ================================================================================
+
+## Develop settings for Luce: values read and set by parameter name, curves by
+## index, and the text form.
+pub struct Look:
+    var settings: Settings
+
+    ## The value of the parameter named `name` (name_of lists them).
+    pub func get(name: str) -> f64!:
+        let which = named(name) else error(invalid, "no such develop parameter")
+        return self.settings.get(which)
+
+    ## Set the parameter named `name`, kept inside its range.
+    pub func set(name: str, value: f64) -> !:
+        let which = named(name) else error(invalid, "no such develop parameter")
+        self.settings.set(which, value)
+
+    ## Every parameter of section `section` back to its default.
+    pub func reset_section(section: str):
+        for at in 0..<parameter_count:
+            if parameters[at].section == section:
+                self.settings.values[at] = parameters[at].default
+
+    ## How many points curve `at` has (0: the identity), and point `point`'s x and y.
+    pub func curve_size(at: i64) -> i64!:
+        return (i64)self.settings.curves[try curve_index(at)].count
+    pub func curve_x(at: i64, point: i64) -> f64!:
+        let curve = self.settings.curves[try curve_index(at)]
+        return curve.xs[(usize)point] if point >= 0 and point < (i64)curve.count else 0.0
+    pub func curve_y(at: i64, point: i64) -> f64!:
+        let curve = self.settings.curves[try curve_index(at)]
+        return curve.ys[(usize)point] if point >= 0 and point < (i64)curve.count else 0.0
+
+    ## Set curve `at` (0 all channels, 1 red, 2 green, 3 blue, 4 luma) to points.
+    pub func set_curve(at: i64, xs: const f64[], ys: const f64[]) -> !:
+        try self.settings.set_curve(try curve_index(at), xs, ys)
+
+    ## The text form.
+    pub func text() -> interop.Owned[str]!:
+        var out: Buffer
+        defer out.destroy()
+        try text_of(&self.settings, &out)
+        return try interop.copy_text(out.text())
+
+    ## Take the settings `text` describes.
+    pub func load(text: str):
+        self.settings = parse(text)
+
+    ## A copy, for undo or copy and paste.
+    pub func copy() -> interop.Reference[Look]!:
+        return try adopt(self.settings)
+
+    ## The settings, for Base code holding a Look.
+    pub func value() -> Settings:
+        return self.settings
+
+    pub func close():
+        _ = self
+
+    func trace(visit: func(ownership.Object*, void*) -> unit, context: void*):
+        _ = self
+        _ = visit
+        _ = context
+
+pub let look_type: interop.Type[Look] = interop.Type[Look]("Look", Look.close, Look.trace, closeable = true)
+
+func curve_index(at: i64) -> usize!:
+    if at < 0 or at >= (i64)curve_count:
+        error(invalid, "curves are numbered 0 to 4")
+    return (usize)at
+
+func adopt(settings: Settings) -> interop.Reference[Look]!:
+    let made = try new Look(settings = settings) in memory.heap
+    return try interop.Reference[Look].adopt(made, look_type, memory.heap)
+
+## A Look of the settings `text` describes ("" for the defaults).
+pub func look(text: str = "") -> interop.Reference[Look]!:
+    return try adopt(parse(text))
+
+## The parameter table, for building controls: how many there are, then each
+## one's name, label, Properties section, range, default and decimals.
+pub func parameter_total() -> i64:
+    return (i64)parameter_count
+pub func name_of(at: i64) -> str:
+    return parameters[(usize)at].name
+pub func label_of(at: i64) -> str:
+    return parameters[(usize)at].label
+pub func section_of(at: i64) -> str:
+    return parameters[(usize)at].section
+pub func low_of(at: i64) -> f64:
+    return parameters[(usize)at].low
+pub func high_of(at: i64) -> f64:
+    return parameters[(usize)at].high
+pub func default_of(at: i64) -> f64:
+    return parameters[(usize)at].default
+pub func decimals_of(at: i64) -> i64:
+    return parameters[(usize)at].decimals
 
 test "settings round-trip through their text, naming only changes":
     var out: Buffer
     defer out.destroy()
-    try text_of(defaults(), &out)
+    let base = defaults()
+    try text_of(&base, &out)
     assert(out.length() == 0)
     var changed = defaults()
-    changed.exposure = 0.75
-    changed.contrast = -20.0
-    changed.temperature = 5600.0
-    changed.view = (i64)View.linear
-    try text_of(changed, &out)
-    assert(out.text() == "temperature=5600;exposure=0.75;contrast=-20;view=2")
+    changed.set(.exposure, 0.75)
+    changed.set(.contrast, -20.0)
+    changed.set(.temperature, 5600.0)
+    changed.set(.view, 2.0)
+    try changed.set_curve(0, [0.0, 0.3, 1.0], [0.0, 0.25, 1.0])
+    try text_of(&changed, &out)
+    assert(out.text() == "temperature=5600;exposure=0.75;contrast=-20;view=2;curve_rgb=0,0 0.3,0.25 1,1")
     let back = parse(out.text())
-    assert(back.exposure == 0.75 and back.contrast == -20.0 and back.temperature == 5600.0 and back.view == 2)
-    let odd = parse("exposure=9;glow=3;contrast=;temperature=900;saturation=-12.5")
-    assert(odd.exposure == 6.0 and odd.contrast == 0.0 and odd.temperature == 1667.0 and odd.saturation == -12.5)
+    assert(back.get(.exposure) == 0.75 and back.get(.contrast) == -20.0 and back.get(.temperature) == 5600.0 and back.get(.view) == 2.0)
+    assert(back.curve(0).count == 3 and back.curve(0).ys[1] == 0.25)
+    let odd = parse("exposure=9;glow=3;contrast=;temperature=900;saturation=-12.5;curve_red=0,0 1;curve_blue=0,0 1,1")
+    assert(odd.get(.exposure) == 6.0 and odd.get(.contrast) == 0.0 and odd.get(.temperature) == 1667.0 and odd.get(.saturation) == -12.5)
+    assert(odd.curves_untouched())
+
+test "curves pass their points and never overshoot":
+    var curve = Curve(count = 3)
+    curve.xs[1] = 0.5
+    curve.xs[2] = 1.0
+    curve.ys[1] = 0.7
+    curve.ys[2] = 1.0
+    assert(curve.evaluate(0.5) == 0.7 and curve.evaluate(1.0) == 1.0 and curve.evaluate(0.0) == 0.0)
+    var previous = -1.0
+    for step in 0..<(usize)101:
+        let y = curve.evaluate((f64)step / 100.0)
+        assert(y >= previous and y <= 1.0)
+        previous = y

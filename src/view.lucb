@@ -48,6 +48,9 @@ pub func shape(x: f64) -> f64:
     return math.clamp((math.log2(x / 0.18) - shaper_low) / (shaper_high - shaper_low), 0.0, 1.0)
 
 ## The SDR ACES 2.0 transform, built once on first use (its tables take milliseconds).
+## How much the ACES view raises scene light first: one stop.
+pub let aces_lift: f64 = 2.0
+
 var aces_sdr: aces.OutputTransform
 var aces_once: sync.Once
 
@@ -70,8 +73,10 @@ func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
 pub func display(view: View, rgb: f64[3], to_display: f64[9]) -> f64[3]:
     if view == View.aces:
         aces_once.run(build_aces)
-        # AP1 in; Rec.709-primary display light out, 1.0 the SDR white.
-        return aces_sdr.apply_ap1(rgb)
+        # AP1 in, a stop brighter: ACES shows scene grey at 10 nits, a stop darker
+        # than a camera's rendering, and photographs are exposed for cameras. Out:
+        # Rec.709-primary display light, 1.0 the SDR white.
+        return aces_sdr.apply_ap1([rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift])
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
@@ -123,7 +128,7 @@ test "middle grey shows at 0.25; white stays neutral":
 
 test "ACES shows grey near 10 nits, neutral, and highlights converge to white":
     let to_display = working_to_display()
-    let grey = display(View.aces, [0.18, 0.18, 0.18], to_display)
+    let grey = display(View.aces, [0.09, 0.09, 0.09], to_display)
     assert(grey[1] > 0.09 and grey[1] < 0.11)
     assert(math.abs(grey[0] - grey[1]) < 1.0e-4 and math.abs(grey[2] - grey[1]) < 1.0e-4)
     let white = display(View.aces, [2000.0, 2000.0, 2000.0], to_display)
@@ -147,4 +152,6 @@ test "the ACES table bakes":
     print(f"ACES 64³ bake: {(time.now() - started) // 1000000} ms")
     let grey_node = (usize)(shape(0.18) * (f64)(n - 1) + 0.5)
     let at = (grey_node * n * n + grey_node * n + grey_node) * 4
-    assert((f64)table[at + 1] > 0.08 and (f64)table[at + 1] < 0.12)
+    let node = unshape((f64)grey_node / (f64)(n - 1))
+    let expected = display(View.aces, [node, node, node], working_to_display())
+    assert(math.abs((f64)table[at + 1] - expected[1]) < 0.002)

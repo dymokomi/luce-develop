@@ -1,16 +1,16 @@
-## The develop on the CPU: the same stages as the renderer's shader
-## (shaders/develop.frag) — matrix, tone, Oklab color, view — with the view
-## evaluated exactly instead of through its table. Export uses it, and the tests
-## hold the GPU to it.
+## The develop on the CPU: shaders/develop.frag step for step, reading the same
+## tables (tables.lucb) with the same filtering, except that the view is
+## evaluated exactly instead of through its table. Export uses it, and the
+## tests hold the GPU to it. Change both together.
 import interop
-import memory
 from luce_std import math
 from luce_color import transfer
-from settings import Settings, View, clamped
+from settings import Settings, View
 from scene import Scene
 from picture import Picture, adopt
+from tables import Tables
 import scene
-import tone
+import tables
 import view
 
 ## AP1's luminance weights, and AP1 (D60) to and from Oklab's LMS (D65): the
@@ -22,55 +22,193 @@ let from_lms: f64[9] = [2.068802739, -1.175172287, 0.106575960, -0.876328522, 2.
 func apply(m: f64[9], v: f64[3]) -> f64[3]:
     return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]
 
-## One pixel's develop from scene values `camera` to display-linear sRGB.
-func develop_pixel(camera: f64[3], matrix: f64[9], gains: const f32[], settings: const Settings*, shown: View, to_display: f64[9]) -> f64[3]:
-    var c = apply(matrix, camera)
+func smooth01(edge0: f64, edge1: f64, x: f64) -> f64:
+    let t = math.clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+func luminance(c: f64[3]) -> f64:
+    return c[0] * ap1_luminance[0] + c[1] * ap1_luminance[1] + c[2] * ap1_luminance[2]
+
+## Everything one pixel's develop needs besides its value and place.
+struct Develop:
+    var matrix: f64[9]
+    var tables: Tables
+    var shown: View
+    var to_display: f64[9]
+    var vibrance: f64
+    var saturation: f64
+    var aspect: f64
+
+func radius(u: f64, v: f64, aspect: f64) -> f64:
+    let x = (u - 0.5) * 2.0 * aspect
+    let y = (v - 0.5) * 2.0
+    return math.sqrt(x * x + y * y) / math.sqrt(aspect * aspect + 1.0)
+
+func with_lens(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
+    let value = d.tables.value(5)
+    if value[1] <= 0.0:
+        return c
+    let start = value[2] * 0.6
+    let t = math.clamp((radius(u, v, d.aspect) - start) / (1.0 - start), 0.0, 1.0)
+    let gain = 1.0 + value[1] * 2.0 * t * t
+    return [c[0] * gain, c[1] * gain, c[2] * gain]
+
+func with_tone(d: const Develop*, c: f64[3]) -> f64[3]:
+    let y = luminance(c)
+    if y <= 1.0e-10:
+        return c
+    let gain = math.exp2(d.tables.sample(0, (math.log2(y / 0.18) + 14.0) / 24.0)[0])
+    return [c[0] * gain, c[1] * gain, c[2] * gain]
+
+func with_color(d: const Develop*, c: f64[3]) -> f64[3]:
+    let y = luminance(c)
+    if y <= 1.0e-10:
+        return c
+    let shape = d.tables.value(4)
+    let s = math.log2(y / 0.18)
+    let width = 1.0 + 3.0 * shape[1]
+    let low = -2.0 + 2.0 * shape[0]
+    let high = 2.0 + 2.0 * shape[0]
+    let w_shadows = 1.0 - smooth01(low - width, low + width, s)
+    let w_highlights = smooth01(high - width, high + width, s)
+    let w_midtones = math.max(0.0, 1.0 - w_shadows - w_highlights)
+    let lms = apply(to_lms, c)
+    let l_ = math.cbrt(lms[0])
+    let m_ = math.cbrt(lms[1])
+    let s_ = math.cbrt(lms[2])
+    let l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+    let a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+    let b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+    let chroma = math.sqrt(a * a + b * b)
+    var hue = math.atan2(b, a) / (2.0 * math.pi) + 1.0
+    hue -= math.floor(hue)
+    let scale = (1.0 + d.saturation) * (1.0 + d.vibrance * (1.0 - smooth01(0.0, 0.2, chroma)))
+    let band = d.tables.sample(1, hue)
+    let turned = 2.0 * math.pi * band[0]
+    var a2 = math.cos(turned) * a - math.sin(turned) * b
+    var b2 = math.sin(turned) * a + math.cos(turned) * b
+    let factor = math.max(scale * band[1], 0.0)
+    a2 *= factor
+    b2 *= factor
+    var lightness = l * (1.0 + (band[2] - 1.0) * smooth01(0.0, 0.1, chroma))
+    let g0 = d.tables.value(0)
+    let g1 = d.tables.value(1)
+    let g2 = d.tables.value(2)
+    let g3 = d.tables.value(3)
+    a2 += w_shadows * g0[0] + w_midtones * g1[0] + w_highlights * g2[0] + g3[0]
+    b2 += w_shadows * g0[1] + w_midtones * g1[1] + w_highlights * g2[1] + g3[1]
+    lightness *= (w_shadows * g0[2] + w_midtones * g1[2] + w_highlights * g2[2]) * g3[2]
+    if shape[2] > 0.5:
+        lightness *= math.max(0.0, 1.0 + band[3] * chroma * 3.0)
+        a2 = shape[3]
+        b2 = d.tables.value(5)[0]
+    let l2 = lightness + 0.3963377774 * a2 + 0.2158037573 * b2
+    let m2 = lightness - 0.1055613458 * a2 - 0.0638541728 * b2
+    let s2 = lightness - 0.0894841775 * a2 - 1.2914855480 * b2
+    return apply(from_lms, [l2 * l2 * l2, m2 * m2 * m2, s2 * s2 * s2])
+
+func encode(c: f64) -> f64:
+    return c * 12.92 if c < 0.0031308 else 1.055 * math.pow(math.max(c, 0.0), 1.0 / 2.4) - 0.055
+
+func decode(c: f64) -> f64:
+    return c / 12.92 if c < 0.04045 else math.pow((c + 0.055) / 1.055, 2.4)
+
+func with_curves(d: const Develop*, c: f64[3]) -> f64[3]:
+    var e: f64[3]
+    for at in 0..<(usize)3:
+        e[at] = d.tables.sample(2, encode(math.clamp(c[at], 0.0, 1.0)))[at]
+    let luma = e[0] * 0.2126 + e[1] * 0.7152 + e[2] * 0.0722
+    if luma > 1.0e-5:
+        let ratio = d.tables.sample(2, luma)[3] / luma
+        for at in 0..<(usize)3:
+            e[at] = math.min(e[at] * ratio, 1.0)
+    return [decode(e[0]), decode(e[1]), decode(e[2])]
+
+func with_vignette(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
+    let v5 = d.tables.value(5)
+    let v6 = d.tables.value(6)
+    let amount = v5[3]
+    if amount == 0.0:
+        return c
+    let stretch = 1.0 + (d.aspect - 1.0) * (v6[1] + 1.0) * 0.5
+    let x = (u - 0.5) * 2.0 * stretch
+    let y = (v - 0.5) * 2.0
+    let r = math.sqrt(x * x + y * y) / math.sqrt(stretch * stretch + 1.0)
+    let start = v6[0]
+    let edge = smooth01(start, start + math.max(v6[2], 0.02) * (1.2 - start), r)
+    var out = c
+    for at in 0..<(usize)3:
+        out[at] = c[at] * (1.0 + amount * edge) if amount < 0.0 else c[at] + (1.0 - c[at]) * (amount * edge)
+    return out
+
+## A hash of a cell to 0..1, the same as the shader's.
+func hashed(px: u32, py: u32) -> f64:
+    var x = px *% 1664525 +% py *% 1013904223
+    x = x ^ (x >> 16)
+    x = x *% 0x7feb352d
+    x = x ^ (x >> 15)
+    x = x *% 0x846ca68b
+    x = x ^ (x >> 16)
+    return (f64)(x >> 8) / 16777216.0
+
+func with_grain(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
+    let v6 = d.tables.value(6)
+    let v7 = d.tables.value(7)
+    let amount = v6[3]
+    if amount <= 0.0:
+        return c
+    let scale = 1500.0 / (1.0 + 4.0 * v7[0])
+    let ax = u * d.aspect * scale
+    let ay = v * scale
+    let cx = (u32)math.floor(ax)
+    let cy = (u32)math.floor(ay)
+    var fx = ax - math.floor(ax)
+    var fy = ay - math.floor(ay)
+    fx = fx * fx * (3.0 - 2.0 * fx)
+    fy = fy * fy * (3.0 - 2.0 * fy)
+    let top = hashed(cx, cy) + (hashed(cx + 1, cy) - hashed(cx, cy)) * fx
+    let bottom = hashed(cx, cy + 1) + (hashed(cx + 1, cy + 1) - hashed(cx, cy + 1)) * fx
+    let smooth_noise = top + (bottom - top) * fy
+    let rough_noise = hashed(cx *% 7 +% 3, cy *% 7 +% 5)
+    let noise = (smooth_noise + (rough_noise - smooth_noise) * v7[1] * 0.5) * 2.0 - 1.0
+    let luma = encode(math.clamp(c[0], 0.0, 1.0)) * 0.2126 + encode(math.clamp(c[1], 0.0, 1.0)) * 0.7152 + encode(math.clamp(c[2], 0.0, 1.0)) * 0.0722
+    let gain = 1.0 + amount * 0.6 * noise * 4.0 * luma * (1.0 - luma)
+    return [math.max(c[0] * gain, 0.0), math.max(c[1] * gain, 0.0), math.max(c[2] * gain, 0.0)]
+
+## One pixel's develop from scene values `camera` at image position (`u`, `v`),
+## 0..1, to display-linear sRGB.
+func develop_pixel(d: const Develop*, camera: f64[3], u: f64, v: f64) -> f64[3]:
+    var c = apply(d.matrix, camera)
     for at in 0..<(usize)3:
         c[at] = math.max(c[at], 0.0)
-    let y = c[0] * ap1_luminance[0] + c[1] * ap1_luminance[1] + c[2] * ap1_luminance[2]
-    if y > 1.0e-10:
-        let gain = math.exp2(tone.gain_at(gains, math.log2(y / 0.18)))
-        for at in 0..<(usize)3:
-            c[at] *= gain
-    let vibrance = settings.vibrance / 100.0
-    let saturation = settings.saturation / 100.0
-    if vibrance != 0.0 or saturation != 0.0:
-        let lms = apply(to_lms, c)
-        let l_ = math.cbrt(lms[0])
-        let m_ = math.cbrt(lms[1])
-        let s_ = math.cbrt(lms[2])
-        let l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
-        var a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
-        var b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
-        let chroma = math.sqrt(a * a + b * b)
-        let t = math.clamp(chroma / 0.2, 0.0, 1.0)
-        let vivid = t * t * (3.0 - 2.0 * t)
-        let scale = math.max(0.0, (1.0 + saturation) * (1.0 + vibrance * (1.0 - vivid)))
-        a *= scale
-        b *= scale
-        let l2 = l + 0.3963377774 * a + 0.2158037573 * b
-        let m2 = l - 0.1055613458 * a - 0.0638541728 * b
-        let s2 = l - 0.0894841775 * a - 1.2914855480 * b
-        c = apply(from_lms, [l2 * l2 * l2, m2 * m2 * m2, s2 * s2 * s2])
-    return view.display(shown, c, to_display)
+    c = with_lens(d, c, u, v)
+    c = with_tone(d, c)
+    c = with_color(d, c)
+    c = view.display(d.shown, c, d.to_display)
+    c = with_curves(d, c)
+    c = with_vignette(d, c, u, v)
+    return with_grain(d, c, u, v)
 
 ## `scene` developed with `settings` into an 8-bit sRGB picture of its size.
 pub func render(source: const Scene*, settings: Settings) -> Picture!:
-    let checked = clamped(settings)
-    let matrix = try source.matrix(&checked)
-    var gains: f32[256]
-    tone.fill(checked, gains)
-    let shown = (View)checked.view
-    let to_display = view.working_to_display()
-    var out = try Picture.create((usize)source.width(), (usize)source.height())
+    let width = (usize)source.width()
+    let height = (usize)source.height()
+    let develop = Develop(matrix = try source.matrix(&settings), tables = tables.build(&settings),
+                          shown = (View)(i64)settings.get(.view), to_display = view.working_to_display(),
+                          vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
+                          aspect = (f64)width / (f64)height)
+    var out = try Picture.create(width, height)
     errdefer out.close()
     let pixels = out.bytes()
-    for at in 0..<(usize)(source.width() * source.height()):
-        let shown_color = develop_pixel(source.value_at(at), matrix, gains, &checked, shown, to_display)
-        pixels[at * 4] = transfer.srgb_byte(shown_color[0])
-        pixels[at * 4 + 1] = transfer.srgb_byte(shown_color[1])
-        pixels[at * 4 + 2] = transfer.srgb_byte(shown_color[2])
-        pixels[at * 4 + 3] = 255
+    for y in 0..<height:
+        let v = ((f64)y + 0.5) / (f64)height
+        for x in 0..<width:
+            let at = y * width + x
+            let shown_color = develop_pixel(&develop, source.value_at(at), ((f64)x + 0.5) / (f64)width, v)
+            pixels[at * 4] = transfer.srgb_byte(shown_color[0])
+            pixels[at * 4 + 1] = transfer.srgb_byte(shown_color[1])
+            pixels[at * 4 + 2] = transfer.srgb_byte(shown_color[2])
+            pixels[at * 4 + 3] = 255
     return out
 
 ## The photo at `path` developed with `settings` at most `edge` pixels on its

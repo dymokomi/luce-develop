@@ -1,0 +1,161 @@
+## The develop's tables: everything a pixel looks up that does not fit the
+## renderer's 128 bytes of uniforms, built once per settings change on the CPU and
+## sampled the same way by the shader (one 1024 × 4 half-float texture) and by
+## the CPU path (process.lucb). Rows:
+##
+##   0  tone      the tone curve's gain in stops (red) over luminance from 14 stops
+##                below middle grey to 10 above (tone.lucb), 1024 samples
+##   1  hue       over Oklab hue (0..1 turn): the Color Mixer's hue shift in turns
+##                (red), saturation factor (green), luminance factor (blue), and
+##                Black & White's weight (alpha), blended between eight bands
+##   2  curves    over the display's encoded value (0..1): red, green and blue
+##                through Levels, the channel's curve and the RGB curve; alpha the
+##                luma curve
+##   3  values    the rest as texels: 0–3 the grading colors (Oklab a and b
+##                offsets, luminance factor) for shadows, midtones, highlights and
+##                global; 4 grading balance, blending, B&W on, B&W tint a; 5 B&W tint
+##                b, lens vignetting, its midpoint, vignette amount; 6 vignette
+##                midpoint, roundness, feather, grain amount; 7 grain size and
+##                roughness
+from luce_std import math
+from settings import Settings, defaults
+from parameters import Parameter
+import tone
+
+pub let table_width: usize = 1024
+pub let table_rows: usize = 4
+
+## The eight Color Mixer and Black & White bands' Oklab hues, in degrees: red,
+## orange, yellow, green, aqua, blue, purple, magenta.
+pub let band_hues: f64[8] = [29.0, 60.0, 105.0, 142.0, 195.0, 264.0, 300.0, 335.0]
+
+## The tables, RGBA f32, row after row.
+pub struct Tables:
+    pub var texels: f32[16384]
+
+    func put(row: usize, at: usize, r: f64, g: f64, b: f64, a: f64):
+        let base = (row * table_width + at) * 4
+        self.texels[base] = (f32)r
+        self.texels[base + 1] = (f32)g
+        self.texels[base + 2] = (f32)b
+        self.texels[base + 3] = (f32)a
+
+    ## Row `row` at position `u` (0..1) with the GPU's linear filtering between
+    ## texel centers, as four values.
+    pub func sample(row: usize, u: f64) -> f64[4]:
+        let position = math.clamp(u, 0.0, 1.0) * (f64)(table_width - 1)
+        let below = (usize)math.floor(position)
+        let above = below + 1 if below + 1 < table_width else below
+        let t = position - (f64)below
+        var out: f64[4]
+        for channel in 0..<(usize)4:
+            let low = (f64)(f16)self.texels[(row * table_width + below) * 4 + channel]
+            let high = (f64)(f16)self.texels[(row * table_width + above) * 4 + channel]
+            out[channel] = low + (high - low) * t
+        return out
+
+    ## Texel `at` of the values row, as stored (half floats).
+    pub func value(at: usize) -> f64[4]:
+        var out: f64[4]
+        for channel in 0..<(usize)4:
+            out[channel] = (f64)(f16)self.texels[(3 * table_width + at) * 4 + channel]
+        return out
+
+## The hue band `band`'s parameter `offset` (0 hue, 1 saturation, 2 luminance)
+## of the Color Mixer, -1..1.
+func mixer(settings: const Settings*, band: usize, offset: usize) -> f64:
+    return settings.get((Parameter)(u8)((usize)Parameter.red_hue + band * 3 + offset)) / 100.0
+
+func bw_weight(settings: const Settings*, band: usize) -> f64:
+    return settings.get((Parameter)(u8)((usize)Parameter.bw_red + band)) / 100.0
+
+## The two bands around `hue` (degrees) and how far it is from the first to the
+## second, eased.
+func between(hue: f64) -> (usize, usize, f64):
+    for band in 0..<(usize)8:
+        let next = (band + 1) % 8
+        let start = band_hues[band]
+        var span = band_hues[next] - start
+        if span < 0.0:
+            span += 360.0
+        var into = hue - start
+        if into < 0.0:
+            into += 360.0
+        if into <= span:
+            let t = into / span
+            return (band, next, t * t * (3.0 - 2.0 * t))
+    return (0, 0, 0.0)
+
+## An Oklab a/b offset for a grading wheel at `hue` degrees and `saturation`
+## 0..100.
+func wheel(hue: f64, saturation: f64) -> (f64, f64):
+    let reach = 0.05 * saturation / 100.0
+    let angle = hue * math.pi / 180.0
+    return (reach * math.cos(angle), reach * math.sin(angle))
+
+## The tables for `settings`.
+pub func build(settings: const Settings*) -> Tables:
+    var out: Tables
+    var gains: f32[1024]
+    tone.fill(*settings, gains)
+    for at in 0..<table_width:
+        out.put(0, at, (f64)gains[at], 0.0, 0.0, 1.0)
+    # Hue bands, blended smoothly around the circle.
+    for at in 0..<table_width:
+        let hue = (f64)at / (f64)(table_width - 1) * 360.0
+        let (first, second, t) = between(hue)
+        let shift = mixer(settings, first, 0) * (1.0 - t) + mixer(settings, second, 0) * t
+        let saturation = mixer(settings, first, 1) * (1.0 - t) + mixer(settings, second, 1) * t
+        let luminance = mixer(settings, first, 2) * (1.0 - t) + mixer(settings, second, 2) * t
+        let weight = bw_weight(settings, first) * (1.0 - t) + bw_weight(settings, second) * t
+        out.put(1, at, shift * 30.0 / 360.0, 1.0 + saturation, 1.0 + luminance * 0.5, weight)
+    # Levels, then each channel's curve, then the RGB curve; the luma curve apart.
+    let black = settings.get(.levels_black)
+    let white = settings.get(.levels_white)
+    let gamma = settings.get(.levels_gamma)
+    let out_black = settings.get(.levels_out_black)
+    let out_white = settings.get(.levels_out_white)
+    for at in 0..<table_width:
+        let x = (f64)at / (f64)(table_width - 1)
+        var leveled = math.clamp((x - black) / math.max(white - black, 1.0e-4), 0.0, 1.0)
+        leveled = math.pow(leveled, 1.0 / gamma)
+        leveled = out_black + leveled * (out_white - out_black)
+        var channels: f64[3]
+        for channel in 0..<(usize)3:
+            channels[channel] = settings.curve(0).evaluate(settings.curve(1 + channel).evaluate(leveled))
+        out.put(2, at, channels[0], channels[1], channels[2], settings.curve(4).evaluate(x))
+    # The rest, as values.
+    var ranges: Parameter[4] = [.grade_shadows_hue, .grade_midtones_hue, .grade_highlights_hue, .grade_global_hue]
+    for (at, first) in ranges.indexed():
+        let (a, b) = wheel(settings.get(first), settings.get((Parameter)(u8)((usize)first + 1)))
+        let luminance = settings.get((Parameter)(u8)((usize)first + 2)) / 100.0
+        out.put(3, at, a, b, 1.0 + luminance * 0.4, 0.0)
+    let (tint_a, tint_b) = wheel(settings.get(.bw_tint_hue), settings.get(.bw_tint_amount) * 0.5)
+    out.put(3, 4, settings.get(.grade_balance) / 100.0, settings.get(.grade_blending) / 100.0, settings.get(.bw), tint_a)
+    out.put(3, 5, tint_b, settings.get(.lens_vignetting) / 100.0, settings.get(.lens_midpoint) / 100.0, settings.get(.vignette_amount) / 100.0)
+    out.put(3, 6, settings.get(.vignette_midpoint) / 100.0, settings.get(.vignette_roundness) / 100.0, settings.get(.vignette_feather) / 100.0, settings.get(.grain_amount) / 100.0)
+    out.put(3, 7, settings.get(.grain_size) / 100.0, settings.get(.grain_roughness) / 100.0, 0.0, 0.0)
+    return out
+
+## The tables as half floats, for the texture.
+pub func half(tables: const Tables*, out: f16[]):
+    for at in 0..<out.length:
+        out[at] = (f16)tables.texels[at]
+
+test "untouched settings give identity tables":
+    let settings = defaults()
+    let tables = build(&settings)
+    for at in 0..<(usize)1024:
+        let hue = tables.sample(1, (f64)at / 1023.0)
+        assert(hue[0] == 0.0 and hue[1] == 1.0 and hue[2] == 1.0)
+        let x = (f64)at / 1023.0
+        let curves = tables.sample(2, x)
+        assert(math.abs(curves[0] - x) < 0.002 and math.abs(curves[3] - x) < 0.002)
+
+test "a band's change peaks at its hue and fades to its neighbours":
+    var settings = defaults()
+    settings.set(.green_saturation, -100.0)
+    let tables = build(&settings)
+    assert(tables.sample(1, 142.0 / 360.0)[1] < 0.01)
+    assert(math.abs(tables.sample(1, 264.0 / 360.0)[1] - 1.0) < 0.01)
+    assert(tables.sample(1, 120.0 / 360.0)[1] > 0.2)

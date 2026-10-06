@@ -35,26 +35,46 @@ writes it out. `width()`, `height()` and `pixels()` read it from Luce.
 ## Developing (`settings`, `scene`, `renderer`, `process`, `view`)
 
 The develop works in scene-linear ACES AP1. A raw is developed once by luce-raw
-with `camera` set (balanced as shot, no matrix). A new white balance is then
-just a matrix built from luce-raw's `rendering`, so white balance and exposure
-cost nothing to change. The stages, in order:
+with `camera` set (balanced as shot, no matrix). A new white balance is then just
+a matrix built from luce-raw's `rendering`. The stages, in the order the shader
+(`shaders/develop.frag`) and the CPU path (`process`) run them:
 
-1. Matrix: white balance, camera color and exposure into AP1.
-2. Tone (`tone`): contrast, highlights, shadows, whites and blacks as one gain in
-   stops over luminance, applied to all three channels so hues hold.
-3. Color: vibrance and saturation in Oklab.
-4. View (`view`): Standard, a neutral filmic curve with highlights running to
-   white, or Linear. ACES 2.0 comes with luce-color.
+1. The matrix: white balance, camera color and exposure.
+2. Lens vignetting correction.
+3. Tone: contrast, highlights, shadows, whites and blacks as one gain over
+   luminance, so hues hold (`tone`).
+4. In Oklab: vibrance and saturation; the Color Mixer (eight hue bands' hue,
+   saturation and luminance); Color Grading (shadows, midtones, highlights and
+   global wheels, balance, blending); Black & White (hue weights, tint).
+5. The view: ACES 2.0 SDR (luce-color), lifted one stop so photographs land as
+   a camera renders them, which is the default; Standard, a neutral filmic curve;
+   or Linear.
+6. Levels and Curves (all channels, R, G, B, luma) on the display's encoded values.
+7. The vignette and grain.
 
-- `settings.Settings` holds every parameter. `defaults()`, `parse(text)` and
-  `encode(settings)` convert to and from the short text form
-  ("exposure=0.7;contrast=20") that catalogs store.
-- `scene.open(path, edge)` loads a photo at a viewer's size.
-- `renderer.start()` runs on the GPU for viewers: `open(path, edge)` loads on its
-  own thread, `poll()` takes in what loaded, `set_settings`, then
-  `draw(target, x, y, w, h)` every frame, one pass of `shaders/develop.frag`.
-- `process.render(scene, settings)` is the same develop on the CPU, with the
-  view evaluated exactly instead of through a table. Export uses it.
+- **Parameters.** All 76 are in `tools/parameters.py`, which generates
+  `src/parameters.lucb`: each one's name, label, Properties section, range,
+  default and decimals.
+- **Tables.** Everything per hue, per tone or per curve is built into one 1024×4
+  table (`tables`), which both paths read with the same filtering.
+- **Settings for Base.** `settings.Settings` holds the values and five curves.
+  `parse(text)` and `text_of` read and write the short text form that catalogs
+  store ("exposure=0.7;curve_rgb=0,0 0.3,0.25 1,1").
+- **Looks for Luce.** `settings.look(text)` returns a `Look` with
+  `get`/`set(name)`, `set_curve`, `text()` and `load(text)`. `name_of(i)`,
+  `label_of(i)`, `section_of(i)` and the rest describe the table, so an
+  application can build its controls from it.
+- **Scenes.** `scene.open(path, edge)` loads a photo at a viewer's size.
+- **The renderer (GPU, for viewers).**
+  - `open(path, edge)` loads on the renderer's own thread, and `poll()` takes in
+    what loaded.
+  - `set_settings(settings)` changes the develop.
+  - `draw(target, x, y, w, h)` draws every frame, as one pass.
+- **The CPU path.** `process.render(scene, settings)` is the same develop on the
+  CPU, with the view evaluated exactly. Export uses it.
+- **Parity.** `tests/parity.lucb` holds the GPU to the CPU for every tool. Both
+  paths agree to within a level on average, and to 3 levels for Standard and
+  Linear.
 
 ## Tests
 

@@ -1,9 +1,9 @@
 ## The renderer: a viewer's photo developed on the GPU every frame, so a slider
 ## moves the picture as it moves. A scene loads on a thread of the renderer's
 ## own (the newest asked for wins), its pixels go up once, and each draw is one
-## pass of shaders/develop.frag with the settings in its uniforms and two tables:
-## the tone curve, refilled when tone settings change, and the view transform,
-## baked when the view changes.
+## pass of shaders/develop.frag with the settings in its uniforms and two
+## textures: the develop's tables (tables.lucb), rebuilt when the settings change,
+## and the ACES view's table, baked once.
 import interop
 import memory
 import ownership
@@ -12,10 +12,10 @@ import sync
 import thread
 from luce_gpu import gpu
 from luce_std import math
-from settings import Settings, View, clamped
+from settings import Settings, View, defaults
 from scene import Scene
 import scene
-import tone
+import tables
 import view
 from shaders import develop_frag_words, develop_frag_msl
 import codes
@@ -79,14 +79,14 @@ pub struct Renderer:
     var shown_serial: u64
     var upload: bool
     var settings: Settings
-    var tone_stale: bool
+    var tables_stale: bool
     var view_baked: i64
     ## Made on the first draw, on the window's device.
     var device: gpu.Device?
     var shader: gpu.Shader?
     var pipeline: gpu.Pipeline?
     var scene_texture: gpu.Texture?
-    var tone_texture: gpu.Texture?
+    var tables_texture: gpu.Texture?
     var view_texture: gpu.Texture?
     var problem: u8[256]
     var problem_length: usize
@@ -161,10 +161,8 @@ pub struct Renderer:
 
     ## Develop with `settings` from the next draw on.
     pub func set_settings(settings: Settings):
-        let next = clamped(settings)
-        if next.contrast != self.settings.contrast or next.highlights != self.settings.highlights or next.shadows != self.settings.shadows or next.whites != self.settings.whites or next.blacks != self.settings.blacks:
-            self.tone_stale = true
-        self.settings = next
+        self.settings = settings
+        self.tables_stale = true
 
     ## Draw the photo into `x`, `y`, `width` × `height` points of `target`.
     pub func draw(target: interop.View[gpu.RenderTarget], x: f64, y: f64, width: f64, height: f64) -> !:
@@ -174,7 +172,7 @@ pub struct Renderer:
         try self.prepare(checked)
         let pipeline = self.pipeline else return
         let scene_texture = self.scene_texture else return
-        let tone_texture = self.tone_texture else return
+        let tables_texture = self.tables_texture else return
         let view_texture = self.view_texture else return
         let place = try checked.placement()
         let size = try checked.size()
@@ -183,8 +181,8 @@ pub struct Renderer:
         var uniforms: f32[20] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
-            (f32)(self.settings.vibrance / 100.0), (f32)(self.settings.saturation / 100.0), (f32)self.settings.view, 0.0f32]
-        let images: gpu.Texture[3] = [scene_texture, tone_texture, view_texture]
+            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)((f64)self.shown.width() / (f64)self.shown.height())]
+        let images: gpu.Texture[3] = [scene_texture, tables_texture, view_texture]
         try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 80), images, gpu.Filter.linear)
 
     ## The pipeline and the textures, made or refreshed for what changed.
@@ -208,28 +206,26 @@ pub struct Renderer:
             try texture.upload(self.shown.bytes())
             self.scene_texture = texture
             self.upload = false
-        if self.tone_texture == none or self.tone_stale:
-            var gains: f32[256]
-            tone.fill(self.settings, gains)
-            var texels: f16[1024]
-            for at in 0..<(usize)256:
-                texels[at * 4] = (f16)gains[at]
-                texels[at * 4 + 3] = (f16)1.0f32
-            if self.tone_texture == none:
-                self.tone_texture = try gpu.Texture.create(device, 256, 1, gpu.Format.rgba16_float)
-            let held = self.tone_texture else return
-            try held.upload(u8[]((u8*)&texels[0], 2048))
-            self.tone_stale = false
-        if self.view_texture == none or self.view_baked != self.settings.view:
+        if self.tables_texture == none or self.tables_stale:
+            let built = tables.build(&self.settings)
+            let texels = try new f16[tables.table_width * tables.table_rows * 4] --- in memory.heap
+            defer free(texels) in memory.heap
+            tables.half(&built, texels)
+            if self.tables_texture == none:
+                self.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
+            let held = self.tables_texture else return
+            try held.upload(u8[]((u8*)texels.data, texels.length * 2))
+            self.tables_stale = false
+        if self.view_texture == none or self.view_baked != (i64)self.settings.get(.view):
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
-            view.bake((View)self.settings.view, table)
+            view.bake((View)(i64)self.settings.get(.view), table)
             if self.view_texture == none:
                 self.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
             let held = self.view_texture else return
             try held.upload(u8[]((u8*)table.data, table.length * 2))
-            self.view_baked = self.settings.view
+            self.view_baked = (i64)self.settings.get(.view)
 
     ## Stop the loading thread and let every texture go.
     pub func close():
@@ -246,7 +242,7 @@ pub struct Renderer:
             free(loading) in memory.heap
         self.loading = none
         self.shown.close()
-        for slot in [&self.scene_texture, &self.tone_texture, &self.view_texture]:
+        for slot in [&self.scene_texture, &self.tables_texture, &self.view_texture]:
             if let held = *slot:
                 var gone = held
                 gone.destroy()
@@ -274,7 +270,7 @@ pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, settings = Settings(view = (i64)View.standard), view_baked = -1, format = format)
+    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:

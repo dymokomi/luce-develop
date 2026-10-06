@@ -5,12 +5,13 @@
 ## sampled into a table the renderer reads (and the CPU path interpolates the
 ## same table, so both agree).
 from luce_std import math
-from settings import Settings
+from settings import Settings, defaults
+from parameters import Parameter
 
 ## The stops the table covers, from middle grey, and its sample count.
 pub let tone_low: f64 = -14.0
 pub let tone_high: f64 = 10.0
-pub let tone_samples: usize = 256
+pub let tone_samples: usize = 1024
 
 func bump(l: f64, centre: f64, width: f64) -> f64:
     let d = (l - centre) / width
@@ -21,11 +22,11 @@ func rise(l: f64, centre: f64, width: f64) -> f64:
 
 ## Where luminance `l` (stops from grey) lands, before the monotonic fix.
 func raw_curve(settings: const Settings*, l: f64) -> f64:
-    let contrast = settings.contrast / 100.0
-    let highlights = settings.highlights / 100.0
-    let shadows = settings.shadows / 100.0
-    let whites = settings.whites / 100.0
-    let blacks = settings.blacks / 100.0
+    let contrast = settings.get(.contrast) / 100.0
+    let highlights = settings.get(.highlights) / 100.0
+    let shadows = settings.get(.shadows) / 100.0
+    let whites = settings.get(.whites) / 100.0
+    let blacks = settings.get(.blacks) / 100.0
     var out = l
     # Contrast steepens the curve about grey, gently far from it.
     out += 0.45 * contrast * l * bump(l, 0.0, 7.0)
@@ -58,25 +59,36 @@ pub func gain_at(gains: const f32[], l: f64) -> f64:
     let t = position - (f64)below
     return (f64)gains[below] * (1.0 - t) + (f64)gains[above] * t
 
+## Default settings with `which` set to `value`, and `other` to `second`.
+func changed(which: Parameter, value: f64, other: Parameter = .exposure, second: f64 = 0.0) -> Settings:
+    var out = defaults()
+    out.set(which, value)
+    out.set(other, second)
+    return out
+
 test "untouched settings leave tone alone; contrast steepens about grey":
-    var gains: f32[256]
-    fill(Settings(), gains)
+    var gains: f32[1024]
+    fill(defaults(), gains)
     for gain in gains:
         assert(gain == 0.0f32)
-    fill(Settings(contrast = 100.0), gains)
+    fill(changed(.contrast, 100.0), gains)
     assert(math.abs(gain_at(gains, 0.0)) < 0.01)
     assert(gain_at(gains, 2.0) > 0.5 and gain_at(gains, -2.0) < -0.5)
-    fill(Settings(shadows = 100.0), gains)
+    fill(changed(.shadows, 100.0), gains)
     assert(gain_at(gains, -3.0) > 1.4 and gain_at(gains, 3.0) < 0.1)
-    fill(Settings(highlights = -100.0, blacks = 100.0), gains)
+    fill(changed(.highlights, -100.0, .blacks, 100.0), gains)
     assert(gain_at(gains, 2.0) < -1.4)
 
 test "the curve never folds back":
-    var gains: f32[256]
-    fill(Settings(contrast = -100.0, highlights = -100.0, whites = -100.0, shadows = 100.0, blacks = 100.0), gains)
+    var gains: f32[1024]
+    var extreme = changed(.contrast, -100.0, .highlights, -100.0)
+    extreme.set(.whites, -100.0)
+    extreme.set(.shadows, 100.0)
+    extreme.set(.blacks, 100.0)
+    fill(extreme, gains)
     var previous = -1.0e9
-    for at in 0..<(usize)256:
-        let l = tone_low + (f64)at * (tone_high - tone_low) / 255.0
+    for at in 0..<(usize)1024:
+        let l = tone_low + (f64)at * (tone_high - tone_low) / 1023.0
         let out = l + (f64)gains[at]
         assert(out > previous)
         previous = out

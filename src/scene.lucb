@@ -52,13 +52,13 @@ pub struct Scene:
     ## white balance and camera color for raws, then exposure.
     pub func matrix(settings: const Settings*) -> f64[9]!:
         let to_working = view.display_to_working()
-        let exposure = math.exp2(settings.exposure)
+        let exposure = math.exp2(settings.get(.exposure))
         if not self.is_raw():
             var out = to_working
             for at in 0..<(usize)9:
                 out[at] *= exposure
             return out
-        let look = try raw.rendering(self.data, settings.temperature, settings.tint if settings.temperature > 0.0 else 0.0)
+        let look = try raw.rendering(self.data, settings.get(.temperature), settings.get(.tint) if settings.get(.temperature) > 0.0 else 0.0)
         # Values balanced as shot, rebalanced: times the new multipliers over the old.
         var balanced = look.to_srgb
         for row in 0..<(usize)3:
