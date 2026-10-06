@@ -1,0 +1,81 @@
+## The develop on the CPU: the same stages as the renderer's shader
+## (shaders/develop.frag) — matrix, tone, Oklab color, view — with the view
+## evaluated exactly instead of through its table. Export uses it, and the tests
+## hold the GPU to it.
+import interop
+import memory
+from luce_std import math
+from luce_color import transfer
+from settings import Settings, View, clamped
+from scene import Scene
+from picture import Picture, adopt
+import scene
+import tone
+import view
+
+## AP1's luminance weights, and AP1 (D60) to and from Oklab's LMS (D65): the
+## shader's constants, row-major here.
+let ap1_luminance: f64[3] = [0.272228717, 0.674081766, 0.053689517]
+let to_lms: f64[9] = [0.631694013, 0.348861603, 0.019335190, 0.270070163, 0.630951453, 0.099005298, 0.098790269, 0.185321549, 0.716367829]
+let from_lms: f64[9] = [2.068802739, -1.175172287, 0.106575960, -0.876328522, 2.149760160, -0.273454027, -0.058594228, -0.394073107, 1.451975109]
+
+func apply(m: f64[9], v: f64[3]) -> f64[3]:
+    return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]
+
+## One pixel's develop from scene values `camera` to display-linear sRGB.
+func develop_pixel(camera: f64[3], matrix: f64[9], gains: const f32[], settings: const Settings*, shown: View, to_display: f64[9]) -> f64[3]:
+    var c = apply(matrix, camera)
+    for at in 0..<(usize)3:
+        c[at] = math.max(c[at], 0.0)
+    let y = c[0] * ap1_luminance[0] + c[1] * ap1_luminance[1] + c[2] * ap1_luminance[2]
+    if y > 1.0e-10:
+        let gain = math.exp2(tone.gain_at(gains, math.log2(y / 0.18)))
+        for at in 0..<(usize)3:
+            c[at] *= gain
+    let vibrance = settings.vibrance / 100.0
+    let saturation = settings.saturation / 100.0
+    if vibrance != 0.0 or saturation != 0.0:
+        let lms = apply(to_lms, c)
+        let l_ = math.cbrt(lms[0])
+        let m_ = math.cbrt(lms[1])
+        let s_ = math.cbrt(lms[2])
+        let l = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_
+        var a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_
+        var b = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_
+        let chroma = math.sqrt(a * a + b * b)
+        let t = math.clamp(chroma / 0.2, 0.0, 1.0)
+        let vivid = t * t * (3.0 - 2.0 * t)
+        let scale = math.max(0.0, (1.0 + saturation) * (1.0 + vibrance * (1.0 - vivid)))
+        a *= scale
+        b *= scale
+        let l2 = l + 0.3963377774 * a + 0.2158037573 * b
+        let m2 = l - 0.1055613458 * a - 0.0638541728 * b
+        let s2 = l - 0.0894841775 * a - 1.2914855480 * b
+        c = apply(from_lms, [l2 * l2 * l2, m2 * m2 * m2, s2 * s2 * s2])
+    return view.display(shown, c, to_display)
+
+## `scene` developed with `settings` into an 8-bit sRGB picture of its size.
+pub func render(source: const Scene*, settings: Settings) -> Picture!:
+    let checked = clamped(settings)
+    let matrix = try source.matrix(&checked)
+    var gains: f32[256]
+    tone.fill(checked, gains)
+    let shown = (View)checked.view
+    let to_display = view.working_to_display()
+    var out = try Picture.create((usize)source.width(), (usize)source.height())
+    errdefer out.close()
+    let pixels = out.bytes()
+    for at in 0..<(usize)(source.width() * source.height()):
+        let shown_color = develop_pixel(source.value_at(at), matrix, gains, &checked, shown, to_display)
+        pixels[at * 4] = transfer.srgb_byte(shown_color[0])
+        pixels[at * 4 + 1] = transfer.srgb_byte(shown_color[1])
+        pixels[at * 4 + 2] = transfer.srgb_byte(shown_color[2])
+        pixels[at * 4 + 3] = 255
+    return out
+
+## The photo at `path` developed with `settings` at most `edge` pixels on its
+## longer side, for Luce: what an exporter or a thumbnail maker calls.
+pub func render_file(path: str, settings: Settings, edge: i64) -> interop.Reference[Picture]!:
+    var opened = try scene.open(path, (usize)edge)
+    defer opened.close()
+    return try adopt(try render(&opened, settings))

@@ -1,0 +1,82 @@
+## The scene tone curve: contrast and the four tonal ranges (highlights, shadows,
+## whites, blacks) as one function of a pixel's luminance in stops from middle
+## grey, L = log2(Y / 0.18). The curve answers a gain in stops that multiplies
+## the pixel's red, green and blue alike, so tone never shifts a hue. It is
+## sampled into a table the renderer reads (and the CPU path interpolates the
+## same table, so both agree).
+from luce_std import math
+from settings import Settings
+
+## The stops the table covers, from middle grey, and its sample count.
+pub let tone_low: f64 = -14.0
+pub let tone_high: f64 = 10.0
+pub let tone_samples: usize = 256
+
+func bump(l: f64, centre: f64, width: f64) -> f64:
+    let d = (l - centre) / width
+    return math.exp(-d * d)
+
+func rise(l: f64, centre: f64, width: f64) -> f64:
+    return 1.0 / (1.0 + math.exp(-(l - centre) / width))
+
+## Where luminance `l` (stops from grey) lands, before the monotonic fix.
+func raw_curve(settings: const Settings*, l: f64) -> f64:
+    let contrast = settings.contrast / 100.0
+    let highlights = settings.highlights / 100.0
+    let shadows = settings.shadows / 100.0
+    let whites = settings.whites / 100.0
+    let blacks = settings.blacks / 100.0
+    var out = l
+    # Contrast steepens the curve about grey, gently far from it.
+    out += 0.45 * contrast * l * bump(l, 0.0, 7.0)
+    out += 1.6 * highlights * bump(l, 2.0, 1.6)
+    out += 1.6 * shadows * bump(l, -3.0, 2.2)
+    out += 1.2 * whites * rise(l, 2.5, 0.8)
+    out += 1.4 * blacks * (1.0 - rise(l, -5.5, 1.0))
+    return out
+
+## Fill `gains` (tone_samples values) with the curve's gain in stops at evenly
+## spaced luminances from tone_low to tone_high. The curve is kept rising (at
+## least a tenth of a stop out per stop in), so no setting inverts tones.
+pub func fill(settings: Settings, gains: f32[]):
+    let step = (tone_high - tone_low) / (f64)(gains.length - 1)
+    var previous = -1.0e9
+    for at in 0..<gains.length:
+        let l = tone_low + (f64)at * step
+        var out = raw_curve(&settings, l)
+        if out < previous + 0.1 * step:
+            out = previous + 0.1 * step
+        previous = out
+        gains[at] = (f32)(out - l)
+
+## The gain in stops `gains` gives luminance `l` (stops from grey), interpolated
+## as the GPU's linear filter does.
+pub func gain_at(gains: const f32[], l: f64) -> f64:
+    let position = math.clamp((l - tone_low) / (tone_high - tone_low), 0.0, 1.0) * (f64)(gains.length - 1)
+    let below = (usize)math.floor(position)
+    let above = below + 1 if below + 1 < gains.length else below
+    let t = position - (f64)below
+    return (f64)gains[below] * (1.0 - t) + (f64)gains[above] * t
+
+test "untouched settings leave tone alone; contrast steepens about grey":
+    var gains: f32[256]
+    fill(Settings(), gains)
+    for gain in gains:
+        assert(gain == 0.0f32)
+    fill(Settings(contrast = 100.0), gains)
+    assert(math.abs(gain_at(gains, 0.0)) < 0.01)
+    assert(gain_at(gains, 2.0) > 0.5 and gain_at(gains, -2.0) < -0.5)
+    fill(Settings(shadows = 100.0), gains)
+    assert(gain_at(gains, -3.0) > 1.4 and gain_at(gains, 3.0) < 0.1)
+    fill(Settings(highlights = -100.0, blacks = 100.0), gains)
+    assert(gain_at(gains, 2.0) < -1.4)
+
+test "the curve never folds back":
+    var gains: f32[256]
+    fill(Settings(contrast = -100.0, highlights = -100.0, whites = -100.0, shadows = 100.0, blacks = 100.0), gains)
+    var previous = -1.0e9
+    for at in 0..<(usize)256:
+        let l = tone_low + (f64)at * (tone_high - tone_low) / 255.0
+        let out = l + (f64)gains[at]
+        assert(out > previous)
+        previous = out

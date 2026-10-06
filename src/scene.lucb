@@ -1,0 +1,172 @@
+## A photo's scene: its light as the develop starts from it, at a viewer's size.
+## A raw is developed once with luce-raw's `camera` option (demosaiced, levelled,
+## balanced as shot, no color matrix) and kept with its file, so a new white
+## balance is only a new matrix (luce-raw's `rendering`). Other files keep their
+## preview, linearized from sRGB. Either way the renderer turns the scene's values
+## into ACES AP1 with one matrix that also carries the exposure.
+import c
+import memory
+import strings
+from luce_std import files
+from luce_std import math
+from luce_color import transfer
+from luce_raw import raw
+from settings import Settings
+import source
+import view
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+
+pub struct Scene:
+    ## The raw file's bytes (owned), or empty for other files.
+    var data: u8[]
+    var columns: usize
+    var rows: usize
+    ## RGBA half floats, rows packed, top-down, upright.
+    var pixels: f16[]
+    ## The as-shot white balance's multipliers, its temperature and tint.
+    var as_shot: f64[3]
+    pub var shot_temperature: f64
+    pub var shot_tint: f64
+
+    pub func width() -> i64:
+        return (i64)self.columns
+
+    pub func height() -> i64:
+        return (i64)self.rows
+
+    ## Whether the scene is a camera raw, whose white balance the settings choose.
+    pub func is_raw() -> bool:
+        return self.data.length > 0
+
+    ## The scene values of pixel `at` (rows packed).
+    pub func value_at(at: usize) -> f64[3]:
+        return [(f64)self.pixels[at * 4], (f64)self.pixels[at * 4 + 1], (f64)self.pixels[at * 4 + 2]]
+
+    ## The pixels as bytes, for a texture upload.
+    pub func bytes() -> const u8[]:
+        return u8[]((u8*)self.pixels.data, self.pixels.length * 2)
+
+    ## The matrix, row-major, from the scene's values into AP1 for `settings`:
+    ## white balance and camera color for raws, then exposure.
+    pub func matrix(settings: const Settings*) -> f64[9]!:
+        let to_working = view.display_to_working()
+        let exposure = math.exp2(settings.exposure)
+        if not self.is_raw():
+            var out = to_working
+            for at in 0..<(usize)9:
+                out[at] *= exposure
+            return out
+        let look = try raw.rendering(self.data, settings.temperature, settings.tint if settings.temperature > 0.0 else 0.0)
+        # Values balanced as shot, rebalanced: times the new multipliers over the old.
+        var balanced = look.to_srgb
+        for row in 0..<(usize)3:
+            for column in 0..<(usize)3:
+                balanced[row * 3 + column] *= look.balance.multipliers[column] / self.as_shot[column] * look.gain * exposure
+        return multiply(to_working, balanced)
+
+    pub func close():
+        if self.data.length > 0:
+            free(self.data) in memory.heap
+        if self.pixels.length > 0:
+            free(self.pixels) in memory.heap
+        var no_bytes: u8[]
+        var no_pixels: f16[]
+        self.data = no_bytes
+        self.pixels = no_pixels
+        self.columns = 0
+        self.rows = 0
+
+func multiply(a: f64[9], b: f64[9]) -> f64[9]:
+    var out: f64[9]
+    for row in 0..<(usize)3:
+        for column in 0..<(usize)3:
+            out[row * 3 + column] = a[row * 3] * b[column] + a[row * 3 + 1] * b[3 + column] + a[row * 3 + 2] * b[6 + column]
+    return out
+
+## The photo at `path` as a scene no larger than `edge` on its longer side.
+pub func open(path: str, edge: usize) -> Scene!:
+    let terminated = try strings.copy(path)
+    defer strings.release(terminated)
+    let read = try files.read((c.str)terminated)
+    defer read.release()
+    return try from_bytes(read.value, edge)
+
+## The photo whose file is `data` as a scene (see `open`).
+pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
+    if edge < 16:
+        error(invalid, "a scene needs a size")
+    if raw.detect(data):
+        return try raw_scene(data, edge)
+    var picture = try source.preview(data, edge)
+    defer picture.close()
+    var scene = Scene(columns = (usize)picture.width(), rows = (usize)picture.height(), as_shot = [1.0, 1.0, 1.0], shot_temperature = 6500.0)
+    scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
+    var decode: f32[256]
+    for level in 0..<(usize)256:
+        decode[level] = (f32)transfer.srgb_decode((f64)level / 255.0)
+    let bytes = picture.pixels()
+    for at in 0..<scene.columns * scene.rows * 4:
+        scene.pixels[at] = (f16)(1.0f32 if at % 4 == 3 else decode[bytes[at]])
+    return scene
+
+## The full-size camera values a develop delivers, gathered from its tiles.
+struct Gathered:
+    var pixels: f32[]
+    var width: usize
+
+func gather(context: void*?, tile: const raw.Tile*) -> !:
+    let into = (Gathered*)(context else return)
+    for row in 0..<tile.height:
+        for column in 0..<tile.width:
+            let from_at = (row * tile.width + column) * 3
+            let to_at = ((tile.y + row) * into.width + tile.x + column) * 3
+            into.pixels[to_at] = tile.pixels[from_at]
+            into.pixels[to_at + 1] = tile.pixels[from_at + 1]
+            into.pixels[to_at + 2] = tile.pixels[from_at + 2]
+
+func raw_scene(data: const u8[], edge: usize) -> Scene!:
+    # Half size first: each 2×2 filter cell is a pixel, no demosaic needed, and a
+    # viewer's fit is rarely larger.
+    let options = raw.Options(camera = true, half = true, exposure = false, quality = .fast)
+    let (width, height) = try raw.dimensions(data, options)
+    var gathered = Gathered(width = width)
+    gathered.pixels = try new f32[width * height * 3] in memory.heap
+    defer free(gathered.pixels) in memory.heap
+    try raw.develop(data, options, (void*)&gathered, gather)
+    let shot = try raw.rendering(data)
+    var scene = Scene(as_shot = shot.balance.multipliers, shot_temperature = shot.balance.temperature, shot_tint = shot.balance.tint)
+    errdefer scene.close()
+    scene.data = try new u8[data.length] --- in memory.heap
+    memory.copy(scene.data, data, data.length)
+    # Average down to the edge in linear light.
+    let longer = width if width > height else height
+    let columns = width * edge // longer if longer > edge else width
+    let rows = height * edge // longer if longer > edge else height
+    scene.columns = columns if columns > 0 else 1
+    scene.rows = rows if rows > 0 else 1
+    scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
+    for y in 0..<scene.rows:
+        let y0 = y * height // scene.rows
+        let y1 = math_above(y0, (y + 1) * height // scene.rows)
+        for x in 0..<scene.columns:
+            let x0 = x * width // scene.columns
+            let x1 = math_above(x0, (x + 1) * width // scene.columns)
+            var sum: f32[3]
+            for sy in y0..<y1:
+                for sx in x0..<x1:
+                    let at = (sy * width + sx) * 3
+                    sum[0] += gathered.pixels[at]
+                    sum[1] += gathered.pixels[at + 1]
+                    sum[2] += gathered.pixels[at + 2]
+            let weight = 1.0f32 / (f32)((x1 - x0) * (y1 - y0))
+            let out = (y * scene.columns + x) * 4
+            scene.pixels[out] = (f16)(sum[0] * weight)
+            scene.pixels[out + 1] = (f16)(sum[1] * weight)
+            scene.pixels[out + 2] = (f16)(sum[2] * weight)
+            scene.pixels[out + 3] = (f16)1.0f32
+    return scene
+
+func math_above(low: usize, value: usize) -> usize:
+    return value if value > low else low + 1

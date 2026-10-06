@@ -1,0 +1,269 @@
+## The renderer: a viewer's photo developed on the GPU every frame, so a slider
+## moves the picture as it moves. A scene loads on a thread of the renderer's
+## own (the newest asked for wins), its pixels go up once, and each draw is one
+## pass of shaders/develop.frag with the settings in its uniforms and two tables:
+## the tone curve, refilled when tone settings change, and the view transform,
+## baked when the view changes.
+import interop
+import memory
+import ownership
+import strings
+import sync
+import thread
+from luce_gpu import gpu
+from luce_std import math
+from settings import Settings, View, clamped
+from scene import Scene
+import scene
+import tone
+import view
+from shaders import develop_frag_words, develop_frag_msl
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+
+## What the window and the loading thread share, guarded by `lock`.
+struct Loading:
+    var lock: sync.Mutex
+    var wake: sync.Condition
+    ## The file asked for (a strings.copy, or empty) and the size it loads at.
+    var wanted: str
+    var edge: usize
+    var serial: u64
+    ## The newest scene loaded and the request it answers; or why it failed.
+    var done: Scene
+    var done_serial: u64
+    var failure: u8[256]
+    var failure_length: usize
+    var stopping: bool
+
+func load(context: void*?):
+    let loading = (Loading*)(context else return)
+    var served: u64 = 0
+    while true:
+        loading.lock.lock()
+        while loading.serial == served and not loading.stopping:
+            loading.wake.wait(&loading.lock)
+        if loading.stopping:
+            loading.lock.unlock()
+            return
+        served = loading.serial
+        let path = strings.copy(loading.wanted) catch failure:
+            loading.lock.unlock()
+            continue
+        let edge = loading.edge
+        loading.lock.unlock()
+        defer strings.release(path)
+        var opened: Scene
+        var message = ""
+        opened = scene.open(path, edge) catch failure:
+            message = failure.message
+            recover Scene()
+        loading.lock.lock()
+        if served == loading.serial:
+            loading.done.close()
+            loading.done = opened
+            loading.done_serial = served
+            let length = message.length if message.length < 256 else 256
+            memory.copy(loading.failure[..<length], message.bytes[..<length], length)
+            loading.failure_length = length
+        else:
+            opened.close()
+        loading.lock.unlock()
+
+pub struct Renderer:
+    var loading: Loading*?
+    var worker: thread.Handle
+    ## The scene shown, and whether its pixels still need to go up.
+    var shown: Scene
+    var shown_serial: u64
+    var upload: bool
+    var settings: Settings
+    var tone_stale: bool
+    var view_baked: i64
+    ## Made on the first draw, on the window's device.
+    var device: gpu.Device?
+    var shader: gpu.Shader?
+    var pipeline: gpu.Pipeline?
+    var scene_texture: gpu.Texture?
+    var tone_texture: gpu.Texture?
+    var view_texture: gpu.Texture?
+    var problem: u8[256]
+    var problem_length: usize
+
+    ## Load the photo at `path` at most `edge` pixels on its longer side; the
+    ## current one stays shown until it is in (see `poll`).
+    pub func open(path: str, edge: i64) -> !:
+        let loading = self.loading else error(invalid, "the renderer is closed")
+        if edge < 16:
+            error(invalid, "a renderer needs a size")
+        let copied = try strings.copy(path)
+        loading.lock.lock()
+        if loading.wanted.length > 0:
+            strings.release(loading.wanted)
+        loading.wanted = copied
+        loading.edge = (usize)edge
+        loading.serial += 1
+        loading.lock.unlock()
+        loading.wake.signal()
+
+    ## Show nothing.
+    pub func clear():
+        self.shown.close()
+        self.upload = false
+        if let held = self.loading:
+            held.lock.lock()
+            held.serial += 1
+            held.lock.unlock()
+
+    ## Take in a scene that finished loading; whether one did (redraw then). A
+    ## failed load shows nothing and answers true too; `failure` says why.
+    pub func poll() -> bool:
+        let loading = self.loading else return false
+        loading.lock.lock()
+        defer loading.lock.unlock()
+        if loading.done_serial == 0 or loading.done_serial == self.shown_serial or loading.done_serial != loading.serial:
+            return false
+        self.shown.close()
+        self.shown = loading.done
+        loading.done = Scene()
+        self.shown_serial = loading.done_serial
+        memory.copy(self.problem[..<loading.failure_length], loading.failure[..<loading.failure_length], loading.failure_length)
+        self.problem_length = loading.failure_length
+        self.upload = self.shown.width() > 0
+        return true
+
+    ## Why the last load failed, or "".
+    pub func failure() -> str:
+        return (str)self.problem[..<self.problem_length]
+
+    ## Whether a photo is shown, its size, and its as-shot white balance.
+    pub func has_image() -> bool:
+        return self.shown.width() > 0
+    pub func width() -> i64:
+        return self.shown.width()
+    pub func height() -> i64:
+        return self.shown.height()
+    pub func is_raw() -> bool:
+        return self.shown.is_raw()
+    pub func shot_temperature() -> f64:
+        return self.shown.shot_temperature
+    pub func shot_tint() -> f64:
+        return self.shown.shot_tint
+
+    ## Develop with `settings` from the next draw on.
+    pub func set_settings(settings: Settings):
+        let next = clamped(settings)
+        if next.contrast != self.settings.contrast or next.highlights != self.settings.highlights or next.shadows != self.settings.shadows or next.whites != self.settings.whites or next.blacks != self.settings.blacks:
+            self.tone_stale = true
+        self.settings = next
+
+    ## Draw the photo into `x`, `y`, `width` × `height` points of `target`.
+    pub func draw(target: interop.View[gpu.RenderTarget], x: f64, y: f64, width: f64, height: f64) -> !:
+        if not self.has_image() or width <= 0.0 or height <= 0.0:
+            return
+        let checked = try target.get()
+        try self.prepare(checked)
+        let pipeline = self.pipeline else return
+        let scene_texture = self.scene_texture else return
+        let tone_texture = self.tone_texture else return
+        let view_texture = self.view_texture else return
+        let place = try checked.placement()
+        let size = try checked.size()
+        let scale = size.pixel_width / size.width if size.width > 0.0 else 1.0
+        let m = try self.shown.matrix(&self.settings)
+        var uniforms: f32[20] = [
+            (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
+            (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
+            (f32)(self.settings.vibrance / 100.0), (f32)(self.settings.saturation / 100.0), 0.0f32, 0.0f32]
+        let images: gpu.Texture[3] = [scene_texture, tone_texture, view_texture]
+        try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 80), images, gpu.Filter.linear)
+
+    ## The pipeline and the textures, made or refreshed for what changed.
+    func prepare(target: const gpu.RenderTarget*) -> !:
+        if self.device == none:
+            let device = try gpu.device_of(target)
+            var shader = try gpu.Shader.create(device, develop_frag_words, develop_frag_msl)
+            errdefer shader.destroy()
+            let pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace)
+            self.device = device
+            self.shader = shader
+            self.pipeline = pipeline
+        let device = self.device else return
+        if self.upload:
+            if let old = self.scene_texture:
+                var gone = old
+                gone.destroy()
+            self.scene_texture = none
+            var texture = try gpu.Texture.create(device, (u32)self.shown.width(), (u32)self.shown.height(), gpu.Format.rgba16_float)
+            errdefer texture.destroy()
+            try texture.upload(self.shown.bytes())
+            self.scene_texture = texture
+            self.upload = false
+        if self.tone_texture == none or self.tone_stale:
+            var gains: f32[256]
+            tone.fill(self.settings, gains)
+            var texels: f16[1024]
+            for at in 0..<(usize)256:
+                texels[at * 4] = (f16)gains[at]
+                texels[at * 4 + 3] = (f16)1.0f32
+            if self.tone_texture == none:
+                self.tone_texture = try gpu.Texture.create(device, 256, 1, gpu.Format.rgba16_float)
+            let held = self.tone_texture else return
+            try held.upload(u8[]((u8*)&texels[0], 2048))
+            self.tone_stale = false
+        if self.view_texture == none or self.view_baked != self.settings.view:
+            let n = view.lut_size
+            let table = try new f16[n * n * n * 4] --- in memory.heap
+            defer free(table) in memory.heap
+            view.bake((View)self.settings.view, table)
+            if self.view_texture == none:
+                self.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
+            let held = self.view_texture else return
+            try held.upload(u8[]((u8*)table.data, table.length * 2))
+            self.view_baked = self.settings.view
+
+    ## Stop the loading thread and let every texture go.
+    pub func close():
+        if let loading = self.loading:
+            loading.lock.lock()
+            loading.stopping = true
+            loading.lock.unlock()
+            loading.wake.broadcast()
+            self.worker.join() catch failure:
+                trap("the renderer's loading thread could not be joined")
+            loading.done.close()
+            if loading.wanted.length > 0:
+                strings.release(loading.wanted)
+            free(loading) in memory.heap
+        self.loading = none
+        self.shown.close()
+        for slot in [&self.scene_texture, &self.tone_texture, &self.view_texture]:
+            if let held = *slot:
+                var gone = held
+                gone.destroy()
+            *slot = none
+        if let held = self.pipeline:
+            var gone = held
+            gone.destroy()
+        if let held = self.shader:
+            var gone = held
+            gone.destroy()
+        self.pipeline = none
+        self.shader = none
+        self.device = none
+
+    func trace(visit: func(ownership.Object*, void*) -> unit, context: void*):
+        _ = self
+        _ = visit
+        _ = context
+
+pub let renderer_type: interop.Type[Renderer] = interop.Type[Renderer]("Renderer", Renderer.close, Renderer.trace, closeable = true, main_thread = true)
+
+## A renderer for Luce, its loading thread started.
+pub func start() -> interop.Reference[Renderer]!:
+    let loading = try new Loading in memory.heap
+    errdefer free(loading) in memory.heap
+    let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
+    let renderer = try new Renderer(loading = loading, worker = worker, settings = Settings(view = (i64)View.standard), view_baked = -1) in memory.heap
+    return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

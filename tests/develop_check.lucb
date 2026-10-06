@@ -1,0 +1,27 @@
+## Develop each file on the command line on the CPU, at 1024 px, with the
+## settings given first ("" for the defaults), into OUTPUT_DIR/<name>.jpg.
+import time
+from luce_std import paths
+import strings
+from luce_develop import scene
+from luce_develop import process
+from luce_develop import settings
+
+pub func main(arguments: str[]) -> i32!:
+    if arguments.length < 4:
+        print("usage: develop_check OUTPUT_DIR SETTINGS FILE...")
+        return 2
+    let wanted = settings.parse(arguments[2])
+    for path in arguments[3..]:
+        let started = time.now()
+        var opened = try scene.open(path, 1024)
+        defer opened.close()
+        let loaded = (time.now() - started) // 1000000
+        var picture = try process.render(&opened, wanted)
+        defer picture.close()
+        let spent = (time.now() - started) // 1000000
+        var buffer: u8[1024]
+        let target = try strings.format(buffer, f"{arguments[1]}/{paths.base(path)}.jpg")
+        try picture.save_jpeg(target, 90)
+        print(f"ok    {paths.base(path)}  {picture.width()}x{picture.height()}  as shot {(i64)opened.shot_temperature} K  load {loaded} ms  total {spent} ms")
+    return 0

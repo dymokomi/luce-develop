@@ -1,0 +1,208 @@
+## A photo's develop settings: every parameter of the pipeline, its default and
+## range, and a short text form ("exposure=0.7;contrast=20") that names only
+## what differs from the defaults, for catalogs and copy and paste. A Settings
+## is a plain value; Luce reads and writes its fields directly.
+import interop
+from luce_std import math
+from luce_std.collections import Buffer
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+
+## How scene light becomes display light.
+pub enum View as i64:
+    ## The ACES 2.0 SDR output transform (luce-color).
+    aces = 0
+    ## A neutral filmic curve that keeps hues and rolls highlights to white.
+    standard = 1
+    ## No tone mapping: scene values clipped to the display, for checking.
+    linear = 2
+
+pub struct Settings:
+    ## White balance: kelvin and Adobe-style tint; temperature 0 keeps the
+    ## camera's as-shot balance (and ignores tint).
+    pub var temperature: f64
+    pub var tint: f64
+    ## Exposure in stops.
+    pub var exposure: f64
+    ## Tone, each -100..100: contrast about middle grey, then the tonal ranges.
+    pub var contrast: f64
+    pub var highlights: f64
+    pub var shadows: f64
+    pub var whites: f64
+    pub var blacks: f64
+    ## Color, each -100..100, in Oklab: vibrance favors the colors that have
+    ## little; saturation scales every color's chroma.
+    pub var vibrance: f64
+    pub var saturation: f64
+    ## The view transform (View).
+    pub var view: i64
+
+## One setting's name, range and default, in text-form order.
+struct Field:
+    let name: str
+    let low: f64
+    let high: f64
+
+let fields: Field[11] = [
+    Field("temperature", 0.0, 50000.0), Field("tint", -150.0, 150.0), Field("exposure", -6.0, 6.0),
+    Field("contrast", -100.0, 100.0), Field("highlights", -100.0, 100.0), Field("shadows", -100.0, 100.0),
+    Field("whites", -100.0, 100.0), Field("blacks", -100.0, 100.0), Field("vibrance", -100.0, 100.0),
+    Field("saturation", -100.0, 100.0), Field("view", 0.0, 2.0)]
+
+## The settings a photo starts with: as shot, untouched, the Standard view
+## (ACES 2.0 becomes the default once luce-color has it).
+pub func defaults() -> Settings:
+    return Settings(view = (i64)View.standard)
+
+func read(settings: const Settings*, at: usize) -> f64:
+    return match at:
+        0 => settings.temperature
+        1 => settings.tint
+        2 => settings.exposure
+        3 => settings.contrast
+        4 => settings.highlights
+        5 => settings.shadows
+        6 => settings.whites
+        7 => settings.blacks
+        8 => settings.vibrance
+        9 => settings.saturation
+        _ => (f64)settings.view
+
+func write(settings: Settings*, at: usize, value: f64):
+    match at:
+        0: settings.temperature = value
+        1: settings.tint = value
+        2: settings.exposure = value
+        3: settings.contrast = value
+        4: settings.highlights = value
+        5: settings.shadows = value
+        6: settings.whites = value
+        7: settings.blacks = value
+        8: settings.vibrance = value
+        9: settings.saturation = value
+        _: settings.view = (i64)value
+
+## `settings` with every value inside its range (a temperature below 1667 K,
+## other than 0, becomes 1667).
+pub func clamped(settings: Settings) -> Settings:
+    var out = settings
+    for at in 0..<fields.length:
+        let value = read(&out, at)
+        write(&out, at, math.clamp(value if math.is_finite(value) else 0.0, fields[at].low, fields[at].high))
+    if out.temperature > 0.0 and out.temperature < 1667.0:
+        out.temperature = 1667.0
+    return out
+
+## The text form of `settings`: name=value pairs for what differs from the
+## defaults, separated by semicolons; "" when nothing does.
+pub func text_of(settings: Settings, out: Buffer*) -> !:
+    out.clear()
+    let base = defaults()
+    for at in 0..<fields.length:
+        let value = read(&settings, at)
+        if value == read(&base, at):
+            continue
+        if out.length() > 0:
+            try out.put_byte(';')
+        try out.put_text(fields[at].name)
+        try out.put_byte('=')
+        try put_decimal(out, value)
+
+## The text form of `settings`, for Luce.
+pub func encode(settings: Settings) -> interop.Owned[str]!:
+    var out: Buffer
+    defer out.destroy()
+    try text_of(settings, &out)
+    return try interop.copy_text(out.text())
+
+## Settings from their text form; unknown names and malformed pairs are passed
+## over, so text from a newer version still opens.
+pub func parse(text: str) -> Settings:
+    var out = defaults()
+    let bytes = text.bytes
+    var first: usize = 0
+    while first < bytes.length:
+        var end = first
+        while end < bytes.length and bytes[end] != ';':
+            end += 1
+        let pair = bytes[first..<end]
+        first = end + 1
+        var equals: usize = 0
+        while equals < pair.length and pair[equals] != '=':
+            equals += 1
+        if equals == pair.length:
+            continue
+        let name = (str)pair[..<equals]
+        let value = decimal((str)pair[equals + 1..]) else continue
+        for at in 0..<fields.length:
+            if fields[at].name == name:
+                write(&out, at, value)
+    return clamped(out)
+
+## `value` with up to four decimals, trailing zeros dropped.
+func put_decimal(out: Buffer*, value: f64) -> !:
+    let scaled = math.round(math.abs(value) * 10000.0)
+    if value < 0.0 and scaled > 0.0:
+        try out.put_byte('-')
+    let whole = (i64)(scaled / 10000.0)
+    var fraction = (i64)scaled - whole * 10000
+    try out.put_number(whole)
+    if fraction == 0:
+        return
+    try out.put_byte('.')
+    var digits: u8[4]
+    for at in 0..<(usize)4:
+        digits[3 - at] = (u8)(fraction % 10) + '0'
+        fraction = fraction // 10
+    var count: usize = 4
+    while digits[count - 1] == '0':
+        count -= 1
+    try out.put(digits[..<count])
+
+## A decimal number: optional sign, digits, optional fraction; none otherwise.
+func decimal(text: str) -> f64?:
+    let bytes = text.bytes
+    if bytes.length == 0:
+        return none
+    var at: usize = 0
+    var sign = 1.0
+    if bytes[0] == '-':
+        sign = -1.0
+        at = 1
+    # Digits as one integer, divided once: 0.75 reads back exactly as written.
+    var whole: i64 = 0
+    var scale = 1.0
+    var digits = 0
+    while at < bytes.length and bytes[at] >= '0' and bytes[at] <= '9' and digits < 15:
+        whole = whole * 10 + (i64)(bytes[at] - '0')
+        at += 1
+        digits += 1
+    if at < bytes.length and bytes[at] == '.':
+        at += 1
+        while at < bytes.length and bytes[at] >= '0' and bytes[at] <= '9' and digits < 15:
+            whole = whole * 10 + (i64)(bytes[at] - '0')
+            scale *= 10.0
+            at += 1
+            digits += 1
+    let value = (f64)whole / scale
+    if digits == 0 or at != bytes.length:
+        return none
+    return sign * value
+
+test "settings round-trip through their text, naming only changes":
+    var out: Buffer
+    defer out.destroy()
+    try text_of(defaults(), &out)
+    assert(out.length() == 0)
+    var changed = defaults()
+    changed.exposure = 0.75
+    changed.contrast = -20.0
+    changed.temperature = 5600.0
+    changed.view = (i64)View.linear
+    try text_of(changed, &out)
+    assert(out.text() == "temperature=5600;exposure=0.75;contrast=-20;view=2")
+    let back = parse(out.text())
+    assert(back.exposure == 0.75 and back.contrast == -20.0 and back.temperature == 5600.0 and back.view == 2)
+    let odd = parse("exposure=9;glow=3;contrast=;temperature=900;saturation=-12.5")
+    assert(odd.exposure == 6.0 and odd.contrast == 0.0 and odd.temperature == 1667.0 and odd.saturation == -12.5)
