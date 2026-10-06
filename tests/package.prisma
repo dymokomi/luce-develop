@@ -7,6 +7,10 @@ def package "luce-develop-tests" {
         str path = ".."
     }
 
+    def dependency "luce-gpu" {
+        str path = "../../luce-gpu"
+    }
+
     def dependency "luce-std" {
         str path = "../../luce-std"
     }

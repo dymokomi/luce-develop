@@ -90,6 +90,8 @@ pub struct Renderer:
     var view_texture: gpu.Texture?
     var problem: u8[256]
     var problem_length: usize
+    ## The format of the targets drawn into: the window's when none.
+    var format: gpu.Format?
 
     ## Load the photo at `path` at most `edge` pixels on its longer side; the
     ## current one stays shown until it is in (see `poll`).
@@ -106,6 +108,12 @@ pub struct Renderer:
         loading.serial += 1
         loading.lock.unlock()
         loading.wake.signal()
+
+    ## Show `shown` now, without loading: the renderer owns it from here.
+    pub func show(shown: Scene):
+        self.shown.close()
+        self.shown = shown
+        self.upload = self.shown.width() > 0
 
     ## Show nothing.
     pub func clear():
@@ -175,7 +183,7 @@ pub struct Renderer:
         var uniforms: f32[20] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
-            (f32)(self.settings.vibrance / 100.0), (f32)(self.settings.saturation / 100.0), 0.0f32, 0.0f32]
+            (f32)(self.settings.vibrance / 100.0), (f32)(self.settings.saturation / 100.0), (f32)self.settings.view, 0.0f32]
         let images: gpu.Texture[3] = [scene_texture, tone_texture, view_texture]
         try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 80), images, gpu.Filter.linear)
 
@@ -185,7 +193,7 @@ pub struct Renderer:
             let device = try gpu.device_of(target)
             var shader = try gpu.Shader.create(device, develop_frag_words, develop_frag_msl)
             errdefer shader.destroy()
-            let pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace)
+            let pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace, self.format)
             self.device = device
             self.shader = shader
             self.pipeline = pipeline
@@ -260,10 +268,18 @@ pub struct Renderer:
 
 pub let renderer_type: interop.Type[Renderer] = interop.Type[Renderer]("Renderer", Renderer.close, Renderer.trace, closeable = true, main_thread = true)
 
-## A renderer for Luce, its loading thread started.
-pub func start() -> interop.Reference[Renderer]!:
+## A renderer drawing into targets of `format` (the window's when none), its
+## loading thread started; the caller closes it.
+pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    let renderer = try new Renderer(loading = loading, worker = worker, settings = Settings(view = (i64)View.standard), view_baked = -1) in memory.heap
+    return Renderer(loading = loading, worker = worker, settings = Settings(view = (i64)View.standard), view_baked = -1, format = format)
+
+## A renderer for Luce, drawing into the window.
+pub func start() -> interop.Reference[Renderer]!:
+    var made = try create()
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1) in memory.heap catch failure:
+        made.close()
+        error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)
