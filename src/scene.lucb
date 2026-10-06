@@ -2,19 +2,21 @@
 ## upright (the file's orientation applied). A raw is developed once with
 ## luce-raw's `camera` option (demosaiced, levelled, balanced as shot, no color
 ## matrix), turned upright, and kept with its file, so a new white
-## balance is only a new matrix (luce-raw's `rendering`). Other files keep their
-## preview, linearized from sRGB. Either way the renderer turns the scene's values
-## into ACES AP1 with one matrix that also carries the exposure.
+## balance is only a new matrix (luce-raw's `rendering`). Other files are
+## display-referred: their pixels come in through the ACES view's inverse
+## (view.undisplay), as AP1 scene light the default view shows unchanged, white
+## as white. Either way the renderer turns the scene's values into ACES AP1 with
+## one matrix that also carries the exposure.
 import c
 import memory
 import strings
 from luce_std import files
 from luce_std import math
-from luce_color import transfer
 from luce_raw import raw
 from settings import Settings
 import source
 import view
+import parallel
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -24,7 +26,8 @@ pub struct Scene:
     var data: u8[]
     var columns: usize
     var rows: usize
-    ## RGBA half floats, rows packed, top-down, upright.
+    ## RGBA half floats, rows packed, top-down, upright: camera values balanced as
+    ## shot for raws, AP1 scene light for other files.
     var pixels: f16[]
     ## The as-shot white balance's multipliers, its temperature and tint.
     var as_shot: f64[3]
@@ -74,13 +77,11 @@ pub struct Scene:
     ## The matrix, row-major, from the scene's values into AP1 for `settings`:
     ## white balance and camera color for raws, then exposure.
     pub func matrix(settings: const Settings*) -> f64[9]!:
-        let to_working = view.display_to_working()
         let exposure = math.exp2(settings.get(.exposure))
         if not self.is_raw():
-            var out = to_working
-            for at in 0..<(usize)9:
-                out[at] *= exposure
-            return out
+            # Already AP1: only the exposure.
+            return [exposure, 0.0, 0.0, 0.0, exposure, 0.0, 0.0, 0.0, exposure]
+        let to_working = view.display_to_working()
         let look = try raw.rendering(self.data, settings.get(.temperature), settings.get(.tint) if settings.get(.temperature) > 0.0 else 0.0)
         # Values balanced as shot, rebalanced: times the new multipliers over the old.
         var balanced = look.to_srgb
@@ -163,13 +164,26 @@ pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
     defer picture.close()
     var scene = Scene(columns = (usize)picture.width(), rows = (usize)picture.height(), as_shot = [1.0, 1.0, 1.0], shot_temperature = 6500.0)
     scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
-    var decode: f32[256]
-    for level in 0..<(usize)256:
-        decode[level] = (f32)transfer.srgb_decode((f64)level / 255.0)
-    let bytes = picture.pixels()
-    for at in 0..<scene.columns * scene.rows * 4:
-        scene.pixels[at] = (f16)(1.0f32 if at % 4 == 3 else decode[bytes[at]])
+    errdefer free(scene.pixels) in memory.heap
+    var job = Undisplay(bytes = picture.pixels(), pixels = scene.pixels, columns = scene.columns)
+    try parallel.parallel(scene.rows, (void*)&job, undisplay_row)
     return scene
+
+## A display-referred picture's rows into scene light, in parallel.
+struct Undisplay:
+    var bytes: const u8[]
+    var pixels: f16[]
+    var columns: usize
+
+func undisplay_row(context: void*, row: usize) -> !:
+    let job = (Undisplay*)context
+    for column in 0..<job.columns:
+        let at = (row * job.columns + column) * 4
+        let scene = view.undisplay((f64)job.bytes[at] / 255.0, (f64)job.bytes[at + 1] / 255.0, (f64)job.bytes[at + 2] / 255.0)
+        job.pixels[at] = (f16)scene[0]
+        job.pixels[at + 1] = (f16)scene[1]
+        job.pixels[at + 2] = (f16)scene[2]
+        job.pixels[at + 3] = (f16)1.0f32
 
 ## The full-size camera values a develop delivers, gathered from its tiles.
 struct Gathered:

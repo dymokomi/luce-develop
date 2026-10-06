@@ -12,12 +12,21 @@
 ## its ratios (so hues hold), colors out of the display gamut pulled toward their
 ## luminance, and highlights that run to white as they pass the shoulder.
 ## Linear: the scene clipped to the display, for checking.
+##
+## Display-referred pictures (JPEG, PNG, TIFF, HEIC) come into the scene through
+## the ACES view's inverse (`undisplay`, luce-color's inverse output transform,
+## with the lift taken off), as textures and screen content enter an ACES
+## pipeline: shown through the default view they look as they did, white white,
+## and edits act on scene light. Through Standard or Linear they are that scene
+## light shown another way.
 import memory
 import sync
 import time
 from luce_std import math
 from luce_color import xyz
 from luce_color import aces
+from luce_color import transfer
+import parallel
 from settings import View
 
 ## Nodes per side of the baked table, and the shaper's range in stops from 0.18.
@@ -82,6 +91,96 @@ func build_aces():
 func build_aces_p3():
     aces_p3 = aces.OutputTransform.create(100.0, xyz.display_p3) catch failure:
         trap("the ACES 2.0 SDR P3 transform could not be built")
+
+## Nodes per side of the inverse table, over sRGB-encoded display values.
+pub let inverse_size: usize = 129
+
+## The ACES view's inverse, baked over sRGB-encoded display values: per node the
+## AP1 scene light that view shows as it (red fastest, then green, then blue),
+## stored as `squeeze` of it, in which it is nearly linear between nodes: scene
+## light grows about exponentially toward the display's white and its edges.
+var inverse_table: f32[]
+var inverse_once: sync.Once
+
+## The sRGB decode of each node, shared by the threads that build the table.
+var inverse_decoded: f64[129]
+
+func build_inverse():
+    let n = inverse_size
+    aces_once.run(build_aces)
+    inverse_table = new f32[n * n * n * 3] --- in memory.heap catch failure:
+        trap("the ACES inverse table could not be allocated")
+    for at in 0..<n:
+        inverse_decoded[at] = transfer.srgb_decode((f64)at / (f64)(n - 1))
+    # A slice of blue per work item, on every processor.
+    parallel.parallel(n, (void*)&inverse_table, build_inverse_slice) catch failure:
+        trap("the ACES inverse table could not be built")
+
+func build_inverse_slice(context: void*, b: usize) -> !:
+    let n = inverse_size
+    for g in 0..<n:
+        for r in 0..<n:
+            let scene = aces_sdr.invert_ap1([inverse_decoded[r], inverse_decoded[g], inverse_decoded[b]])
+            let at = ((b * n + g) * n + r) * 3
+            for channel in 0..<(usize)3:
+                inverse_table[at + channel] = (f32)squeeze(scene[channel] / aces_lift)
+
+## The lower node of the table cell holding coordinate `at` (0..n-1).
+func cell_of(at: f64, n: usize) -> usize:
+    let node = (usize)at
+    return node if node < n - 1 else n - 2
+
+## The scene light (AP1) that the ACES view shows as the sRGB-encoded display
+## color (`r`, `g`, `b`, each 0..1), read from the inverse table tetrahedrally.
+pub func undisplay(r: f64, g: f64, b: f64) -> f64[3]:
+    inverse_once.run(build_inverse)
+    let n = inverse_size
+    let top = (f64)(n - 1)
+    let x = math.clamp(r, 0.0, 1.0) * top
+    let y = math.clamp(g, 0.0, 1.0) * top
+    let z = math.clamp(b, 0.0, 1.0) * top
+    let x0 = cell_of(x, n)
+    let y0 = cell_of(y, n)
+    let z0 = cell_of(z, n)
+    let fx = x - (f64)x0
+    let fy = y - (f64)y0
+    let fz = z - (f64)z0
+    # The tetrahedron of the cube holding the point, by the order of its fractions.
+    var steps: usize[3] = [1, n, n * n]
+    var fractions: f64[3] = [fx, fy, fz]
+    for pass in 0..<(usize)2:
+        for at in 0..<(usize)(2 - pass):
+            if fractions[at] < fractions[at + 1]:
+                let f = fractions[at]
+                fractions[at] = fractions[at + 1]
+                fractions[at + 1] = f
+                let s = steps[at]
+                steps[at] = steps[at + 1]
+                steps[at + 1] = s
+    let base = (z0 * n + y0) * n + x0
+    let corner_1 = base + steps[0]
+    let corner_2 = corner_1 + steps[1]
+    let corner_3 = corner_2 + steps[2]
+    var out: f64[3]
+    for channel in 0..<(usize)3:
+        let c0 = (f64)inverse_table[base * 3 + channel]
+        let c1 = (f64)inverse_table[corner_1 * 3 + channel]
+        let c2 = (f64)inverse_table[corner_2 * 3 + channel]
+        let c3 = (f64)inverse_table[corner_3 * 3 + channel]
+        out[channel] = unsqueeze(c0 + (c1 - c0) * fractions[0] + (c2 - c1) * fractions[1] + (c3 - c2) * fractions[2])
+    return out
+
+## Scene light on a log-like scale that passes through zero (an inverse
+## hyperbolic sine), and back.
+let squeeze_scale: f64 = 256.0
+
+func squeeze(x: f64) -> f64:
+    let v = x * squeeze_scale
+    return math.copysign(math.log(math.abs(v) + math.sqrt(v * v + 1.0)), v)
+
+func unsqueeze(y: f64) -> f64:
+    let grown = math.exp(math.abs(y))
+    return math.copysign(0.5 * (grown - 1.0 / grown), y) / squeeze_scale
 
 ## The Standard view's tone curve, set as a camera renders: scene grey (0.18)
 ## shows at 0.25 (sRGB 136), scene 1.0 at 0.7, and it reaches the display's
@@ -187,3 +286,22 @@ test "the ACES table bakes":
     let node = unshape((f64)grey_node / (f64)(n - 1))
     let expected = display(View.aces, [node, node, node], working_to_display())
     assert(math.abs((f64)table[at + 1] - expected[1]) < 0.002)
+
+test "display pictures come back unchanged through the ACES view":
+    let to_display = working_to_display()
+    let started = time.now()
+    let white = display(View.aces, undisplay(1.0, 1.0, 1.0), to_display)
+    print(f"ACES inverse table: {(time.now() - started) // 1000000} ms")
+    assert(white[0] > 0.998 and white[1] > 0.998 and white[2] > 0.998)
+    # Every 8-bit level of a grid, and colors between the table's nodes, in levels.
+    var worst = 0.0
+    for r in 0..<(usize)18:
+        for g in 0..<(usize)18:
+            for b in 0..<(usize)18:
+                let encoded: f64[3] = [(f64)(r * 15) / 255.0, (f64)(g * 15) / 255.0, (f64)(b * 15) / 255.0]
+                let scene = undisplay(encoded[0], encoded[1], encoded[2])
+                let shown = display(View.aces, scene, to_display)
+                for at in 0..<(usize)3:
+                    worst = math.max(worst, math.abs(transfer.srgb_encode(shown[at]) - encoded[at]) * 255.0)
+    print(f"ACES inverse round trip: worst {worst} levels")
+    assert(worst < 0.5)
