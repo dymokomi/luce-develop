@@ -77,8 +77,13 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
     what loaded.
   - `set_settings(settings)` changes the develop.
   - `draw(target, x, y, w, h)` draws every frame, as one pass.
-- **The CPU path.** `process.render(scene, settings)` is the same develop on the
-  CPU, with the view evaluated exactly. Export uses it.
+- **The CPU path.** `process.render(scene, settings)` and `render16` are the
+  same develop on the CPU, rows spread over every processor, with the view
+  evaluated exactly.
+- **Export.** `export.export(source, settings, target, format, quality, edge)`
+  develops at full size (or a long edge) and writes JPEG or 16-bit PNG: about
+  2 s for a 24 MP raw, demosaic included. `scene.open(path, 0)` is a full-size
+  scene.
 - **Parity.** `tests/parity.lucb` holds the GPU to the CPU for every tool. Both
   paths agree to within a level on average, and to 3 levels for Standard and
   Linear.

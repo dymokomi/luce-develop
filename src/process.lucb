@@ -3,6 +3,8 @@
 ## evaluated exactly instead of through its table. Export uses it, and the
 ## tests hold the GPU to it. Change both together.
 import interop
+import memory
+import parallel
 from luce_std import math
 from luce_color import transfer
 from settings import Settings, View
@@ -201,27 +203,60 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
     c = with_vignette(d, c, u, v)
     return with_grain(d, c, u, v)
 
-## `scene` developed with `settings` into an 8-bit sRGB picture of its size.
-pub func render(source: const Scene*, settings: Settings) -> Picture!:
+## A render under way: the develop, the scene, and where rows go: 8-bit RGBA
+## (`bytes`) or 16-bit RGBA (`words`), both sRGB-encoded.
+struct Rendering:
+    var develop: Develop
+    var source: const Scene*
+    var width: usize
+    var height: usize
+    var bytes: u8[]
+    var words: u16[]
+
+func render_row(context: void*, y: usize) -> !:
+    let job = (Rendering*)context
+    let v = ((f64)y + 0.5) / (f64)job.height
+    for x in 0..<job.width:
+        let shown = develop_pixel(&job.develop, job.source, ((f64)x + 0.5) / (f64)job.width, v)
+        let at = y * job.width + x
+        if job.bytes.length > 0:
+            job.bytes[at * 4] = transfer.srgb_byte(shown[0])
+            job.bytes[at * 4 + 1] = transfer.srgb_byte(shown[1])
+            job.bytes[at * 4 + 2] = transfer.srgb_byte(shown[2])
+            job.bytes[at * 4 + 3] = 255
+        else:
+            for channel in 0..<(usize)3:
+                let encoded = transfer.srgb_encode(math.clamp(shown[channel], 0.0, 1.0))
+                job.words[at * 4 + channel] = (u16)(encoded * 65535.0 + 0.5)
+            job.words[at * 4 + 3] = 65535
+
+func rendering(source: const Scene*, settings: const Settings*) -> Rendering!:
     let width = (usize)source.width()
     let height = (usize)source.height()
-    let develop = Develop(matrix = try source.matrix(&settings), tables = tables.build(&settings),
+    let develop = Develop(matrix = try source.matrix(settings), tables = tables.build(settings),
                           shown = (View)(i64)settings.get(.view), to_display = view.working_to_display(),
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
-                          aspect = (f64)width / (f64)height, map = geometry.frame_map(&settings, (f64)width, (f64)height))
-    var out = try Picture.create(width, height)
+                          aspect = (f64)width / (f64)height, map = geometry.frame_map(settings, (f64)width, (f64)height))
+    return Rendering(develop = develop, source = source, width = width, height = height)
+
+## `scene` developed with `settings` into an 8-bit sRGB picture of its size, on
+## every processor.
+pub func render(source: const Scene*, settings: Settings) -> Picture!:
+    var job = try rendering(source, &settings)
+    var out = try Picture.create(job.width, job.height)
     errdefer out.close()
-    let pixels = out.bytes()
-    for y in 0..<height:
-        let v = ((f64)y + 0.5) / (f64)height
-        for x in 0..<width:
-            let at = y * width + x
-            let shown_color = develop_pixel(&develop, source, ((f64)x + 0.5) / (f64)width, v)
-            pixels[at * 4] = transfer.srgb_byte(shown_color[0])
-            pixels[at * 4 + 1] = transfer.srgb_byte(shown_color[1])
-            pixels[at * 4 + 2] = transfer.srgb_byte(shown_color[2])
-            pixels[at * 4 + 3] = 255
+    job.bytes = out.bytes()
+    try parallel.parallel(job.height, (void*)&job, render_row)
     return out
+
+## `scene` developed with `settings` into 16-bit sRGB RGBA (alpha opaque), rows
+## packed, on every processor; the caller frees it.
+pub func render16(source: const Scene*, settings: Settings) -> u16[]!:
+    var job = try rendering(source, &settings)
+    job.words = try new u16[job.width * job.height * 4] --- in memory.heap
+    errdefer free(job.words) in memory.heap
+    try parallel.parallel(job.height, (void*)&job, render_row)
+    return job.words
 
 ## The photo at `path` developed with `settings` at most `edge` pixels on its
 ## longer side, for Luce: what an exporter or a thumbnail maker calls.

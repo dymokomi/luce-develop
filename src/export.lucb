@@ -1,0 +1,45 @@
+## Export: a photo developed at full size (or shrunk to a long edge) on the CPU
+## and written as a file: JPEG (8-bit, a quality), or PNG (16-bit, lossless),
+## sRGB either way. One call does it all on the calling thread; an application
+## runs it on a thread of its own.
+import c
+import memory
+import strings
+from luce_std import files
+from luce_png import png
+from luce_raster.binary import Buffer
+from settings import parse
+import scene
+import process
+import codes
+
+pub let invalid: ErrorCode = codes.invalid
+
+## The file formats.
+pub let jpeg: i64 = 0
+pub let png16: i64 = 1
+
+## Develop the photo at `source` with the settings `settings` (their text form)
+## and write it to `target` as `format` (jpeg or png16), its longer side `edge`
+## pixels at most (0: full size); `quality` 1–100 for JPEG.
+pub func export(source: str, settings: str, target: str, format: i64, quality: i64 = 92, edge: i64 = 0) -> !:
+    if format != jpeg and format != png16:
+        error(invalid, "export writes JPEG or 16-bit PNG")
+    if edge < 0 or quality < 1 or quality > 100:
+        error(invalid, "an export needs a size of 0 or more and a quality of 1 to 100")
+    var opened = try scene.open(source, (usize)edge)
+    defer opened.close()
+    let wanted = parse(settings)
+    if format == jpeg:
+        var picture = try process.render(&opened, wanted)
+        defer picture.close()
+        try picture.save_jpeg(target, quality)
+        return
+    let words = try process.render16(&opened, wanted)
+    defer free(words) in memory.heap
+    var output = Buffer()
+    defer output.close()
+    try png.encode_rgba16(words, (usize)opened.width(), (usize)opened.height(), &output)
+    let terminated = try strings.copy(target)
+    defer strings.release(terminated)
+    try files.write((c.str)terminated, output.data[..<output.used])

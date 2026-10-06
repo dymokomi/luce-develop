@@ -6,7 +6,7 @@ def package "luce-develop" {
     str language = "luce-base"
     str description = "Photo development for Luce: camera RAWs and JPEG/PNG/TIFF/HEIC sources, quick oriented previews, and a scene-linear develop pipeline with a GPU renderer for viewers and a CPU path for export."
     str readme = "README.md"
-    str[] public = ["source", "picture", "settings", "scene", "process", "view", "renderer", "geometry"]
+    str[] public = ["source", "picture", "settings", "scene", "process", "view", "renderer", "geometry", "export"]
 
     def dependency "luce-raw" {
         str owner = "dymokomi"

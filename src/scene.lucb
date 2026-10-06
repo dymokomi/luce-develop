@@ -107,7 +107,8 @@ func multiply(a: f64[9], b: f64[9]) -> f64[9]:
             out[row * 3 + column] = a[row * 3] * b[column] + a[row * 3 + 1] * b[3 + column] + a[row * 3 + 2] * b[6 + column]
     return out
 
-## The photo at `path` as a scene no larger than `edge` on its longer side.
+## The photo at `path` as a scene no larger than `edge` on its longer side; 0
+## is its full size.
 pub func open(path: str, edge: usize) -> Scene!:
     let terminated = try strings.copy(path)
     defer strings.release(terminated)
@@ -117,11 +118,11 @@ pub func open(path: str, edge: usize) -> Scene!:
 
 ## The photo whose file is `data` as a scene (see `open`).
 pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
-    if edge < 16:
+    if edge != 0 and edge < 16:
         error(invalid, "a scene needs a size")
     if raw.detect(data):
         return try raw_scene(data, edge)
-    var picture = try source.preview(data, edge)
+    var picture = try source.preview(data, edge if edge > 0 else 65536)
     defer picture.close()
     var scene = Scene(columns = (usize)picture.width(), rows = (usize)picture.height(), as_shot = [1.0, 1.0, 1.0], shot_temperature = 6500.0)
     scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
@@ -149,9 +150,13 @@ func gather(context: void*?, tile: const raw.Tile*) -> !:
             into.pixels[to_at + 2] = tile.pixels[from_at + 2]
 
 func raw_scene(data: const u8[], edge: usize) -> Scene!:
-    # Half size first: each 2×2 filter cell is a pixel, no demosaic needed, and a
-    # viewer's fit is rarely larger.
-    let options = raw.Options(camera = true, half = true, exposure = false, quality = .fast)
+    # Half size when it is large enough: each 2×2 filter cell is a pixel, no
+    # demosaic needed, and a viewer's fit is rarely larger. Otherwise the whole
+    # sensor, demosaiced at its best (AHD, Markesteijn for X-Trans).
+    let half_options = raw.Options(camera = true, half = true, exposure = false, quality = .fast)
+    let (half_width, half_height) = try raw.dimensions(data, half_options)
+    let half_longer = half_width if half_width > half_height else half_height
+    let options = half_options if edge > 0 and half_longer * 20 >= edge * 19 else raw.Options(camera = true, exposure = false, quality = .best)
     let (width, height) = try raw.dimensions(data, options)
     var gathered = Gathered(width = width)
     gathered.pixels = try new f32[width * height * 3] in memory.heap
@@ -164,8 +169,8 @@ func raw_scene(data: const u8[], edge: usize) -> Scene!:
     memory.copy(scene.data, data, data.length)
     # Average down to the edge in linear light.
     let longer = width if width > height else height
-    let columns = width * edge // longer if longer > edge else width
-    let rows = height * edge // longer if longer > edge else height
+    let columns = width * edge // longer if edge > 0 and longer > edge else width
+    let rows = height * edge // longer if edge > 0 and longer > edge else height
     scene.columns = columns if columns > 0 else 1
     scene.rows = rows if rows > 0 else 1
     scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
