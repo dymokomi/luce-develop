@@ -4,13 +4,20 @@
 ## samples: per-channel log2 shaper over 24 stops around middle grey, `lut_size`
 ## nodes a side, tiled into a 2D texture (the blue axis across the slices).
 ##
+## ACES: the ACES 2.0 Output Transform for a 100-nit SDR display limited to Rec.709
+## primaries (luce-color's aces): Hellwig JMh, the Daniele tonescale, chroma and gamut
+## compression. It shows scene grey near 0.1, as ACES intends, and its table is
+## read tetrahedrally on the GPU.
 ## Standard: a neutral filmic curve on each pixel's largest component, keeping
 ## its ratios (so hues hold), colors out of the display gamut pulled toward their
 ## luminance, and highlights that run to white as they pass the shoulder.
 ## Linear: the scene clipped to the display, for checking.
+import memory
+import sync
+import time
 from luce_std import math
 from luce_color import xyz
-from luce_color.color import Color
+from luce_color import aces
 from settings import View
 
 ## Nodes per side of the baked table, and the shaper's range in stops from 0.18.
@@ -40,6 +47,14 @@ pub func shape(x: f64) -> f64:
         return 0.0
     return math.clamp((math.log2(x / 0.18) - shaper_low) / (shaper_high - shaper_low), 0.0, 1.0)
 
+## The SDR ACES 2.0 transform, built once on first use (its tables take milliseconds).
+var aces_sdr: aces.OutputTransform
+var aces_once: sync.Once
+
+func build_aces():
+    aces_sdr = aces.OutputTransform.create(100.0, xyz.srgb) catch failure:
+        trap("the ACES 2.0 SDR transform could not be built")
+
 ## The Standard view's tone curve, set as a camera renders: scene grey (0.18)
 ## shows at 0.25 (sRGB 136), scene 1.0 at 0.7, and it reaches the display's
 ## white near 16, with a firm toe.
@@ -53,6 +68,10 @@ func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
 
 ## Scene light `rgb` (AP1) shown through `view`: display-linear sRGB, 0..1.
 pub func display(view: View, rgb: f64[3], to_display: f64[9]) -> f64[3]:
+    if view == View.aces:
+        aces_once.run(build_aces)
+        # AP1 in; Rec.709-primary display light out, 1.0 the SDR white.
+        return aces_sdr.apply_ap1(rgb)
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
@@ -101,3 +120,31 @@ test "middle grey shows at 0.25; white stays neutral":
     let hot = display(View.standard, [30.0, 0.5, 0.5], to_display)
     assert(hot[0] > 0.99 and hot[1] > 0.3)
     assert(math.abs(shape(unshape(0.37)) - 0.37) < 1.0e-12)
+
+test "ACES shows grey near 10 nits, neutral, and highlights converge to white":
+    let to_display = working_to_display()
+    let grey = display(View.aces, [0.18, 0.18, 0.18], to_display)
+    assert(grey[1] > 0.09 and grey[1] < 0.11)
+    assert(math.abs(grey[0] - grey[1]) < 1.0e-4 and math.abs(grey[2] - grey[1]) < 1.0e-4)
+    let white = display(View.aces, [2000.0, 2000.0, 2000.0], to_display)
+    assert(white[0] > 0.99 and white[1] > 0.99 and white[2] > 0.99)
+    # A saturated red far past white desaturates toward white instead of clipping.
+    let hot = display(View.aces, [400.0, 20.0, 20.0], to_display)
+    assert(hot[0] > 0.95 and hot[1] > 0.5 and hot[2] > 0.5)
+    var previous = -1.0
+    for step in 0..<(usize)30:
+        let v = 0.001 * math.exp2((f64)step * 0.6)
+        let shown = display(View.aces, [v, v, v], to_display)[1]
+        assert(shown >= previous)
+        previous = shown
+
+test "the ACES table bakes":
+    let n = lut_size
+    let table = try new f16[n * n * n * 4] --- in memory.heap
+    defer free(table) in memory.heap
+    let started = time.now()
+    bake(View.aces, table)
+    print(f"ACES 64³ bake: {(time.now() - started) // 1000000} ms")
+    let grey_node = (usize)(shape(0.18) * (f64)(n - 1) + 0.5)
+    let at = (grey_node * n * n + grey_node * n + grey_node) * 4
+    assert((f64)table[at + 1] > 0.08 and (f64)table[at + 1] < 0.12)

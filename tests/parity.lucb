@@ -13,8 +13,9 @@ from luce_develop import process
 from luce_develop import renderer
 from luce_develop.settings import parse
 
-let cases: str[4] = ["", "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
-                     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50", "view=2;exposure=1.5"]
+let cases: str[5] = ["", "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
+                     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50", "view=2;exposure=1.5",
+                     "view=0;exposure=1;contrast=20;vibrance=40"]
 
 pub func main(arguments: str[]) -> i32!:
     var device = gpu.Device.open() catch failure:
