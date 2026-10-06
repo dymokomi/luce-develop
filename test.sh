@@ -2,7 +2,7 @@
 # Module tests, then previews of luce-raw's sample files when they are present.
 set -eu
 cd "$(dirname "$0")"
-for module in picture source settings tone view tables process renderer; do
+for module in picture source settings tone view tables geometry scene process renderer; do
     luce-base test "src/$module.lucb" --native
 done
 samples=../luce-raw/build/samples

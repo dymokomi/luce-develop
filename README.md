@@ -34,6 +34,13 @@ writes it out. `width()`, `height()` and `pixels()` read it from Luce.
 
 ## Developing (`settings`, `scene`, `renderer`, `process`, `view`)
 
+Before anything else, the output position is mapped onto the photo by the
+geometry (`geometry`). That covers perspective as the camera turned back
+(roll, tilt, pan through a 28 mm-equivalent lens), aspect, scale, and crop to
+fit. Guides drawn on the photo that should be vertical or horizontal solve for
+the turn (Nelder–Mead, after darktable's ashift). `geometry.frame_map` is the
+one matrix the shader and the CPU path both sample through.
+
 The develop works in scene-linear ACES AP1. A raw is developed once by luce-raw
 with `camera` set (balanced as shot, no matrix). A new white balance is then just
 a matrix built from luce-raw's `rendering`. The stages, in the order the shader

@@ -87,12 +87,18 @@ pub enum Parameter as u8:
     grain_amount = 70
     grain_size = 71
     grain_roughness = 72
-    view = 73
+    geometry_rotate = 73
+    geometry_vertical = 74
+    geometry_horizontal = 75
+    geometry_aspect = 76
+    geometry_scale = 77
+    geometry_autocrop = 78
+    view = 79
 
 ## How many parameters there are.
-pub let parameter_count: usize = 74
+pub let parameter_count: usize = 80
 
-pub let parameters: ParameterSpec[74] = [
+pub let parameters: ParameterSpec[80] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure & Tone", -6.0, 6.0, 0.0, 2),
@@ -166,4 +172,10 @@ pub let parameters: ParameterSpec[74] = [
     ParameterSpec("grain_amount", "Grain", "Effects", 0.0, 100.0, 0.0, 0),
     ParameterSpec("grain_size", "Grain Size", "Effects", 0.0, 100.0, 25.0, 0),
     ParameterSpec("grain_roughness", "Roughness", "Effects", 0.0, 100.0, 50.0, 0),
+    ParameterSpec("geometry_rotate", "Rotate", "Geometry", -45.0, 45.0, 0.0, 1),
+    ParameterSpec("geometry_vertical", "Vertical", "Geometry", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("geometry_horizontal", "Horizontal", "Geometry", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("geometry_aspect", "Aspect", "Geometry", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("geometry_scale", "Scale", "Geometry", 50.0, 150.0, 100.0, 0),
+    ParameterSpec("geometry_autocrop", "Crop to Fit", "Geometry", 0.0, 1.0, 1.0, 0),
     ParameterSpec("view", "View", "View", 0.0, 2.0, 0.0, 0)]

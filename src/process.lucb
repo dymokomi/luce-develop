@@ -12,6 +12,7 @@ from tables import Tables
 import scene
 import tables
 import view
+import geometry
 
 ## AP1's luminance weights, and AP1 (D60) to and from Oklab's LMS (D65): the
 ## shader's constants, row-major here.
@@ -38,6 +39,8 @@ struct Develop:
     var vibrance: f64
     var saturation: f64
     var aspect: f64
+    ## Output (0..1) to source (0..1): geometry.frame_map.
+    var map: geometry.Matrix
 
 func radius(u: f64, v: f64, aspect: f64) -> f64:
     let x = (u - 0.5) * 2.0 * aspect
@@ -175,13 +178,22 @@ func with_grain(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
     let gain = 1.0 + amount * 0.6 * noise * 4.0 * luma * (1.0 - luma)
     return [math.max(c[0] * gain, 0.0), math.max(c[1] * gain, 0.0), math.max(c[2] * gain, 0.0)]
 
-## One pixel's develop from scene values `camera` at image position (`u`, `v`),
-## 0..1, to display-linear sRGB.
-func develop_pixel(d: const Develop*, camera: f64[3], u: f64, v: f64) -> f64[3]:
-    var c = apply(d.matrix, camera)
+## One pixel's develop at output position (`u`, `v`), 0..1, to display-linear
+## sRGB: black where the geometry leaves the photo.
+func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f64[3]:
+    let mx = d.map[0] * u + d.map[1] * v + d.map[2]
+    let my = d.map[3] * u + d.map[4] * v + d.map[5]
+    let mz = d.map[6] * u + d.map[7] * v + d.map[8]
+    if mz <= 0.0:
+        return [0.0, 0.0, 0.0]
+    let su = mx / mz
+    let sv = my / mz
+    if su < 0.0 or su > 1.0 or sv < 0.0 or sv > 1.0:
+        return [0.0, 0.0, 0.0]
+    var c = apply(d.matrix, source.sample(su, sv))
     for at in 0..<(usize)3:
         c[at] = math.max(c[at], 0.0)
-    c = with_lens(d, c, u, v)
+    c = with_lens(d, c, su, sv)
     c = with_tone(d, c)
     c = with_color(d, c)
     c = view.display(d.shown, c, d.to_display)
@@ -196,7 +208,7 @@ pub func render(source: const Scene*, settings: Settings) -> Picture!:
     let develop = Develop(matrix = try source.matrix(&settings), tables = tables.build(&settings),
                           shown = (View)(i64)settings.get(.view), to_display = view.working_to_display(),
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
-                          aspect = (f64)width / (f64)height)
+                          aspect = (f64)width / (f64)height, map = geometry.frame_map(&settings, (f64)width, (f64)height))
     var out = try Picture.create(width, height)
     errdefer out.close()
     let pixels = out.bytes()
@@ -204,7 +216,7 @@ pub func render(source: const Scene*, settings: Settings) -> Picture!:
         let v = ((f64)y + 0.5) / (f64)height
         for x in 0..<width:
             let at = y * width + x
-            let shown_color = develop_pixel(&develop, source.value_at(at), ((f64)x + 0.5) / (f64)width, v)
+            let shown_color = develop_pixel(&develop, source, ((f64)x + 0.5) / (f64)width, v)
             pixels[at * 4] = transfer.srgb_byte(shown_color[0])
             pixels[at * 4 + 1] = transfer.srgb_byte(shown_color[1])
             pixels[at * 4 + 2] = transfer.srgb_byte(shown_color[2])

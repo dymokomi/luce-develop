@@ -16,6 +16,7 @@ from settings import Settings, View, Look, defaults
 from scene import Scene
 import scene
 import tables
+import geometry
 import view
 from shaders import develop_frag_words, develop_frag_msl
 import codes
@@ -92,6 +93,9 @@ pub struct Renderer:
     var problem_length: usize
     ## The format of the targets drawn into: the window's when none.
     var format: gpu.Format?
+    ## Whether draws apply the geometry; off while guides are drawn on the photo
+    ## as it was taken.
+    var geometry_shown: bool
     ## For the histogram: a pipeline drawing into 8-bit textures, and the bins.
     var probe_pipeline: gpu.Pipeline?
     var bins: i64[1024]
@@ -162,6 +166,11 @@ pub struct Renderer:
     pub func shot_tint() -> f64:
         return self.shown.shot_tint
 
+    ## Apply the geometry (perspective, rotation, crop to fit) or show the photo
+    ## as it was taken, for drawing guides on.
+    pub func show_geometry(on: bool):
+        self.geometry_shown = on
+
     ## Develop with `look`'s settings from the next draw on.
     pub func set_look(look: interop.Reference[Look]) -> !:
         self.set_settings((try look.get()).value())
@@ -189,12 +198,15 @@ pub struct Renderer:
         let size = try checked.size()
         let scale = size.pixel_width / size.width if size.width > 0.0 else 1.0
         let m = try self.shown.matrix(&self.settings)
-        var uniforms: f32[20] = [
+        let identity: geometry.Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        let map = geometry.frame_map(&self.settings, (f64)self.shown.width(), (f64)self.shown.height()) if self.geometry_shown else identity
+        var uniforms: f32[32] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
-            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)((f64)self.shown.width() / (f64)self.shown.height())]
+            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)((f64)self.shown.width() / (f64)self.shown.height()),
+            (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
         let images: gpu.Texture[3] = [scene_texture, tables_texture, view_texture]
-        try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 80), images, gpu.Filter.linear)
+        try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
 
     ## Count the develop as shown into the histogram (`histogram`): the photo is
     ## developed at most 256 pixels on its longer side, off screen, and read back.
@@ -330,12 +342,12 @@ pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format)
+    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format, geometry_shown = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
-    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1) in memory.heap catch failure:
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1, geometry_shown = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

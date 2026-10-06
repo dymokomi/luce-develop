@@ -1,0 +1,304 @@
+## Geometry: perspective correction, rotation, aspect and scale, and the guides
+## that solve for them. The correction is the camera turned back: a roll
+## (Rotate), a tilt (Vertical) and a pan (Horizontal) about the image's middle,
+## H = K·R·K⁻¹ with K a 28 mm equivalent lens, so converging verticals from a
+## camera tilted up straighten exactly as they would had it been level. Aspect
+## stretches the result, and the frame is the largest rectangle of the photo's
+## shape inside the corrected image ("crop to fit"), or the rectangle holding all
+## of it, divided by Scale.
+##
+## Guides are lines drawn on the uncorrected photo that should be vertical or
+## horizontal; `solve` finds the roll, tilt and pan that make them so, by
+## Nelder–Mead over the rotations the guides constrain, and writes them into the
+## settings. darktable's ashift does the same job with a lens-shift model; this is
+## its approach, not its code.
+##
+## Everything else reads one 3×3 matrix, `frame_map`: from output coordinates
+## (0..1 of the output) to source coordinates (0..1 of the photo), homogeneous.
+from luce_std import math
+from settings import Settings, Guide, defaults
+from parameters import Parameter
+
+## The largest tilt or pan the Vertical and Horizontal sliders reach, in degrees.
+pub let reach_degrees: f64 = 30.0
+
+pub type Matrix = f64[9]
+
+func multiply(a: Matrix, b: Matrix) -> Matrix:
+    var out: Matrix
+    for row in 0..<(usize)3:
+        for column in 0..<(usize)3:
+            out[row * 3 + column] = a[row * 3] * b[column] + a[row * 3 + 1] * b[3 + column] + a[row * 3 + 2] * b[6 + column]
+    return out
+
+func invert(m: Matrix) -> Matrix:
+    let a = m[4] * m[8] - m[5] * m[7]
+    let b = m[5] * m[6] - m[3] * m[8]
+    let c = m[3] * m[7] - m[4] * m[6]
+    let determinant = m[0] * a + m[1] * b + m[2] * c
+    if math.abs(determinant) < 1.0e-300:
+        return [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    let d = 1.0 / determinant
+    return [a * d, (m[2] * m[7] - m[1] * m[8]) * d, (m[1] * m[5] - m[2] * m[4]) * d,
+            b * d, (m[0] * m[8] - m[2] * m[6]) * d, (m[2] * m[3] - m[0] * m[5]) * d,
+            c * d, (m[1] * m[6] - m[0] * m[7]) * d, (m[0] * m[4] - m[1] * m[3]) * d]
+
+## `m` applied to the point (`x`, `y`), divided through.
+pub func project(m: Matrix, x: f64, y: f64) -> (f64, f64):
+    let w = m[6] * x + m[7] * y + m[8]
+    let scale = 1.0 / w if math.abs(w) > 1.0e-12 else 1.0e12
+    return ((m[0] * x + m[1] * y + m[2]) * scale, (m[3] * x + m[4] * y + m[5]) * scale)
+
+## The turn (radians) of each axis: roll about the view, tilt about the
+## horizontal, pan about the vertical.
+pub struct Turn:
+    pub var roll: f64
+    pub var tilt: f64
+    pub var pan: f64
+
+## The settings' turn.
+pub func turn_of(settings: const Settings*) -> Turn:
+    let degrees = math.pi / 180.0
+    return Turn(roll = settings.get(.geometry_rotate) * degrees,
+                tilt = settings.get(.geometry_vertical) / 100.0 * reach_degrees * degrees,
+                pan = settings.get(.geometry_horizontal) / 100.0 * reach_degrees * degrees)
+
+## The correction of a `width` × `height` photo turned by `turn` and stretched by
+## `aspect` (-1..1), in pixels: source to corrected.
+pub func correction(turn: Turn, aspect: f64, width: f64, height: f64) -> Matrix:
+    let focal = math.sqrt(width * width + height * height) * 28.0 / 43.27
+    let camera: Matrix = [focal, 0.0, width * 0.5, 0.0, focal, height * 0.5, 0.0, 0.0, 1.0]
+    let cr = math.cos(turn.roll)
+    let sr = math.sin(turn.roll)
+    let ct = math.cos(turn.tilt)
+    let st = math.sin(turn.tilt)
+    let cp = math.cos(turn.pan)
+    let sp = math.sin(turn.pan)
+    let roll: Matrix = [cr, -sr, 0.0, sr, cr, 0.0, 0.0, 0.0, 1.0]
+    let tilt: Matrix = [1.0, 0.0, 0.0, 0.0, ct, -st, 0.0, st, ct]
+    let pan: Matrix = [cp, 0.0, sp, 0.0, 1.0, 0.0, -sp, 0.0, cp]
+    let rotation = multiply(roll, multiply(tilt, pan))
+    let turned = multiply(camera, multiply(rotation, invert(camera)))
+    # Aspect stretches about the middle.
+    let stretch = math.exp2(aspect * 0.5)
+    let aspect_matrix: Matrix = [stretch, 0.0, width * 0.5 * (1.0 - stretch), 0.0, 1.0 / stretch, height * 0.5 * (1.0 - 1.0 / stretch), 0.0, 0.0, 1.0]
+    return multiply(aspect_matrix, turned)
+
+## Whether every corner of the `half_width` × `half_height` rectangle about
+## (`cx`, `cy`) lies inside the convex quadrilateral `quad` (four corners in order).
+func rectangle_inside(quad: f64[8], cx: f64, cy: f64, half_width: f64, half_height: f64) -> bool:
+    let corners: f64[8] = [cx - half_width, cy - half_height, cx + half_width, cy - half_height, cx + half_width, cy + half_height, cx - half_width, cy + half_height]
+    var sign = 0.0
+    for edge in 0..<(usize)4:
+        let ax = quad[edge * 2]
+        let ay = quad[edge * 2 + 1]
+        let bx = quad[((edge + 1) % 4) * 2]
+        let by = quad[((edge + 1) % 4) * 2 + 1]
+        for corner in 0..<(usize)4:
+            let cross = (bx - ax) * (corners[corner * 2 + 1] - ay) - (by - ay) * (corners[corner * 2] - ax)
+            if sign == 0.0:
+                sign = 1.0 if cross >= 0.0 else -1.0
+            elif cross * sign < 0.0:
+                return false
+    return true
+
+## The map from output coordinates (0..1) to source coordinates (0..1) for
+## `settings` on a `width` × `height` photo: the identity when untouched.
+pub func frame_map(settings: const Settings*, width: f64, height: f64) -> Matrix:
+    let identity: Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    let turn = turn_of(settings)
+    let aspect = settings.get(.geometry_aspect) / 100.0
+    let scale = settings.get(.geometry_scale) / 100.0
+    if turn.roll == 0.0 and turn.tilt == 0.0 and turn.pan == 0.0 and aspect == 0.0 and scale == 1.0:
+        return identity
+    let forward = correction(turn, aspect, width, height)
+    var quad: f64[8]
+    var low_x = 1.0e300
+    var low_y = 1.0e300
+    var high_x = -1.0e300
+    var high_y = -1.0e300
+    let source_corners: f64[8] = [0.0, 0.0, width, 0.0, width, height, 0.0, height]
+    for corner in 0..<(usize)4:
+        let (x, y) = project(forward, source_corners[corner * 2], source_corners[corner * 2 + 1])
+        quad[corner * 2] = x
+        quad[corner * 2 + 1] = y
+        low_x = math.min(low_x, x)
+        low_y = math.min(low_y, y)
+        high_x = math.max(high_x, x)
+        high_y = math.max(high_y, y)
+    let (cx, cy) = project(forward, width * 0.5, height * 0.5)
+    # How much of the photo's size the frame spans in corrected pixels.
+    var span = 1.0
+    if settings.get(.geometry_autocrop) > 0.5:
+        var low = 0.01
+        var high = 4.0
+        for _step in 0..<(usize)50:
+            let middle = (low + high) * 0.5
+            if rectangle_inside(quad, cx, cy, width * 0.5 * middle, height * 0.5 * middle):
+                low = middle
+            else:
+                high = middle
+        span = low
+    else:
+        span = math.max(math.max(high_x - cx, cx - low_x) / (width * 0.5), math.max(high_y - cy, cy - low_y) / (height * 0.5))
+    span /= scale
+    # Output (u, v) to corrected pixels, back through the correction, to source (u, v).
+    let place: Matrix = [width * span, 0.0, cx - width * span * 0.5, 0.0, height * span, cy - height * span * 0.5, 0.0, 0.0, 1.0]
+    let normalize: Matrix = [1.0 / width, 0.0, 0.0, 0.0, 1.0 / height, 0.0, 0.0, 0.0, 1.0]
+    return multiply(normalize, multiply(invert(forward), place))
+
+# mark: solving =============================================================================
+
+## How far the guides are from vertical and horizontal under `turn`, plus a
+## little of the turn itself, so a guide that leaves a rotation free does not
+## let it wander.
+func misfit(guides: const Guide[], turn: Turn, width: f64, height: f64) -> f64:
+    let forward = correction(turn, 0.0, width, height)
+    var total = 0.0
+    for guide in guides:
+        let (x1, y1) = project(forward, guide.x1 * width, guide.y1 * height)
+        let (x2, y2) = project(forward, guide.x2 * width, guide.y2 * height)
+        let dx = x2 - x1
+        let dy = y2 - y1
+        let length = dx * dx + dy * dy
+        if length <= 1.0e-18:
+            continue
+        # The off-axis share of the direction, squared: 0 when the guide is true.
+        total += (dx * dx if guide.vertical() else dy * dy) / length
+    return total + 0.0005 * (turn.roll * turn.roll + turn.tilt * turn.tilt + turn.pan * turn.pan)
+
+## Which turns the guides decide: roll with any guide, tilt with two verticals,
+## pan with two horizontals.
+func freed(guides: const Guide[]) -> (bool, bool, bool):
+    var verticals = 0
+    var horizontals = 0
+    for guide in guides:
+        if guide.vertical():
+            verticals += 1
+        else:
+            horizontals += 1
+    return (verticals + horizontals > 0, verticals >= 2, horizontals >= 2)
+
+func turn_from(base: Turn, values: const f64[], axes: (bool, bool, bool)) -> Turn:
+    var out = base
+    var at: usize = 0
+    if axes.0:
+        out.roll = values[at]
+        at += 1
+    if axes.1:
+        out.tilt = values[at]
+        at += 1
+    if axes.2:
+        out.pan = values[at]
+    return out
+
+## The turn that makes `guides` vertical and horizontal on a `width` × `height`
+## photo; the turns no guide decides stay zero.
+pub func solve_turn(guides: const Guide[], width: f64, height: f64) -> Turn:
+    let axes = freed(guides)
+    var count: usize = 0
+    for on in [axes.0, axes.1, axes.2]:
+        if on:
+            count += 1
+    let start = Turn()
+    if count == 0:
+        return start
+    # Nelder–Mead over the free turns, from no turn, with steps of 3°.
+    var simplex: f64[12]
+    var scores: f64[4]
+    for vertex in 0..=count:
+        for axis in 0..<count:
+            simplex[vertex * 3 + axis] = 0.05 if vertex == axis + 1 else 0.0
+        scores[vertex] = misfit(guides, turn_from(start, simplex[vertex * 3..<vertex * 3 + count], axes), width, height)
+    for _iteration in 0..<(usize)400:
+        # Order the vertices best first.
+        for i in 0..=count:
+            for j in i + 1..=count:
+                if scores[j] < scores[i]:
+                    let held = scores[i]
+                    scores[i] = scores[j]
+                    scores[j] = held
+                    for axis in 0..<(usize)3:
+                        let value = simplex[i * 3 + axis]
+                        simplex[i * 3 + axis] = simplex[j * 3 + axis]
+                        simplex[j * 3 + axis] = value
+        if scores[count] - scores[0] < 1.0e-14:
+            break
+        var centroid: f64[3]
+        for vertex in 0..<count:
+            for axis in 0..<count:
+                centroid[axis] += simplex[vertex * 3 + axis] / (f64)count
+        let worst = count * 3
+        var reflected: f64[3]
+        for axis in 0..<count:
+            reflected[axis] = centroid[axis] + (centroid[axis] - simplex[worst + axis])
+        let reflected_score = misfit(guides, turn_from(start, reflected[..<count], axes), width, height)
+        if reflected_score < scores[0]:
+            var expanded: f64[3]
+            for axis in 0..<count:
+                expanded[axis] = centroid[axis] + 2.0 * (centroid[axis] - simplex[worst + axis])
+            let expanded_score = misfit(guides, turn_from(start, expanded[..<count], axes), width, height)
+            let take_expanded = expanded_score < reflected_score
+            for axis in 0..<count:
+                simplex[worst + axis] = expanded[axis] if take_expanded else reflected[axis]
+            scores[count] = expanded_score if take_expanded else reflected_score
+        elif reflected_score < scores[count - 1]:
+            for axis in 0..<count:
+                simplex[worst + axis] = reflected[axis]
+            scores[count] = reflected_score
+        else:
+            var contracted: f64[3]
+            for axis in 0..<count:
+                contracted[axis] = centroid[axis] + 0.5 * (simplex[worst + axis] - centroid[axis])
+            let contracted_score = misfit(guides, turn_from(start, contracted[..<count], axes), width, height)
+            if contracted_score < scores[count]:
+                for axis in 0..<count:
+                    simplex[worst + axis] = contracted[axis]
+                scores[count] = contracted_score
+            else:
+                # Shrink toward the best.
+                for vertex in 1..=count:
+                    for axis in 0..<count:
+                        simplex[vertex * 3 + axis] = simplex[axis] + 0.5 * (simplex[vertex * 3 + axis] - simplex[axis])
+                    scores[vertex] = misfit(guides, turn_from(start, simplex[vertex * 3..<vertex * 3 + count], axes), width, height)
+    return turn_from(start, simplex[..<count], axes)
+
+## Solve `settings`' guides on a `width` × `height` photo and set Rotate,
+## Vertical and Horizontal to the answer; without guides they are left alone.
+pub func solve(settings: Settings*, width: f64, height: f64):
+    if settings.guides().length == 0:
+        return
+    let turn = solve_turn(settings.guides(), width, height)
+    let degrees = 180.0 / math.pi
+    settings.set(.geometry_rotate, turn.roll * degrees)
+    settings.set(.geometry_vertical, turn.tilt * degrees / reach_degrees * 100.0)
+    settings.set(.geometry_horizontal, turn.pan * degrees / reach_degrees * 100.0)
+
+test "untouched geometry maps the frame to itself":
+    let settings = defaults()
+    let map = frame_map(&settings, 6000.0, 4000.0)
+    let (x, y) = project(map, 0.25, 0.75)
+    assert(math.abs(x - 0.25) < 1.0e-12 and math.abs(y - 0.75) < 1.0e-12)
+
+test "guides on a tilted photo solve back to the tilt":
+    # A building's verticals as a camera tilted up by 12° sees them.
+    let width = 6000.0
+    let height = 4000.0
+    let tilted = correction(Turn(tilt = -12.0 * math.pi / 180.0), 0.0, width, height)
+    var guides: Guide[2]
+    for (at, x) in [1500.0, 4500.0].indexed():
+        let (x1, y1) = project(tilted, x, 500.0)
+        let (x2, y2) = project(tilted, x, 3500.0)
+        guides[at] = Guide(x1 / width, y1 / height, x2 / width, y2 / height)
+    let turn = solve_turn(guides, width, height)
+    assert(math.abs(turn.tilt * 180.0 / math.pi - 12.0) < 0.3, "the tilt was not recovered")
+    assert(math.abs(turn.roll) < 0.01 and turn.pan == 0.0)
+
+test "crop to fit keeps the frame inside the corrected photo":
+    var settings = defaults()
+    settings.set(.geometry_vertical, 40.0)
+    settings.set(.geometry_rotate, 5.0)
+    let map = frame_map(&settings, 6000.0, 4000.0)
+    for (u, v) in [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.5, 0.0)]:
+        let (x, y) = project(map, u, v)
+        assert(x >= -1.0e-6 and x <= 1.0 + 1.0e-6 and y >= -1.0e-6 and y <= 1.0 + 1.0e-6, "a corner of the frame left the photo")

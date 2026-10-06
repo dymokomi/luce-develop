@@ -18,6 +18,9 @@
 ##   Black & White    on/off, how much each hue band counts toward the grey,
 ##                    a tint
 ##   Lens             vignetting correction and where it starts
+##   Geometry         rotate, vertical and horizontal perspective, aspect, scale,
+##                    crop to fit; and up to four guides, lines drawn on the
+##                    photo that should be vertical or horizontal (geometry.lucb)
 ##   Effects          a post-crop vignette; film grain
 ##   View             the view transform (View)
 import interop
@@ -88,9 +91,28 @@ pub struct Curve:
         # The harmonic mean keeps the curve from overshooting between points.
         return 2.0 / (1.0 / before + 1.0 / after)
 
+## The most guides a photo takes.
+pub let guide_limit: usize = 4
+
+## A guide: a line from (x1, y1) to (x2, y2) on the uncorrected photo, in 0..1 of
+## its width and height, that should be vertical (when steeper than 45°) or
+## horizontal.
+pub struct Guide:
+    pub var x1: f64
+    pub var y1: f64
+    pub var x2: f64
+    pub var y2: f64
+
+    pub func vertical() -> bool:
+        let dx = self.x2 - self.x1
+        let dy = self.y2 - self.y1
+        return dy * dy > dx * dx
+
 pub struct Settings:
     var values: f64[parameter_count]
     var curves: Curve[5]
+    var lines: Guide[4]
+    var guide_count: usize
 
     pub func get(which: Parameter) -> f64:
         return self.values[(usize)which]
@@ -122,6 +144,20 @@ pub struct Settings:
         if curve.count == 2 and curve.xs[0] == 0.0 and curve.ys[0] == 0.0 and curve.xs[1] == 1.0 and curve.ys[1] == 1.0:
             curve.count = 0
         self.curves[at] = curve
+
+    ## The guides.
+    pub func guides() -> const Guide[]:
+        return self.lines[..<self.guide_count]
+
+    ## Replace the guides with the first four of `guides`, clamped to the photo.
+    pub func set_guides(guides: const Guide[]):
+        self.guide_count = 0
+        for guide in guides:
+            if self.guide_count == guide_limit:
+                break
+            self.lines[self.guide_count] = Guide(math.clamp(guide.x1, 0.0, 1.0), math.clamp(guide.y1, 0.0, 1.0),
+                                                  math.clamp(guide.x2, 0.0, 1.0), math.clamp(guide.y2, 0.0, 1.0))
+            self.guide_count += 1
 
     ## Whether every curve is the identity.
     pub func curves_untouched() -> bool:
@@ -173,6 +209,18 @@ pub func text_of(settings: const Settings*, out: Buffer*) -> !:
             try put_decimal(out, curve.xs[point])
             try out.put_byte(',')
             try put_decimal(out, curve.ys[point])
+    if settings.guide_count > 0:
+        if out.length() > 0:
+            try out.put_byte(';')
+        try out.put_text("guides=")
+        for at in 0..<settings.guide_count:
+            if at > 0:
+                try out.put_byte(' ')
+            let guide = settings.lines[at]
+            for (index, value) in [guide.x1, guide.y1, guide.x2, guide.y2].indexed():
+                if index > 0:
+                    try out.put_byte(',')
+                try put_decimal(out, value)
 
 ## Settings from their text form; unknown names and malformed pairs are passed
 ## over, so text from a newer version still opens.
@@ -200,6 +248,8 @@ pub func parse(text: str) -> Settings:
         for at in 0..<curve_count:
             if curve_names[at] == name:
                 parse_curve(&out, at, value)
+        if name == "guides":
+            parse_guides(&out, value)
     if out.get(.temperature) > 0.0 and out.get(.temperature) < 1667.0:
         out.set(.temperature, 1667.0)
     return out
@@ -228,6 +278,33 @@ func parse_curve(settings: Settings*, at: usize, text: str):
         count += 1
     settings.set_curve(at, xs[..<count], ys[..<count]) catch failure:
         return
+
+func parse_guides(settings: Settings*, text: str):
+    var guides: Guide[4]
+    var count: usize = 0
+    let bytes = text.bytes
+    var first: usize = 0
+    while first < bytes.length and count < guide_limit:
+        var end = first
+        while end < bytes.length and bytes[end] != ' ':
+            end += 1
+        let line = bytes[first..<end]
+        first = end + 1
+        var values: f64[4]
+        var found: usize = 0
+        var start: usize = 0
+        for at in 0..=line.length:
+            if at == line.length or line[at] == ',':
+                if found == 4:
+                    return
+                values[found] = decimal((str)line[start..<at]) else return
+                found += 1
+                start = at + 1
+        if found != 4:
+            return
+        guides[count] = Guide(values[0], values[1], values[2], values[3])
+        count += 1
+    settings.set_guides(guides[..<count])
 
 ## `value` with up to four decimals, trailing zeros dropped.
 func put_decimal(out: Buffer*, value: f64) -> !:
@@ -315,6 +392,29 @@ pub struct Look:
     pub func set_curve(at: i64, xs: const f64[], ys: const f64[]) -> !:
         try self.settings.set_curve(try curve_index(at), xs, ys)
 
+    ## How many guides there are, and guide `at`'s ends (0..1 of the photo).
+    pub func guide_count() -> i64:
+        return (i64)self.settings.guide_count
+    pub func guide(at: i64, end: i64) -> f64:
+        if at < 0 or at >= (i64)self.settings.guide_count or end < 0 or end > 3:
+            return 0.0
+        let line = self.settings.lines[(usize)at]
+        return [line.x1, line.y1, line.x2, line.y2][(usize)end]
+
+    ## Replace the guides with lines from (`x1s[i]`, `y1s[i]`) to (`x2s[i]`,
+    ## `y2s[i]`), at most four.
+    pub func set_guides(x1s: const f64[], y1s: const f64[], x2s: const f64[], y2s: const f64[]) -> !:
+        if x1s.length != y1s.length or x1s.length != x2s.length or x1s.length != y2s.length:
+            error(invalid, "every guide needs both ends")
+        var lines: Guide[4]
+        var count: usize = 0
+        for at in 0..<x1s.length:
+            if count == guide_limit:
+                break
+            lines[count] = Guide(x1s[at], y1s[at], x2s[at], y2s[at])
+            count += 1
+        self.settings.set_guides(lines[..<count])
+
     ## The text form.
     pub func text() -> interop.Owned[str]!:
         var out: Buffer
@@ -396,6 +496,10 @@ test "settings round-trip through their text, naming only changes":
     let odd = parse("exposure=9;glow=3;contrast=;temperature=900;saturation=-12.5;curve_red=0,0 1;curve_blue=0,0 1,1")
     assert(odd.get(.exposure) == 6.0 and odd.get(.contrast) == 0.0 and odd.get(.temperature) == 1667.0 and odd.get(.saturation) == -12.5)
     assert(odd.curves_untouched())
+    let guided = parse("guides=0.1,0.2,0.15,0.9 0.5,0.5,0.9,0.52;exposure=1")
+    assert(guided.guides().length == 2 and guided.guides()[0].vertical() and not guided.guides()[1].vertical() and guided.get(.exposure) == 1.0)
+    try text_of(&guided, &out)
+    assert(out.text() == "exposure=1;guides=0.1,0.2,0.15,0.9 0.5,0.5,0.9,0.52")
 
 test "curves pass their points and never overshoot":
     var curve = Curve(count = 3)

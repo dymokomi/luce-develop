@@ -44,6 +44,28 @@ pub struct Scene:
     pub func value_at(at: usize) -> f64[3]:
         return [(f64)self.pixels[at * 4], (f64)self.pixels[at * 4 + 1], (f64)self.pixels[at * 4 + 2]]
 
+    ## The scene values at (`u`, `v`), 0..1 of the image, filtered as the GPU
+    ## samples a texture: bilinear between texel centers, clamped at the edges.
+    pub func sample(u: f64, v: f64) -> f64[3]:
+        let x = math.clamp(u * (f64)self.columns - 0.5, 0.0, (f64)(self.columns - 1))
+        let y = math.clamp(v * (f64)self.rows - 0.5, 0.0, (f64)(self.rows - 1))
+        let x0 = (usize)x
+        let y0 = (usize)y
+        let x1 = x0 + 1 if x0 + 1 < self.columns else x0
+        let y1 = y0 + 1 if y0 + 1 < self.rows else y0
+        let fx = x - (f64)x0
+        let fy = y - (f64)y0
+        let top_left = self.value_at(y0 * self.columns + x0)
+        let top_right = self.value_at(y0 * self.columns + x1)
+        let bottom_left = self.value_at(y1 * self.columns + x0)
+        let bottom_right = self.value_at(y1 * self.columns + x1)
+        var out: f64[3]
+        for at in 0..<(usize)3:
+            let top = top_left[at] + (top_right[at] - top_left[at]) * fx
+            let bottom = bottom_left[at] + (bottom_right[at] - bottom_left[at]) * fx
+            out[at] = top + (bottom - top) * fy
+        return out
+
     ## The pixels as bytes, for a texture upload.
     pub func bytes() -> const u8[]:
         return u8[]((u8*)self.pixels.data, self.pixels.length * 2)

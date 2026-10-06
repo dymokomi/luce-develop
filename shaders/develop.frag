@@ -10,7 +10,9 @@
 //            (view.lucb), read with tetrahedral interpolation. The Standard and
 //            Linear views are computed here exactly as view.lucb does.
 //
-// Order: the matrix (white balance, camera color, exposure) into ACES AP1, scene
+// First the output position is mapped to the photo through the geometry's frame
+// map (perspective, rotation, aspect, scale, crop to fit); outside the photo is
+// black. Order: the matrix (white balance, camera color, exposure) into ACES AP1, scene
 // linear; lens vignetting; the tone curve on luminance, keeping each pixel's
 // ratios; in Oklab vibrance and saturation, the Color Mixer, Color Grading and
 // Black & White; the view transform to display-linear sRGB; Levels and Curves on
@@ -24,6 +26,9 @@ layout(push_constant) uniform Params {
     vec4 row1;
     vec4 row2;
     vec4 color;     // vibrance, saturation (-1..1), the view (0 ACES, 1 Standard, 2 Linear), the image's aspect
+    vec4 map0;      // geometry.lucb's frame map, by rows: output (0..1) to source (0..1), homogeneous
+    vec4 map1;
+    vec4 map2;
 } params;
 layout(set = 0, binding = 1) uniform sampler2D scene;
 layout(set = 0, binding = 2) uniform sampler2D tables;
@@ -229,9 +234,15 @@ vec3 with_grain(vec3 c, vec2 uv, float aspect) {
 void main() {
     vec2 uv = (gl_FragCoord.xy - params.rect.xy) / params.rect.zw;
     float aspect = params.color.w;
-    vec3 camera = texture(scene, uv).rgb;
+    vec3 mapped = vec3(dot(params.map0.xyz, vec3(uv, 1.0)), dot(params.map1.xyz, vec3(uv, 1.0)), dot(params.map2.xyz, vec3(uv, 1.0)));
+    vec2 source = mapped.xy / mapped.z;
+    if (mapped.z <= 0.0 || any(lessThan(source, vec2(0.0))) || any(greaterThan(source, vec2(1.0)))) {
+        fragment_color = vec4(0.0, 0.0, 0.0, 1.0);
+        return;
+    }
+    vec3 camera = texture(scene, source).rgb;
     vec3 c = vec3(dot(params.row0.xyz, camera), dot(params.row1.xyz, camera), dot(params.row2.xyz, camera));
-    c = with_lens(max(c, vec3(0.0)), uv, aspect);
+    c = with_lens(max(c, vec3(0.0)), source, aspect);
     c = with_tone(c);
     c = with_color(c);
     c = through_view(c);
