@@ -101,11 +101,11 @@ pub struct Renderer:
     var probe_pipeline: gpu.Pipeline?
     var bins: i64[1024]
 
-    ## Load the photo at `path` at most `edge` pixels on its longer side; the
-    ## current one stays shown until it is in (see `poll`).
+    ## Load the photo at `path` at most `edge` pixels on its longer side (0:
+    ## its full size); the current one stays shown until it is in (see `poll`).
     pub func open(path: str, edge: i64) -> !:
         let loading = self.loading else error(invalid, "the renderer is closed")
-        if edge < 16:
+        if edge != 0 and edge < 16:
             error(invalid, "a renderer needs a size")
         let copied = try strings.copy(path)
         loading.lock.lock()

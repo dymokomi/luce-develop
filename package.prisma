@@ -13,6 +13,11 @@ def package "luce-develop" {
         str path = "../luce-raw"
     }
 
+    def dependency "luce-exif" {
+        str owner = "dymokomi"
+        str path = "../luce-exif"
+    }
+
     def dependency "luce-jpeg" {
         str owner = "dymokomi"
         str path = "../luce-jpeg"

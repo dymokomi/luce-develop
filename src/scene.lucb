@@ -1,6 +1,7 @@
-## A photo's scene: its light as the develop starts from it, at a viewer's size.
-## A raw is developed once with luce-raw's `camera` option (demosaiced, levelled,
-## balanced as shot, no color matrix) and kept with its file, so a new white
+## A photo's scene: its light as the develop starts from it, at a viewer's size,
+## upright (the file's orientation applied). A raw is developed once with
+## luce-raw's `camera` option (demosaiced, levelled, balanced as shot, no color
+## matrix), turned upright, and kept with its file, so a new white
 ## balance is only a new matrix (luce-raw's `rendering`). Other files keep their
 ## preview, linearized from sRGB. Either way the renderer turns the scene's values
 ## into ACES AP1 with one matrix that also carries the exposure.
@@ -88,6 +89,29 @@ pub struct Scene:
                 balanced[row * 3 + column] *= look.balance.multipliers[column] / self.as_shot[column] * look.gain * exposure
         return multiply(to_working, balanced)
 
+    ## Turn the pixels upright from EXIF orientation `orientation` (1–8; other
+    ## values leave them as they are). 5–8 swap the width and height.
+    func orient(orientation: u64) -> !:
+        if orientation < 2 or orientation > 8:
+            return
+        let width = self.columns
+        let height = self.rows
+        let turned = orientation >= 5
+        let columns = height if turned else width
+        let rows = width if turned else height
+        let pixels = try new f16[columns * rows * 4] --- in memory.heap
+        for y in 0..<rows:
+            for x in 0..<columns:
+                let (sx, sy) = upright_source(orientation, x, y, width, height)
+                let from_at = (sy * width + sx) * 4
+                let to_at = (y * columns + x) * 4
+                for channel in 0..<(usize)4:
+                    pixels[to_at + channel] = self.pixels[from_at + channel]
+        free(self.pixels) in memory.heap
+        self.pixels = pixels
+        self.columns = columns
+        self.rows = rows
+
     pub func close():
         if self.data.length > 0:
             free(self.data) in memory.heap
@@ -99,6 +123,19 @@ pub struct Scene:
         self.pixels = no_pixels
         self.columns = 0
         self.rows = 0
+
+## The stored pixel that lands at (`x`, `y`) of the upright picture, for a
+## `width` × `height` picture stored with EXIF orientation `orientation`.
+func upright_source(orientation: u64, x: usize, y: usize, width: usize, height: usize) -> (usize, usize):
+    return match orientation:
+        2 => (width - 1 - x, y)
+        3 => (width - 1 - x, height - 1 - y)
+        4 => (x, height - 1 - y)
+        5 => (y, x)
+        6 => (y, height - 1 - x)
+        7 => (width - 1 - y, height - 1 - x)
+        8 => (width - 1 - y, x)
+        _ => (x, y)
 
 func multiply(a: f64[9], b: f64[9]) -> f64[9]:
     var out: f64[9]
@@ -193,7 +230,25 @@ func raw_scene(data: const u8[], edge: usize) -> Scene!:
             scene.pixels[out + 1] = (f16)(sum[1] * weight)
             scene.pixels[out + 2] = (f16)(sum[2] * weight)
             scene.pixels[out + 3] = (f16)1.0f32
+    try scene.orient((try raw.info(data)).orientation)
     return scene
 
 func math_above(low: usize, value: usize) -> usize:
     return value if value > low else low + 1
+
+test "orientations turn the stored picture upright":
+    # A 3 × 2 picture stored as
+    #     a b c
+    #     d e f
+    # Orientation 6 (turn a quarter clockwise) shows it 2 × 3 as
+    #     d a
+    #     e b
+    #     f c
+    assert(upright_source(6, 0, 0, 3, 2) == (0, 1) and upright_source(1 + 5, 1, 0, 3, 2) == (0, 0))
+    assert(upright_source(6, 0, 2, 3, 2) == (2, 1) and upright_source(6, 1, 2, 3, 2) == (2, 0))
+    # Orientation 8 (a quarter counterclockwise) shows c f / b e / a d.
+    assert(upright_source(8, 0, 0, 3, 2) == (2, 0) and upright_source(8, 1, 2, 3, 2) == (0, 1))
+    # 3 is a half turn; 2 and 4 mirror; 5 and 7 mirror across a diagonal.
+    assert(upright_source(3, 0, 0, 3, 2) == (2, 1) and upright_source(2, 0, 1, 3, 2) == (2, 1))
+    assert(upright_source(4, 2, 0, 3, 2) == (2, 1) and upright_source(5, 1, 2, 3, 2) == (2, 1))
+    assert(upright_source(7, 0, 0, 3, 2) == (2, 1))

@@ -13,6 +13,7 @@ from luce_std import paths
 from luce_color import transfer
 from luce_raw import raw
 from luce_jpeg import jpeg
+from luce_exif import exif
 from luce_png import png
 from luce_tiff import tiff
 from luce_heic import heic
@@ -80,8 +81,9 @@ pub func is_photo_name(name: str) -> bool:
 
 ## A display-ready preview of the photo in `data`, upright, its longer side at
 ## most `long_edge` (and close to it when the file allows). `orientation` is the
-## photo's EXIF orientation (1–8); 0 takes the one the file itself states where
-## luce-develop reads it (raws and TIFFs), else none.
+## photo's EXIF orientation (1–8); 0 takes the one the file itself states (its
+## EXIF for JPEGs, the embedded preview's for raws, the raster's for TIFF, PNG
+## and HEIC).
 pub func preview(data: const u8[], long_edge: usize, orientation: u64 = 0) -> Picture!:
     if long_edge == 0:
         error(invalid, "a preview needs a size")
@@ -91,11 +93,19 @@ pub func preview(data: const u8[], long_edge: usize, orientation: u64 = 0) -> Pi
         .jpeg:
             var decoded = try jpeg_picture(data, long_edge)
             defer decoded.close()
-            return try finish(&decoded, long_edge, orientation)
+            return try finish(&decoded, long_edge, orientation if orientation != 0 else stated_orientation(data))
         .png, .tiff, .heic:
             return try raster_preview(data, long_edge, orientation)
         _:
             error(unsupported, "this is not a photo luce-develop reads")
+
+## The orientation the file's EXIF states, 1 (upright) when it states none.
+func stated_orientation(data: const u8[]) -> u64:
+    let found = exif.read(data) catch failure:
+        return 1
+    defer found.release()
+    let stated = found.value.orientation
+    return (u64)stated if stated >= 1 and stated <= 8 else 1
 
 ## The preview of the file at `path` (see `preview`), handed to Luce.
 pub func open_preview(path: str, long_edge: i64, orientation: i64 = 0) -> interop.Reference[Picture]!:
