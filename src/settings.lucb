@@ -434,6 +434,10 @@ pub struct Look:
     pub func value() -> Settings:
         return self.settings
 
+    ## Take `settings`, for Base code holding a Look.
+    pub func replace(settings: Settings):
+        self.settings = settings
+
     pub func close():
         _ = self
 

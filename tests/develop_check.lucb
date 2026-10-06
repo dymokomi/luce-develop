@@ -6,6 +6,7 @@ import strings
 from luce_develop import scene
 from luce_develop import process
 from luce_develop import settings
+from luce_develop import geometry
 
 pub func main(arguments: str[]) -> i32!:
     if arguments.length < 4:
@@ -17,7 +18,12 @@ pub func main(arguments: str[]) -> i32!:
         var opened = try scene.open(path, 1024)
         defer opened.close()
         let loaded = (time.now() - started) // 1000000
-        var picture = try process.render(&opened, wanted)
+        # Guides decide the perspective, as an editor solves them.
+        var solved = wanted
+        geometry.solve(&solved, (f64)opened.width(), (f64)opened.height())
+        if solved.guides().length > 0:
+            print(f"      solved: rotate {solved.get(.geometry_rotate)} vertical {solved.get(.geometry_vertical)} horizontal {solved.get(.geometry_horizontal)}")
+        var picture = try process.render(&opened, solved)
         defer picture.close()
         let spent = (time.now() - started) // 1000000
         var buffer: u8[1024]

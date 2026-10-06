@@ -16,7 +16,8 @@
 ## Everything else reads one 3×3 matrix, `frame_map`: from output coordinates
 ## (0..1 of the output) to source coordinates (0..1 of the photo), homogeneous.
 from luce_std import math
-from settings import Settings, Guide, defaults
+import interop
+from settings import Settings, Guide, Look, defaults
 from parameters import Parameter
 
 ## The largest tilt or pan the Vertical and Horizontal sliders reach, in degrees.
@@ -273,6 +274,14 @@ pub func solve(settings: Settings*, width: f64, height: f64):
     settings.set(.geometry_rotate, turn.roll * degrees)
     settings.set(.geometry_vertical, turn.tilt * degrees / reach_degrees * 100.0)
     settings.set(.geometry_horizontal, turn.pan * degrees / reach_degrees * 100.0)
+
+## Solve `look`'s guides for a `width` × `height` photo (any size of its
+## shape), setting its Rotate, Vertical and Horizontal: for Luce.
+pub func solve_look(look: interop.Reference[Look], width: f64, height: f64) -> !:
+    let held = try look.get()
+    var settings = held.value()
+    solve(&settings, width, height)
+    held.replace(settings)
 
 test "untouched geometry maps the frame to itself":
     let settings = defaults()
