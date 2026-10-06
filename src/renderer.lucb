@@ -92,6 +92,9 @@ pub struct Renderer:
     var problem_length: usize
     ## The format of the targets drawn into: the window's when none.
     var format: gpu.Format?
+    ## For the histogram: a pipeline drawing into 8-bit textures, and the bins.
+    var probe_pipeline: gpu.Pipeline?
+    var bins: i64[1024]
 
     ## Load the photo at `path` at most `edge` pixels on its longer side; the
     ## current one stays shown until it is in (see `poll`).
@@ -175,6 +178,10 @@ pub struct Renderer:
         let checked = try target.get()
         try self.prepare(checked)
         let pipeline = self.pipeline else return
+        try self.shade(checked, pipeline, x, y, width, height)
+
+    ## One develop pass into `target` with `pipeline`.
+    func shade(checked: const gpu.RenderTarget*, pipeline: gpu.Pipeline, x: f64, y: f64, width: f64, height: f64) -> !:
         let scene_texture = self.scene_texture else return
         let tables_texture = self.tables_texture else return
         let view_texture = self.view_texture else return
@@ -188,6 +195,51 @@ pub struct Renderer:
             (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)((f64)self.shown.width() / (f64)self.shown.height())]
         let images: gpu.Texture[3] = [scene_texture, tables_texture, view_texture]
         try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 80), images, gpu.Filter.linear)
+
+    ## Count the develop as shown into the histogram (`histogram`): the photo is
+    ## developed at most 256 pixels on its longer side, off screen, and read back.
+    ## A viewer calls this once the settings have settled, not every frame. It
+    ## needs a draw first (the device is the window's).
+    pub func compute_histogram() -> !:
+        let device = self.device else return
+        if not self.has_image():
+            return
+        let longer = self.shown.width() if self.shown.width() > self.shown.height() else self.shown.height()
+        let scale = math.min(1.0, 256.0 / (f64)longer)
+        let width = math.max(1.0, math.round((f64)self.shown.width() * scale))
+        let height = math.max(1.0, math.round((f64)self.shown.height() * scale))
+        if self.probe_pipeline == none:
+            let shader = self.shader else return
+            self.probe_pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace, gpu.Format.rgba8)
+        let pipeline = self.probe_pipeline else return
+        var texture = try gpu.Texture.create(device, (u32)width, (u32)height, gpu.Format.rgba8)
+        defer texture.destroy()
+        let frame = try texture.frame()
+        defer frame.release()
+        let area = try frame.value().target()
+        defer area.release()
+        try self.shade(try area.get(), pipeline, 0.0, 0.0, width, height)
+        _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+        let pixels = try new u8[(usize)(width * height) * 4] in memory.heap
+        defer free(pixels) in memory.heap
+        try texture.read(pixels)
+        for at in 0..<(usize)1024:
+            self.bins[at] = 0
+        for at in 0..<pixels.length // 4:
+            let r = pixels[at * 4]
+            let g = pixels[at * 4 + 1]
+            let b = pixels[at * 4 + 2]
+            self.bins[r] += 1
+            self.bins[256 + (usize)g] += 1
+            self.bins[512 + (usize)b] += 1
+            # Rec. 709 luma of the encoded values, as photo editors draw it.
+            let luma = ((u32)r * 54 + (u32)g * 183 + (u32)b * 19) >> 8
+            self.bins[768 + (usize)luma] += 1
+
+    ## The last histogram's bin `at`: 256 bins each of red, green, blue and luma,
+    ## in that order, over the displayed 8-bit values.
+    pub func histogram_bin(at: i64) -> i64:
+        return self.bins[(usize)at] if at >= 0 and at < 1024 else 0
 
     ## The pipeline and the textures, made or refreshed for what changed.
     func prepare(target: const gpu.RenderTarget*) -> !:
@@ -254,6 +306,10 @@ pub struct Renderer:
         if let held = self.pipeline:
             var gone = held
             gone.destroy()
+        if let held = self.probe_pipeline:
+            var gone = held
+            gone.destroy()
+        self.probe_pipeline = none
         if let held = self.shader:
             var gone = held
             gone.destroy()
