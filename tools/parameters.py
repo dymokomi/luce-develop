@@ -25,7 +25,7 @@ for b in bands:
 for r in ["shadows","midtones","highlights","global"]:
     add("grade_"+r+"_hue",r.capitalize()+" Hue","Color Grading",0,360,0,0)
     add("grade_"+r+"_saturation",r.capitalize()+" Saturation","Color Grading",0,100)
-    add("grade_"+r+"_luminance",r.capitalize()+" Luminance","Color Grading",-100,100)
+    add("grade_"+r+"_luminance",r.capitalize(),"Color Grading",-100,100)
 add("grade_balance","Balance","Color Grading",-100,100)
 add("grade_blending","Blending","Color Grading",0,100,50)
 add("bw","Black & White","Black & White",0,1)
