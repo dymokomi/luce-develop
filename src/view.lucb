@@ -26,7 +26,7 @@ from luce_std import math
 from luce_color import xyz
 from luce_color import aces
 from luce_color import transfer
-import parallel
+from luce_std import parallel
 from settings import View
 
 ## Nodes per side of the baked table, and the shaper's range in stops from 0.18.
@@ -113,10 +113,10 @@ func build_inverse():
     for at in 0..<n:
         inverse_decoded[at] = transfer.srgb_decode((f64)at / (f64)(n - 1))
     # A slice of blue per work item, on every processor.
-    parallel.parallel(n, (void*)&inverse_table, build_inverse_slice) catch failure:
+    parallel.for_each(n, (void*)&inverse_table, build_inverse_slice) catch failure:
         trap("the ACES inverse table could not be built")
 
-func build_inverse_slice(context: void*, b: usize) -> !:
+func build_inverse_slice(context: void*, b: usize, worker: usize) -> !:
     let n = inverse_size
     for g in 0..<n:
         for r in 0..<n:

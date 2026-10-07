@@ -16,7 +16,7 @@ from luce_raw import raw
 from settings import Settings
 import source
 import view
-import parallel
+from luce_std import parallel
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -166,7 +166,7 @@ pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
     scene.pixels = try new f16[scene.columns * scene.rows * 4] --- in memory.heap
     errdefer free(scene.pixels) in memory.heap
     var job = Undisplay(bytes = picture.pixels(), pixels = scene.pixels, columns = scene.columns)
-    try parallel.parallel(scene.rows, (void*)&job, undisplay_row)
+    try parallel.for_each(scene.rows, (void*)&job, undisplay_row)
     return scene
 
 ## A display-referred picture's rows into scene light, in parallel.
@@ -175,7 +175,7 @@ struct Undisplay:
     var pixels: f16[]
     var columns: usize
 
-func undisplay_row(context: void*, row: usize) -> !:
+func undisplay_row(context: void*, row: usize, worker: usize) -> !:
     let job = (Undisplay*)context
     for column in 0..<job.columns:
         let at = (row * job.columns + column) * 4

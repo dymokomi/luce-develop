@@ -4,7 +4,7 @@
 ## tests hold the GPU to it. Change both together.
 import interop
 import memory
-import parallel
+from luce_std import parallel
 from luce_std import math
 from luce_color import transfer
 from settings import Settings, View
@@ -215,7 +215,7 @@ struct Rendering:
     var bytes: u8[]
     var words: u16[]
 
-func render_row(context: void*, y: usize) -> !:
+func render_row(context: void*, y: usize, worker: usize) -> !:
     let job = (Rendering*)context
     let v = ((f64)y + 0.5) / (f64)job.height
     for x in 0..<job.width:
@@ -251,7 +251,7 @@ pub func render(source: const Scene*, settings: Settings, output: view.Output = 
     var out = try Picture.create(job.width, job.height)
     errdefer out.close()
     job.bytes = out.bytes()
-    try parallel.parallel(job.height, (void*)&job, render_row)
+    try parallel.for_each(job.height, (void*)&job, render_row)
     return out
 
 ## `scene` developed with `settings` for `output` into 16-bit RGBA (alpha opaque), rows
@@ -260,7 +260,7 @@ pub func render16(source: const Scene*, settings: Settings, output: view.Output 
     var job = try rendering(source, &settings, output)
     job.words = try new u16[job.width * job.height * 4] --- in memory.heap
     errdefer free(job.words) in memory.heap
-    try parallel.parallel(job.height, (void*)&job, render_row)
+    try parallel.for_each(job.height, (void*)&job, render_row)
     return job.words
 
 ## The photo at `path` developed with `settings` at most `edge` pixels on its
