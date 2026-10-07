@@ -92,5 +92,7 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 
 ## Tests
 
-`./test.sh` runs the module tests and previews the sample raws in
-`../luce-raw/build/samples` when they are present.
+`luc test` runs the module tests and the test programs in `tests/<name>/`. One of
+those is `tests/parity`, which holds the GPU to the CPU on a Leica DNG, a Fuji
+X-Trans RAF and a Sony ARW from `../luce-raw/build/samples`. It is skipped when
+those samples or a GPU are not there; luce-raw's tests fetch the samples.
