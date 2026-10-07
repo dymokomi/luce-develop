@@ -86,7 +86,7 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
   the matching ICC profile (luce-color's `icc.write_named_profile`): about
   2 s for a 24 MP raw, demosaic included. `scene.open(path, 0)` is a full-size
   scene.
-- **Parity.** `tests/parity.lucb` holds the GPU to the CPU for every tool. Both
+- **Parity.** `tests/parity/main.lucb` holds the GPU to the CPU for every tool. Both
   paths agree to within a level on average, and to 3 levels for Standard and
   Linear.
 
