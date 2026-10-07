@@ -13,7 +13,10 @@ import strings
 from luce_std import files
 from luce_std import math
 from luce_raw import raw
+from luce_color import temperature
+from luce_color import xyz
 from settings import Settings
+from settings import parse as settings_text
 import source
 import view
 from luce_std import parallel
@@ -75,12 +78,23 @@ pub struct Scene:
         return u8[]((u8*)self.pixels.data, self.pixels.length * 2)
 
     ## The matrix, row-major, from the scene's values into AP1 for `settings`:
-    ## white balance and camera color for raws, then exposure.
+    ## white balance (and camera color for raws), then exposure. Other files are
+    ## AP1 already and balanced as shot (a neutral 6500 K): a temperature and tint
+    ## re-balance them as if that had been the light, adapting its white (Bradford)
+    ## to the as-shot one, so a higher temperature warms them as it warms a raw.
     pub func matrix(settings: const Settings*) -> f64[9]!:
         let exposure = math.exp2(settings.get(.exposure))
         if not self.is_raw():
-            # Already AP1: only the exposure.
-            return [exposure, 0.0, 0.0, 0.0, exposure, 0.0, 0.0, 0.0, exposure]
+            var out: f64[9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            let kelvin = settings.get(.temperature)
+            if kelvin > 0.0:
+                let light = temperature.white(kelvin, settings.get(.tint))
+                let shot = temperature.white(self.shot_temperature, self.shot_tint)
+                let to_xyz = xyz.rgb_to_xyz(xyz.aces_ap1)
+                out = xyz.multiply(xyz.xyz_to_rgb(xyz.aces_ap1), xyz.multiply(xyz.adapt(light, shot), to_xyz)).m
+            for at in 0..<(usize)9:
+                out[at] *= exposure
+            return out
         let to_working = view.display_to_working()
         let look = try raw.rendering(self.data, settings.get(.temperature), settings.get(.tint) if settings.get(.temperature) > 0.0 else 0.0)
         # Values balanced as shot, rebalanced: times the new multipliers over the old.
@@ -266,3 +280,22 @@ test "orientations turn the stored picture upright":
     assert(upright_source(3, 0, 0, 3, 2) == (2, 1) and upright_source(2, 0, 1, 3, 2) == (2, 1))
     assert(upright_source(4, 2, 0, 3, 2) == (2, 1) and upright_source(5, 1, 2, 3, 2) == (2, 1))
     assert(upright_source(7, 0, 0, 3, 2) == (2, 1))
+
+## Mid grey through `scene`'s matrix for settings `text`.
+func grey_through(scene: const Scene*, text: str) -> f64[3]!:
+    let settings = settings_text(text)
+    let m = try scene.matrix(&settings)
+    let v = 0.18
+    return [(m[0] + m[1] + m[2]) * v, (m[3] + m[4] + m[5]) * v, (m[6] + m[7] + m[8]) * v]
+
+test "white balance turns non-raw scenes as it turns raws: warmer above as shot, cooler below":
+    let scene = Scene(as_shot = [1.0, 1.0, 1.0], shot_temperature = 6500.0)
+    let same = try grey_through(&scene, "temperature=6500;tint=0")
+    assert(math.abs(same[0] - 0.18) < 1.0e-9 and math.abs(same[2] - 0.18) < 1.0e-9)
+    let warm = try grey_through(&scene, "temperature=9000")
+    assert(warm[0] > warm[1] and warm[1] > warm[2])
+    let cool = try grey_through(&scene, "temperature=4000")
+    assert(cool[2] > cool[1] and cool[1] > cool[0])
+    # A positive tint is magenta: green falls below red and blue.
+    let magenta = try grey_through(&scene, "temperature=6500;tint=30")
+    assert(magenta[1] < magenta[0] and magenta[1] < magenta[2])
