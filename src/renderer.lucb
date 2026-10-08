@@ -56,9 +56,11 @@ func load(context: void*?):
         loading.lock.unlock()
         defer strings.release(path)
         var opened: Scene
+        # The failure's message lives only as long as its handler; keep a copy.
+        var held: u8[256]
         var message = ""
         opened = scene.open(path, edge) catch failure:
-            message = failure.message
+            message = strings.copy_into(held, failure.message)
             recover Scene()
         loading.lock.lock()
         if served == loading.serial:
