@@ -10,8 +10,8 @@
 //      the inhibitor's diffusion), in px
 //   2  halation: the scattered exposure (image 2) plus the halation weights
 //      times a vertical blur of image 1, the horizontally blurred exposure
-//   3  the neutral development of each layer: its dye amount if nothing held
-//      it back, the inhibitor's source
+//   3  the inhibitor's source: each layer's dye if nothing held it back (on a
+//      slide, the first developer's negative image)
 //   4  develop: held back by the blurred inhibitor (image 2), grain, the scan,
 //      back to AP1 (film.lucb's `scan`)
 //
@@ -39,14 +39,26 @@ layout(set = 0, binding = 4) uniform sampler2D film;
 const float table_width = 1024.0;
 const float film_width = 1089.0;
 const float film_rows = 85.0;
-const float film_lut = 33.0;
+const float film_lut_size = 33.0;
 const float film_grid = 48.0;
 
 vec4 value(float at) {
     return texture(tables, vec2((at + 0.5) / table_width, 3.5 / 4.0));
 }
+// The atlas at (x, y) in texels, bilinear between texel centres with exact
+// weights, as film.lucb reads it (the hardware's filtering weighs in 1/256ths,
+// which a slide's steep curves would show).
 vec3 film_texels(float x, float y) {
-    return texture(film, vec2((x + 0.5) / film_width, (y + 0.5) / film_rows)).rgb;
+    vec2 p = vec2(x, y);
+    vec2 base = floor(p);
+    vec2 f = p - base;
+    ivec2 b = ivec2(base);
+    ivec2 top = ivec2(int(film_width) - 1, int(film_rows) - 1);
+    vec3 a = texelFetch(film, min(b, top), 0).rgb;
+    vec3 c = texelFetch(film, min(b + ivec2(1, 0), top), 0).rgb;
+    vec3 d = texelFetch(film, min(b + ivec2(0, 1), top), 0).rgb;
+    vec3 e = texelFetch(film, min(b + ivec2(1, 1), top), 0).rgb;
+    return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
 }
 vec4 film_value(float at) {
     return texture(film, vec2((at + 0.5) / film_width, 84.5 / film_rows));
@@ -58,12 +70,20 @@ vec3 film_along(float row, float log_h) {
 vec3 film_curve(float row, vec3 log_h) {
     return vec3(film_along(row, log_h.r).r, film_along(row, log_h.g).g, film_along(row, log_h.b).b);
 }
+// The scan's table at dye amounts `a`, trilinear with exact weights (texel
+// reads, not the hardware's coarse filtering: a slide's table is steep).
+vec3 film_lut(float x, float y) {
+    return texelFetch(film, ivec2(int(x), int(y)), 0).rgb;
+}
 vec3 film_scan(vec3 a, float top) {
-    vec3 s = clamp(a / top, 0.0, 1.0) * (film_lut - 1.0);
-    float slice = min(floor(s.b), film_lut - 2.0);
-    vec3 near_slice = film_texels(slice * film_lut + s.r, s.g);
-    vec3 far_slice = film_texels((slice + 1.0) * film_lut + s.r, s.g);
-    return mix(near_slice, far_slice, s.b - slice);
+    vec3 s = clamp(a / top, 0.0, 1.0) * (film_lut_size - 1.0);
+    vec3 base = min(floor(s), vec3(film_lut_size - 2.0));
+    vec3 f = s - base;
+    vec3 c00 = mix(film_lut(base.b * film_lut_size + base.r, base.g), film_lut(base.b * film_lut_size + base.r + 1.0, base.g), f.r);
+    vec3 c01 = mix(film_lut(base.b * film_lut_size + base.r, base.g + 1.0), film_lut(base.b * film_lut_size + base.r + 1.0, base.g + 1.0), f.r);
+    vec3 c10 = mix(film_lut((base.b + 1.0) * film_lut_size + base.r, base.g), film_lut((base.b + 1.0) * film_lut_size + base.r + 1.0, base.g), f.r);
+    vec3 c11 = mix(film_lut((base.b + 1.0) * film_lut_size + base.r, base.g + 1.0), film_lut((base.b + 1.0) * film_lut_size + base.r + 1.0, base.g + 1.0), f.r);
+    return mix(mix(c00, c01, f.g), mix(c10, c11, f.g), f.b);
 }
 // A hash of a cell to 0..1, the same as film.lucb's.
 float hashed(uvec2 p) {
@@ -147,7 +167,11 @@ void main() {
     } else if (stage == 2) {
         out_color = fetch(second_image, at) + params.halo.rgb * blurred(first_image, at, step, params.sigma, radius);
     } else if (stage == 3) {
-        out_color = film_curve(81.0, log_exposure(fetch(first_image, at)));
+        // What holds development back: the dye on a negative, the first
+        // developer's negative image on a slide (film.lucb's `inhibitor`).
+        vec3 dye = film_curve(81.0, log_exposure(fetch(first_image, at)));
+        vec4 v17 = film_value(17.0);
+        out_color = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
     } else {
         vec3 amounts;
         vec3 effective;
@@ -160,6 +184,7 @@ void main() {
             float pitch = params.halo.w;
             float cell = max(8.0, pitch);
             float scale = v6.w * grain_gain(cell);
+            float kind = film_value(17.0).w;
             vec2 p = (vec2(at) + 0.5) * pitch / cell + 1.0;
             ivec2 c = ivec2(floor(p));
             vec3 sum = vec3(0.0);
@@ -176,6 +201,8 @@ void main() {
                     developed(ivec2(floor((centre - 1.0) * cell / pitch)), place_amounts, place_effective);
                     vec3 strength = vec3(hashed(k + uvec2(0u, 0x85ebca6bu)), hashed(k + uvec2(7919u, 0x85ebca6bu + 104729u)),
                                          hashed(k + uvec2(15838u, 0x85ebca6bu + 209458u))) * 2.0 - 1.0;
+                    // Black and white: one grain of silver for all three.
+                    if (kind > 1.5) strength = vec3(strength.r);
                     vec3 amplitude = film_curve(83.0, place_effective) * scale;
                     sum += w * (place_amounts + strength * amplitude);
                     spread += w * amplitude;
@@ -184,11 +211,19 @@ void main() {
             }
             amounts = sum / total;
             vec3 sigma = 0.326 * spread / total;
-            unbias = 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
+            unbias = kind > 0.5 && kind < 1.5 ? vec3(0.0) : 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
         } else {
             developed(at, amounts, effective);
         }
         vec3 d = film_scan(amounts, v6.y);
+        float slide = film_value(17.0).w;
+        if (slide > 0.5 && slide < 1.5) {
+            // A slide: scene light (asinh-encoded), Contrast a power about grey; the timing.
+            vec3 grown = exp(d);
+            vec3 light_out = 0.5 * (grown - 1.0 / grown) / 256.0;
+            fragment_color = vec4(0.18 * pow(max(light_out, 0.0) / 0.18, v8.rgb) * film_value(10.0).rgb, 1.0);
+            return;
+        }
         vec4 v7 = film_value(7.0);
         vec3 floors = film_value(9.0).rgb;
         vec3 shown = 0.18 * pow(vec3(10.0), (d - unbias - v7.rgb) * v8.rgb);

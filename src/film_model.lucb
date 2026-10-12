@@ -6,6 +6,8 @@ import memory
 from luce_std import math
 from luce_color import spectral
 from luce_color import xyz
+from luce_color import transfer
+import view
 from film_stocks import Stock
 import film_stocks
 
@@ -16,6 +18,9 @@ pub let grid_size: usize = 48
 pub let curve_samples: usize = 1024
 pub let log_low: f64 = -4.5
 pub let log_high: f64 = 2.5
+
+## Slides are seen on a lightbox of this light (D50, as a black body).
+let lightbox_kelvin: f64 = 5000.0
 
 # mark: Densitometry ==========================================================
 
@@ -62,12 +67,20 @@ pub struct Model:
     pub var to_film: f64[9]
     ## Layer exposures over the xy grid, rows of y (48 × 48 × 3).
     pub var exposure: f64[]
+    ## Each grid cell's spectrum (Y = 1; rows of y, 81 samples each), each
+    ## layer's sensitivity (linear), and the balance light, for exposing the grid
+    ## through a filter (`expose_grid`).
+    pub var spectra: f64[]
+    pub var sensitivity: f64[243]
+    pub var light: spectral.Spectrum
     ## Neutral dye amounts over log H (1024 × 3), and rms granularity.
     pub var neutral: f64[]
     pub var grain: f64[]
     ## The scan: densities over dye amounts 0..top (33³ × 3), r fastest.
     pub var scan: f64[]
     pub var top: f64
+    ## Each layer's most dye (a slide's in its shadows), and normal exposure.
+    pub var most: f64[3]
     pub var grey_log_h: f64
     ## Sharpness, fitted to the stock's MTF curves: each layer's light scatter (an
     ## exponential's length, µm, the emulsion's classic spread of light), how strongly its development holds itself back
@@ -80,9 +93,74 @@ pub struct Model:
 
     pub func release():
         release_table(&self.exposure)
+        release_table(&self.spectra)
         release_table(&self.neutral)
         release_table(&self.grain)
         release_table(&self.scan)
+
+    ## The grid's layer exposures (rows of y, three per cell) through a filter
+    ## that passes `filter` of each sample: each layer relative to its exposure to
+    ## the balance light, the whole raised by the filter factor (the light a grey
+    ## loses through it), as a photographer opens up for a filter.
+    pub func expose_grid(filter: const f64[81], out: f64[]):
+        var unfiltered = 0.0
+        var filtered = 0.0
+        var light_exposure: f64[3]
+        for layer in 0..<(usize)3:
+            var sum = 0.0
+            for at in 0..<spectral.samples:
+                let through = self.light.values[at] * self.sensitivity[layer * 81 + at]
+                sum += through
+                filtered += through * filter[at]
+            light_exposure[layer] = sum
+            unfiltered += sum
+        let factor = unfiltered / math.max(filtered, 1.0e-12)
+        for cell in 0..<grid_size * grid_size:
+            let spectrum = self.spectra[cell * 81..<cell * 81 + 81]
+            for layer in 0..<(usize)3:
+                var sum = 0.0
+                for at in 0..<spectral.samples:
+                    sum += spectrum[at] * filter[at] * self.sensitivity[layer * 81 + at]
+                out[cell * 3 + layer] = sum / light_exposure[layer] * factor
+
+    ## A slide of dye `amounts` on a lightbox of `light`, its clear base white,
+    ## the eye adapted to it: the scene light (AP1, log2 over grey) the ACES view
+    ## shows as that, as display pictures come in (view.undisplay), as
+    ## asinh(256·light).
+    pub func viewed(amounts: f64[3], light: const spectral.Spectrum*) -> f64[3]:
+        var shown = xyz.XYZ(0.0, 0.0, 0.0)
+        var white = xyz.XYZ(0.0, 0.0, 0.0)
+        for at in 0..<spectral.samples:
+            let d = amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]
+            let power = light.values[at] * math.pow(10.0, -d)
+            shown.x += power * spectral.observer[at * 3]
+            shown.y += power * spectral.observer[at * 3 + 1]
+            shown.z += power * spectral.observer[at * 3 + 2]
+            white.x += light.values[at] * spectral.observer[at * 3]
+            white.y += light.values[at] * spectral.observer[at * 3 + 1]
+            white.z += light.values[at] * spectral.observer[at * 3 + 2]
+        let point = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
+        let adapted = xyz.apply(xyz.adapt(point, xyz.d65), xyz.XYZ(shown.x / white.y, shown.y / white.y, shown.z / white.y))
+        let to_srgb = xyz.xyz_to_rgb(xyz.srgb).m
+        var c: f64[3] = [to_srgb[0] * adapted.x + to_srgb[1] * adapted.y + to_srgb[2] * adapted.z,
+                         to_srgb[3] * adapted.x + to_srgb[4] * adapted.y + to_srgb[5] * adapted.z,
+                         to_srgb[6] * adapted.x + to_srgb[7] * adapted.y + to_srgb[8] * adapted.z]
+        # Colors past the display's gamut: toward their luminance until none is negative.
+        let least = math.min(c[0], math.min(c[1], c[2]))
+        if least < 0.0 and adapted.y > 0.0:
+            let t = adapted.y / (adapted.y - least)
+            for k in 0..<(usize)3:
+                c[k] = adapted.y + (c[k] - adapted.y) * t
+        let scene = view.undisplay(transfer.srgb_encode(math.clamp(c[0], 0.0, 1.0)), transfer.srgb_encode(math.clamp(c[1], 0.0, 1.0)),
+                                   transfer.srgb_encode(math.clamp(c[2], 0.0, 1.0)))
+        # On an inverse hyperbolic sine (linear through black, logarithmic in the
+        # light), in which the table interpolates smoothly where a channel of a
+        # saturated color runs down to nothing.
+        var out: f64[3]
+        for k in 0..<(usize)3:
+            let v = math.max(scene[k], 0.0) * 256.0
+            out[k] = math.log(v + math.sqrt(v * v + 1.0))
+        return out
 
     ## The scan's densities over D-min of dye `amounts` (cyan, magenta, yellow).
     pub func scanned(amounts: f64[3]) -> f64[3]:
@@ -104,6 +182,16 @@ func release_table(table: f64[]*):
 func over_minimum(stock: const Stock*, channel: usize, log_h: f64) -> f64:
     let n = stock.curve_count
     let curve = stock.curves[channel * film_stocks.curve_most..<channel * film_stocks.curve_most + n]
+    if stock.kind == 1:
+        # A slide's curve falls from D-max to D-min, both plateaus plotted: held
+        # at its ends, over its least density.
+        var least = curve[0]
+        for value in curve:
+            least = math.min(least, value)
+        let position = math.clamp((log_h - stock.curve_first) / stock.curve_step, 0.0, (f64)(n - 1))
+        let at = (usize)math.min(math.floor(position), (f64)(n - 2))
+        let t = position - (f64)at
+        return curve[at] + (curve[at + 1] - curve[at]) * t - least
     let first = curve[0]
     let toe = first - 0.015
     let start_slope = math.max((curve[1] - curve[0]) / stock.curve_step, 0.01)
@@ -176,30 +264,28 @@ pub func build_model(stock: Stock) -> Model!:
     let white = light.xyz()
     let balance = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
     out.to_film = xyz.multiply(xyz.adapt(xyz.aces_white, balance), xyz.rgb_to_xyz(xyz.aces_ap1)).m
-    # Each layer's sensitivity, linear, and its exposure to the light itself.
-    var sensitivity: f64[243]
-    var light_exposure: f64[3]
+    # Each layer's sensitivity, linear; each grid cell's spectrum; the grid
+    # exposed through no filter.
+    out.light = light
     for layer in 0..<(usize)3:
         var peak = -1.0e9
         for at in 0..<spectral.samples:
             peak = math.max(peak, stock.sensitivity[layer * 81 + at])
         for at in 0..<spectral.samples:
-            sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            sum += light.values[at] * sensitivity[layer * 81 + at]
-        light_exposure[layer] = sum
+            out.sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
     var upsampler = try spectral.upsampler(light, grid_size)
     defer upsampler.release()
-    out.exposure = try new f64[grid_size * grid_size * 3] --- in memory.heap
-    for i in 0..<grid_size:
-        for j in 0..<grid_size:
+    out.spectra = try new f64[grid_size * grid_size * 81] --- in memory.heap
+    for j in 0..<grid_size:
+        for i in 0..<grid_size:
             let spectrum = upsampler.spectrum(i, j)
-            for layer in 0..<(usize)3:
-                var sum = 0.0
-                for at in 0..<spectral.samples:
-                    sum += spectrum.values[at] * sensitivity[layer * 81 + at]
-                out.exposure[(j * grid_size + i) * 3 + layer] = sum / light_exposure[layer]
+            for at in 0..<spectral.samples:
+                out.spectra[(j * grid_size + i) * 81 + at] = spectrum.values[at]
+    out.exposure = try new f64[grid_size * grid_size * 3] --- in memory.heap
+    var clear: f64[81]
+    for at in 0..<spectral.samples:
+        clear[at] = 1.0
+    out.expose_grid(clear, out.exposure)
     # Neutral development: the dye amounts that read each curve's densities.
     out.neutral = try new f64[curve_samples * 3] --- in memory.heap
     out.grain = try new f64[curve_samples * 3] --- in memory.heap
@@ -218,16 +304,21 @@ pub func build_model(stock: Stock) -> Model!:
             out.grain[at * 3 + layer] = stock.granularity[row + below] * (1.0 - t) + stock.granularity[row + below + 1] * t
     out.grey_log_h = stock.grey_log_h
     out.top = 0.0
+    for at in 0..<curve_samples:
+        for layer in 0..<(usize)3:
+            out.most[layer] = math.max(out.most[layer], out.neutral[at * 3 + layer])
     for layer in 0..<(usize)3:
-        out.top = math.max(out.top, out.neutral[(curve_samples - 1) * 3 + layer] * 1.1)
-    # The scan over the dye amounts.
+        out.top = math.max(out.top, out.most[layer] * 1.1)
+    # The scan over the dye amounts: a negative's densities as the scanner reads
+    # them; a slide as seen on a lightbox, as scene light (asinh-encoded).
     let n = lut_size
     out.scan = try new f64[n * n * n * 3] --- in memory.heap
+    let lightbox = spectral.planck(lightbox_kelvin)
     for b in 0..<n:
         for g in 0..<n:
             for r in 0..<n:
                 let amounts: f64[3] = [out.top * (f64)r / (f64)(n - 1), out.top * (f64)g / (f64)(n - 1), out.top * (f64)b / (f64)(n - 1)]
-                let read = out.scanned(amounts)
+                let read = out.viewed(amounts, &lightbox) if stock.kind == 1 else out.scanned(amounts)
                 let at = ((b * n + g) * n + r) * 3
                 out.scan[at] = read[0]
                 out.scan[at + 1] = read[1]
@@ -254,7 +345,9 @@ func fit_sharpness(model: Model*):
     let high = (usize)math.floor(grey_at) + 20
     var slopes: f64[3]
     for layer in 0..<(usize)3:
-        slopes[layer] = (model.neutral[high * 3 + layer] - model.neutral[low * 3 + layer]) / (log_h_at(high) - log_h_at(low))
+        # A slide's dye falls with exposure; its edges follow the first
+        # developer's negative image, which rises as fast.
+        slopes[layer] = math.abs((model.neutral[high * 3 + layer] - model.neutral[low * 3 + layer]) / (log_h_at(high) - log_h_at(low)))
     var best_total = 1.0e30
     var spread = 10.0
     while spread <= 40.0:
@@ -315,7 +408,7 @@ test "each stock's sharpness follows its datasheet MTF":
         print(f"{model.stock.name}: scatter {model.scatter[0]} {model.scatter[1]} {model.scatter[2]} µm, self {model.self_inhibition[0]} {model.self_inhibition[1]} {model.self_inhibition[2]}, spread {model.spread[0]} {model.spread[1]} {model.spread[2]} µm")
         var worst = 0.0
         for layer in 0..<(usize)3:
-            let slope = (model.neutral[(grey_at + 20) * 3 + layer] - model.neutral[(grey_at - 20) * 3 + layer]) / (log_h_at(grey_at + 20) - log_h_at(grey_at - 20))
+            let slope = math.abs((model.neutral[(grey_at + 20) * 3 + layer] - model.neutral[(grey_at - 20) * 3 + layer]) / (log_h_at(grey_at + 20) - log_h_at(grey_at - 20)))
             for point in 0..<model.stock.mtf_count:
                 let wanted = model.stock.mtf[layer * film_stocks.mtf_most + point] / 100.0
                 let got = modelled_mtf(&model, layer, model.stock.mtf_frequencies[point], slope)

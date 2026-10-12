@@ -10,7 +10,8 @@
 ##   Exposure & Tone  exposure (stops); contrast, highlights, shadows, whites,
 ##                    blacks: a tone curve on luminance (tone.lucb)
 ##   Film             stock (0 none), format, filter (the light on set: matched
-##                    to the stock, or White Balance's as the film saw it),
+##                    to the stock, or White Balance's as the film saw it), a
+##                    color filter on the lens (black and white's),
 ##                    film exposure, interimage, grain, halation, and the
 ##                    transfer's warmth, tint, contrast and black (film.lucb)
 ##   Levels           input black and white, gamma, output black and white, on

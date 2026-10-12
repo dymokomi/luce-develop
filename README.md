@@ -111,7 +111,10 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    balances it to the stock, as White Balance does; with None or 85, White
    Balance's Temperature and Tint become the light on set (as shot unless
    set), so daylight on tungsten film goes blue unless an 85 warms it (and
-   takes its 2/3 of a stop).
+   takes its 2/3 of a stop). Color Filter puts a black-and-white
+   photographer's filter on the lens (Yellow 8, Orange 21, Red 25, Green 11,
+   Blue 47, modelled on Wratten curves): its transmission multiplies the light
+   before the layers see it, and exposure opens up by its factor.
 2. **Light in the emulsion.** Each layer's exposure scatters (an exponential,
    the emulsion's classic spread of light); Halation adds light that came back
    off the base, mostly to the red layer, weak behind rem-jet backing.
@@ -155,7 +158,15 @@ print curves are made to one shape, so the three are read as that shape set
 apart, which Kodak's toes (run together on the graph) cannot be read apart for.
 
 Stocks, the tungsten negatives American television shot through the 1990s:
-Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277.
+Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277;
+and two of Fujifilm's. Velvia 50 is a slide (reversal) film: its dyes form a
+positive, seen on a D50 lightbox and brought into scene light through the ACES
+view's inverse, as display pictures come in, so through the default view it
+shows as the slide does (Contrast is a power about grey). Neopan 100 Acros II
+is a black-and-white negative: three identical layers of its panchromatic
+sensitivity (the spectrogram to 5400 K with the light divided out), neutral
+silver, one grain for all three channels, developed per its D-76 7-minute
+curve. The Fuji sheets' graphs are raster scans, traced like 2383's.
 5298's curves were read off the raster graphs of Kodak's TI2082 datasheet
 (`digitize_ti2082.py`); its sheet has no per-dye spectra or marked normal
 exposure, so it takes 5293's dye shapes and 5279's grey (the same speed). The
