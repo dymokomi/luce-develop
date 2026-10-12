@@ -7,13 +7,15 @@
 //      AP1, then into the three layers' exposure (film.lucb's `expose`)
 //   1  blur along (dx, dy), per channel: an exponential of that length (light
 //      scattered in the emulsion) or a Gaussian of that σ (halation's spread,
-//      the inhibitor's diffusion), in px
+//      the inhibitor's diffusion), in px; alpha by a Gaussian of its own (the
+//      developer's exhaustion spreading), or not at all
 //   2  halation: the scattered exposure (image 2) plus the halation weights
 //      times a vertical blur of image 1, the horizontally blurred exposure
 //   3  the inhibitor's source: each layer's dye if nothing held it back (on a
-//      slide, the first developer's negative image)
-//   4  develop: held back by the blurred inhibitor (image 2), grain, the scan,
-//      back to AP1 (film.lucb's `scan`)
+//      slide, the first developer's negative image); in alpha the developer it
+//      uses up (film.lucb's `exhaustion`)
+//   4  develop: held back by the blurred inhibitor and exhaustion (image 2),
+//      grain, the scan, back to AP1 (film.lucb's `scan`)
 //
 //   image 1, 2  the stage's inputs, RGBA half floats at the scene's size
 //   image 3     the develop's tables (tables.lucb), for the lens vignetting
@@ -29,7 +31,7 @@ layout(push_constant) uniform Params {
     vec4 row0;      // stage 0: the matrix from the scene texture to AP1, by rows
     vec4 row1;
     vec4 row2;
-    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it)
+    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it); alpha's blur σ, px
 } params;
 layout(set = 0, binding = 1) uniform sampler2D first_image;
 layout(set = 0, binding = 2) uniform sampler2D second_image;
@@ -106,14 +108,19 @@ float tap(float d, float size, bool exponential) {
     return exponential ? exp(-abs(d) / size) : exp(-0.5 * d * d / (size * size));
 }
 
-vec3 blurred(sampler2D image, ivec2 at, ivec2 step, vec4 sigma, int radius) {
-    vec3 sum = vec3(0.0);
-    vec3 weights = vec3(0.0);
+vec4 fetch4(sampler2D image, ivec2 at) {
+    ivec2 size = textureSize(image, 0);
+    return texelFetch(image, clamp(at, ivec2(0), size - 1), 0);
+}
+
+vec4 blurred(sampler2D image, ivec2 at, ivec2 step, vec4 sigma, float alpha_sigma, int radius) {
+    vec4 sum = vec4(0.0);
+    vec4 weights = vec4(0.0);
     bool exponential = sigma.a > 0.5;
     for (int i = -radius; i <= radius; i++) {
         float d = float(i);
-        vec3 w = vec3(tap(d, sigma.r, exponential), tap(d, sigma.g, exponential), tap(d, sigma.b, exponential));
-        sum += w * fetch(image, at + step * i);
+        vec4 w = vec4(tap(d, sigma.r, exponential), tap(d, sigma.g, exponential), tap(d, sigma.b, exponential), tap(d, alpha_sigma, false));
+        sum += w * fetch4(image, at + step * i);
         weights += w;
     }
     return sum / weights;
@@ -140,8 +147,10 @@ vec3 log_exposure(vec3 e) {
 // H it developed at (film.lucb's `developed`).
 void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
     vec3 log_h = log_exposure(fetch(first_image, at));
-    vec3 held = fetch(second_image, at);
-    effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held));
+    vec4 around = fetch4(second_image, at);
+    vec3 held = around.rgb;
+    effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held))
+              - film_value(20.0).z * around.a;
     amounts = film_curve(82.0, effective);
 }
 
@@ -151,6 +160,7 @@ void main() {
     ivec2 step = ivec2(params.stage.yz);
     int radius = int(params.stage.w + 0.5);
     vec3 out_color;
+    float spent = 1.0;
     if (stage == 0) {
         vec3 camera = fetch(first_image, at);
         vec3 c = max(vec3(dot(params.row0.xyz, camera), dot(params.row1.xyz, camera), dot(params.row2.xyz, camera)), vec3(0.0));
@@ -163,15 +173,18 @@ void main() {
         }
         out_color = expose(c);
     } else if (stage == 1) {
-        out_color = blurred(first_image, at, step, params.sigma, radius);
+        vec4 blur = blurred(first_image, at, step, params.sigma, params.lens.y, radius);
+        out_color = blur.rgb;
+        spent = blur.a;
     } else if (stage == 2) {
-        out_color = fetch(second_image, at) + params.halo.rgb * blurred(first_image, at, step, params.sigma, radius);
+        out_color = fetch(second_image, at) + params.halo.rgb * blurred(first_image, at, step, params.sigma, 0.0, radius).rgb;
     } else if (stage == 3) {
         // What holds development back: the dye on a negative, the first
         // developer's negative image on a slide (film.lucb's `inhibitor`).
         vec3 dye = film_curve(81.0, log_exposure(fetch(first_image, at)));
         vec4 v17 = film_value(17.0);
         out_color = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
+        spent = dot(out_color / max(v17.rgb, vec3(1e-9)), vec3(1.0 / 3.0));
     } else {
         vec3 amounts;
         vec3 effective;
@@ -235,5 +248,5 @@ void main() {
         vec3 scene = vec3(dot(film_value(11.0).rgb, linear_light), dot(film_value(12.0).rgb, linear_light), dot(film_value(13.0).rgb, linear_light));
         out_color = max(scene * film_value(10.0).rgb, 0.0);
     }
-    fragment_color = vec4(out_color, 1.0);
+    fragment_color = vec4(out_color, spent);
 }

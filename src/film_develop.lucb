@@ -36,7 +36,9 @@ pub let black_and_white: i64 = 2
 ## the stock it is tabled for, rate per degree, and against its family's
 ## reference developer at the same contrast: speed (stops), contrast (ratio),
 ## grain (ratio of RMS granularity) and compensation (how much the slope above
-## grey flattens as developer runs out in the highlights, 0..1). A fixed process
+## grey flattens as developer runs out in the highlights, 0..1) and edge effects
+## (how far exhausted developer spreads, µm, and how strongly: the share of a
+## step's density difference added as overshoot at its border). A fixed process
 ## (a two-bath) takes no notice of time or temperature.
 pub struct Process:
     pub var name: str
@@ -48,6 +50,8 @@ pub struct Process:
     pub var contrast: f64
     pub var grain: f64
     pub var compensation: f64 = 0.0
+    pub var edge: f64 = 0.035
+    pub var edge_width: f64 = 20.0
     pub var fixed: bool = false
 
 ## The processes. Sources (research_notes/Film stocks and chemistry/
@@ -59,56 +63,57 @@ pub struct Process:
 ## Microfine), else Tri-X's times scaled by D-76's ratio between the two films
 ## (7¼ / 6¾). Speeds and grain are published where the sheets give them; the
 ## grain of most developers and all compensation are estimates from the
-## textbooks' consensus.
+## textbooks' consensus, and so are the edge effects (Nelson's chemical spread
+## function: strong for dilute, low-sulfite developers and still stands).
 pub let process_count: usize = 19
 pub let processes: Process[19] = [
     # Kodak's motion picture negative process (SD-49, CD-3); the reference for
     # color negatives. 8.5 % per degree (C-41's charts).
-    Process(name = "ECN-2", family = 0, minutes = 3.0, celsius = 41.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0),
+    Process(name = "ECN-2", family = 0, minutes = 3.0, celsius = 41.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
     # The still color negative process (CD-4). Motion picture film in it comes
     # out contrastier and grainier, about a third of a stop faster.
-    Process(name = "C-41", family = 0, minutes = 3.25, celsius = 37.8, rate = 0.085, speed = 0.33, contrast = 1.17, grain = 1.15),
+    Process(name = "C-41", family = 0, minutes = 3.25, celsius = 37.8, rate = 0.085, speed = 0.33, contrast = 1.17, grain = 1.15, edge = 0.035, edge_width = 20.0),
     # The 1960s motion picture process (SD-30): 12 minutes at 21 °C, as Kodak's
     # 1968 paper gives it; for the Eastman Color Negative of that decade.
-    Process(name = "ECN-1", family = 0, minutes = 12.0, celsius = 21.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0),
+    Process(name = "ECN-1", family = 0, minutes = 12.0, celsius = 21.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
     # The reversal process; times are its first developer's.
-    Process(name = "E-6", family = 1, minutes = 6.0, celsius = 37.8, rate = 0.08, speed = 0.0, contrast = 1.0, grain = 1.0),
+    Process(name = "E-6", family = 1, minutes = 6.0, celsius = 37.8, rate = 0.08, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
     # Kodak D-76 stock; the reference for black and white. Acros II: 7 min, the
     # time of its sheet's middle curve, which the model is built on (its table
     # says 7¼).
-    Process(name = "D-76", family = 2, minutes = 7.0, celsius = 20.0, rate = 0.087, speed = 0.0, contrast = 1.0, grain = 1.0),
+    Process(name = "D-76", family = 2, minutes = 7.0, celsius = 20.0, rate = 0.087, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.045, edge_width = 30.0),
     # D-76 diluted 1:1 and used once: a little more grain and sharpness, less
     # sensitive to temperature (5.5 % per degree).
-    Process(name = "D-76 1:1", family = 2, minutes = 10.5, celsius = 20.0, rate = 0.055, speed = 0.08, contrast = 1.0, grain = 1.07, compensation = 0.05),
+    Process(name = "D-76 1:1", family = 2, minutes = 10.5, celsius = 20.0, rate = 0.055, speed = 0.08, contrast = 1.0, grain = 1.07, compensation = 0.05, edge = 0.08, edge_width = 40.0),
     # Ilford's ID-11, the same formula as D-76 (Acros II sheet: 6¾ min against
     # D-76's 7¼).
-    Process(name = "ID-11", family = 2, minutes = 6.5, celsius = 20.0, rate = 0.1, speed = 0.0, contrast = 1.0, grain = 1.0),
+    Process(name = "ID-11", family = 2, minutes = 6.5, celsius = 20.0, rate = 0.1, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.045, edge_width = 30.0),
     # Kodak XTOL (ascorbate): a third of a stop more speed, finer grain.
-    Process(name = "XTOL", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = 0.33, contrast = 1.0, grain = 0.93, compensation = 0.05),
-    Process(name = "XTOL 1:1", family = 2, minutes = 9.7, celsius = 20.0, rate = 0.055, speed = 0.4, contrast = 1.0, grain = 1.0, compensation = 0.08),
+    Process(name = "XTOL", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = 0.33, contrast = 1.0, grain = 0.93, compensation = 0.05, edge = 0.06, edge_width = 30.0),
+    Process(name = "XTOL 1:1", family = 2, minutes = 9.7, celsius = 20.0, rate = 0.055, speed = 0.4, contrast = 1.0, grain = 1.0, compensation = 0.08, edge = 0.08, edge_width = 40.0),
     # Kodak HC-110, dilution B.
-    Process(name = "HC-110 (B)", family = 2, minutes = 4.0, celsius = 20.0, rate = 0.098, speed = 0.0, contrast = 1.0, grain = 1.1, compensation = 0.05),
+    Process(name = "HC-110 (B)", family = 2, minutes = 4.0, celsius = 20.0, rate = 0.098, speed = 0.0, contrast = 1.0, grain = 1.1, compensation = 0.05, edge = 0.08, edge_width = 40.0),
     # Agfa Rodinal (p-aminophenol, almost no sulfite): sharp, defined grain,
     # slower; more dilute, slower still and more compensating.
-    Process(name = "Rodinal 1+25", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = -0.33, contrast = 1.0, grain = 1.32, compensation = 0.05),
-    Process(name = "Rodinal 1+50", family = 2, minutes = 12.9, celsius = 20.0, rate = 0.07, speed = -0.5, contrast = 1.0, grain = 1.25, compensation = 0.12),
+    Process(name = "Rodinal 1+25", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = -0.33, contrast = 1.0, grain = 1.32, compensation = 0.05, edge = 0.1, edge_width = 40.0),
+    Process(name = "Rodinal 1+50", family = 2, minutes = 12.9, celsius = 20.0, rate = 0.07, speed = -0.5, contrast = 1.0, grain = 1.25, compensation = 0.12, edge = 0.125, edge_width = 60.0),
     # An hour's stand in Rodinal 1+100, agitated only at the start.
-    Process(name = "Rodinal 1+100 stand", family = 2, minutes = 60.0, celsius = 20.0, rate = 0.05, speed = -0.67, contrast = 0.85, grain = 1.2, compensation = 0.3),
+    Process(name = "Rodinal 1+100 stand", family = 2, minutes = 60.0, celsius = 20.0, rate = 0.05, speed = -0.67, contrast = 0.85, grain = 1.2, compensation = 0.3, edge = 0.22, edge_width = 100.0),
     # Ilford Microphen (PQ, borax): up to half a stop more speed.
-    Process(name = "Microphen", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.1, speed = 0.5, contrast = 1.0, grain = 1.0),
+    Process(name = "Microphen", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.1, speed = 0.5, contrast = 1.0, grain = 1.0, edge = 0.045, edge_width = 30.0),
     # Ilford Perceptol (high sulfite, near neutral): much finer grain, slower.
-    Process(name = "Perceptol", family = 2, minutes = 10.7, celsius = 20.0, rate = 0.1, speed = -0.85, contrast = 1.0, grain = 0.8),
+    Process(name = "Perceptol", family = 2, minutes = 10.7, celsius = 20.0, rate = 0.1, speed = -0.85, contrast = 1.0, grain = 0.8, edge = 0.03, edge_width = 30.0),
     # Fujifilm Microfine: Acros II at EI 100 in 10 min (its sheet), fine grain;
     # 12½ to 5¾ min from 18 to 26 °C.
-    Process(name = "Microfine", family = 2, minutes = 10.0, celsius = 20.0, rate = 0.097, speed = 0.0, contrast = 1.0, grain = 0.85),
+    Process(name = "Microfine", family = 2, minutes = 10.0, celsius = 20.0, rate = 0.097, speed = 0.0, contrast = 1.0, grain = 0.85, edge = 0.03, edge_width = 30.0),
     # Kodak T-MAX developer 1:4.
-    Process(name = "T-MAX developer", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.09, speed = 0.33, contrast = 1.0, grain = 1.05),
+    Process(name = "T-MAX developer", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.09, speed = 0.33, contrast = 1.0, grain = 1.05, edge = 0.05, edge_width = 30.0),
     # PMK pyro: its stain masks the grain and holds back the highlights.
-    Process(name = "PMK pyro", family = 2, minutes = 12.6, celsius = 20.0, rate = 0.087, speed = -0.2, contrast = 1.0, grain = 0.85, compensation = 0.2),
+    Process(name = "PMK pyro", family = 2, minutes = 12.6, celsius = 20.0, rate = 0.087, speed = -0.2, contrast = 1.0, grain = 0.85, compensation = 0.2, edge = 0.12, edge_width = 45.0),
     # Diafine, two baths of 3 minutes: the developer the emulsion soaked up runs
     # out in the highlights, so time and temperature do not matter; Acros II
     # rated at 200.
-    Process(name = "Diafine", family = 2, minutes = 6.0, celsius = 21.0, rate = 0.0, speed = 1.0, contrast = 1.0, grain = 1.15, compensation = 0.35, fixed = true)]
+    Process(name = "Diafine", family = 2, minutes = 6.0, celsius = 21.0, rate = 0.0, speed = 1.0, contrast = 1.0, grain = 1.15, compensation = 0.35, edge = 0.12, edge_width = 60.0, fixed = true)]
 
 ## The standard process of each stock kind (an index into `processes`).
 let standards: i64[3] = [0, 3, 4]
@@ -144,9 +149,13 @@ pub struct Development:
     pub var shift: f64
     pub var gain: f64
     ## The grain against the stock's standard development (1: as published),
-    ## and how much the slope above grey flattens.
+    ## how much the slope above grey flattens, and the edge effects beyond the
+    ## standard process's (whose are in the stock's published MTF already):
+    ## their strength (signed) and width (µm).
     pub var grain: f64 = 1.0
     pub var compensation: f64 = 0.0
+    pub var edge: f64 = 0.0
+    pub var edge_width: f64 = 0.0
 
 pub func development(kind: i64, degree: f64) -> Development:
     let held = math.clamp(degree, least, most)
@@ -176,6 +185,8 @@ pub func developing(kind: i64, process: i64, minutes: f64, celsius: f64) -> Deve
     out.gain *= used.contrast / normal.contrast
     out.grain = used.grain / normal.grain
     out.compensation = math.clamp(used.compensation - normal.compensation, 0.0, 0.9)
+    out.edge = used.edge - normal.edge
+    out.edge_width = used.edge_width
     return out
 
 test "normal development in the standard process changes nothing":

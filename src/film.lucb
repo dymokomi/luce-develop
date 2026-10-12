@@ -62,8 +62,9 @@
 ##          16 each layer's inhibitor spread (µm); 17 each layer's most dye,
 ##          the stock's kind; 18 grain clouds' spacing (µm), 1/(2σ²), and their
 ##          calibration's a and b; 19 the grain's spread per unit of strength;
-##          20 the retained silver's density per unit of dye density, and the
-##          scan's mean density at the fog
+##          20 the retained silver's density per unit of dye density, the
+##          scan's mean density at the fog, the edge effects' strength (log H
+##          per unit of exhaustion) and width (µm)
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -363,20 +364,37 @@ pub struct Film:
                         dir[row * 3 + column] *= keep
         for row in 0..<(usize)3:
             self.put(values_row, 3 + row, dir[row * 3], dir[row * 3 + 1], dir[row * 3 + 2], 0.0)
+        # The developer's edge effects (film_develop.lucb): development held back
+        # by how much developed nearby, all layers alike, over the developer's
+        # own spread. In log H per unit of exhaustion (the mean share of each
+        # layer's most), within the same monotonic bound.
+        var edge = edge_gain * grown.edge
+        var steepest_spent = 0.0
+        var held_most = 0.0
+        for layer in 0..<(usize)3:
+            steepest_spent += steepest[layer] / (3.0 * math.max(model.most[layer], 1.0e-9))
+            held_most = math.max(held_most, dir[layer * 3] * steepest[0] + dir[layer * 3 + 1] * steepest[1] + dir[layer * 3 + 2] * steepest[2])
+        if edge > 0.0 and steepest_spent > 0.0:
+            edge = math.min(edge, math.max(0.0, 0.7 - held_most) / steepest_spent)
+        # A large even patch is held back by both alike: correct for both.
+        var held_back = dir
+        for row in 0..<(usize)3:
+            for column in 0..<(usize)3:
+                held_back[row * 3 + column] += edge / (3.0 * math.max(model.most[column], 1.0e-9))
         for layer in 0..<(usize)3:
             var source: usize = 0
             for at in 0..<curve_samples:
                 let wanted = log_h_at(at)
                 # March along the neutral ramp to where its effective log H passes `wanted`.
-                while source + 1 < curve_samples and effective(model, dir, layer, source + 1) < wanted:
+                while source + 1 < curve_samples and effective(model, held_back, layer, source + 1) < wanted:
                     source += 1
-                let low = effective(model, dir, layer, source)
+                let low = effective(model, held_back, layer, source)
                 let next = source + 1 if source + 1 < curve_samples else source
-                let high = effective(model, dir, layer, next)
+                let high = effective(model, held_back, layer, next)
                 let t = math.clamp((wanted - low) / math.max(high - low, 1.0e-9), 0.0, 1.0) if source + 1 < curve_samples else 1.0
                 let amount = developed_amount(model, grown, layer, source) * (1.0 - t) + developed_amount(model, grown, layer, next) * t
                 let base = (developed_row * atlas_width + at) * 4
-                self.texels[base + layer] = (f32)(amount if wanted >= effective(model, dir, layer, 0) else developed_amount(model, grown, layer, 0))
+                self.texels[base + layer] = (f32)(amount if wanted >= effective(model, held_back, layer, 0) else developed_amount(model, grown, layer, 0))
                 self.texels[base + 3] = 1.0f32
         # Grey's log H, and each channel's gamma there.
         let grey = model.grey_log_h
@@ -395,7 +413,7 @@ pub struct Film:
         # No silver while the scan is set up and its matrix fitted: the lab's scan
         # is set for a bleached negative.
         let fog_density = (fog_scan[0] + fog_scan[1] + fog_scan[2]) / 3.0
-        self.put(values_row, 20, 0.0, fog_density, 0.0, 0.0)
+        self.put(values_row, 20, 0.0, fog_density, edge, grown.edge_width)
         let warmth = settings.get(.film_warmth) / 100.0
         let tint = settings.get(.film_tint) / 100.0
         self.put(values_row, 10, math.exp2(0.5 * warmth), math.exp2(-0.5 * tint), math.exp2(-0.5 * warmth), 0.0)
@@ -430,7 +448,7 @@ pub struct Film:
         let fitted = self.fit_matrix()
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, fitted[row * 3], fitted[row * 3 + 1], fitted[row * 3 + 2], 0.0)
-        self.put(values_row, 20, retained * silver_density, fog_density, 0.0, 0.0)
+        self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
 
     ## The matrix from the scan's channels to AP1 that best returns colors of
     ## moderate saturation to themselves (least squares), its rows scaled so
@@ -624,14 +642,22 @@ pub struct Developed:
     pub var amounts: f64[3]
     pub var effective: f64[3]
 
+## How much developer the inhibitor `held` used up there: each layer's share of
+## its most, averaged (0..1), which the edge effects spread.
+pub func exhaustion(film: const Film*, held: f64[3]) -> f64:
+    let most = film.value(17)
+    return (held[0] / math.max(most[0], 1.0e-9) + held[1] / math.max(most[1], 1.0e-9) + held[2] / math.max(most[2], 1.0e-9)) / 3.0
+
 ## Exposure `e` developed, held back by the inhibitor from `held` (the neutral
-## dye around, blurred by its spread).
-pub func developed(film: const Film*, e: f64[3], held: f64[3]) -> Developed:
+## dye around, blurred by its spread) and by the developer used up around it
+## (`exhausted`, blurred by the developer's spread).
+pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64) -> Developed:
     let log_h = log_exposure(film, e)
+    let edge = film.value(20)[2]
     var out: Developed
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
-        out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2])
+        out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2]) - edge * exhausted
         out.amounts[k] = film.curve(developed_row, k, out.effective[k])
     return out
 
@@ -697,6 +723,12 @@ let silver_density: f64 = 0.8
 ## grain over the dye clouds' (an estimate, +30–60 % on print film).
 let silver_grain: f64 = 0.4
 
+## Edge effects in log H per unit of their strength (film_develop.lucb's share of
+## a step added as overshoot). For a negative of gamma 0.6 whose dye is about 2
+## at most, a step's border gains about 0.15 of the hold's difference: 1 / 0.15.
+## An estimate, as the strengths are.
+let edge_gain: f64 = 6.7
+
 ## Scanned densities `d` with the retained silver added (values row 20).
 func silver(film: const Film*, d: f64[3]) -> f64[3]:
     let v20 = film.value(20)
@@ -744,8 +776,8 @@ func same_everywhere(context: void*, x: f64, y: f64) -> Developed:
 ## (a large even patch), grained at pixel (`x`, `y`) (centres, in pixels of
 ## `pitch` µm) and scanned back to AP1. `matrix` false skips the grain, the
 ## scan's matrix and the timing.
-pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
-    var here = developed(film, e, held)
+pub func scan(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
+    var here = developed(film, e, held, exhausted)
     if film.value(6)[3] > 0.0 and matrix:
         let (amounts, unbias) = clouded(film, x * pitch, y * pitch, pitch, same_everywhere, (void*)&here)
         return finish(film, amounts, unbias)
@@ -756,7 +788,8 @@ pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch:
 ## (`x`, `y`) of `pitch` µm.
 pub func develop(film: const Film*, c: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
     let e = expose(film, c)
-    return scan(film, e, neutral(film, e), x, y, pitch, matrix)
+    let held = neutral(film, e)
+    return scan(film, e, held, exhaustion(film, held), x, y, pitch, matrix)
 
 # mark: Tests =================================================================
 
@@ -887,7 +920,8 @@ test "grain through a 48 µm aperture reads its granularity, soft clouds or cris
         # An even patch at grey, sampled every 2 µm, through 21 × 21 samples (42 µm):
         # the green layer's density spread against its granularity there.
         let e = expose(&film, [0.18, 0.18, 0.18])
-        var here = developed(&film, e, neutral(&film, e))
+        let held = neutral(&film, e)
+        var here = developed(&film, e, held, exhaustion(&film, held))
         let wanted = film.curve(grain_row, 1, here.effective[1])
         var sum = 0.0
         var squares = 0.0

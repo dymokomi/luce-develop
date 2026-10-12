@@ -7,9 +7,10 @@
 ## The passes: expose (the develop's matrix and lens vignetting, then each
 ## layer's exposure); scatter (each layer's exponential, across then down);
 ## halation (the exposure blurred by halation's spread, across, then down while
-## adding it to the scattered exposure); the neutral development; the
-## inhibitor's spread (across, down); develop as dye clouds with their grain,
-## and scan.
+## adding it to the scattered exposure); the neutral development, with the
+## developer it uses up in its alpha; the inhibitor's spread and the
+## developer's (alpha), across then down; develop as dye clouds with their
+## grain, and scan.
 import memory
 from luce_std import math
 from luce_std import parallel
@@ -27,6 +28,8 @@ pub struct Blur:
     pub var sigma: f32[3]
     pub var radius: i32
     pub var exponential: bool
+    ## A Gaussian's σ for alpha (the developer's spread), 0: alpha unblurred.
+    pub var alpha: f32 = 0.0f32
 
 ## The blurs and grain for a scene `width` pixels wide, in the values the GPU is
 ## handed (single floats).
@@ -50,11 +53,16 @@ pub func plan_for(source: const Film*, width: usize) -> Plan:
     let sharp = source.value(14)
     let halo = source.value(15)
     let spread = source.value(16)
+    # The inhibitor's spread, and in alpha the developer's, as far as the wider.
+    var held = blur_of([spread[0] / pitch, spread[1] / pitch, spread[2] / pitch])
+    let used = source.value(20)[3] / pitch
+    held.alpha = (f32)used
+    held.radius = (i32)math.min(math.max((f64)held.radius, math.ceil(3.0 * used)), widest)
     return Plan(pitch = (f32)pitch,
                 scatter = blur_of([sharp[0] / pitch, sharp[1] / pitch, sharp[2] / pitch], true),
                 halation = blur_of([halo[3] / pitch, halo[3] / pitch, halo[3] / pitch]),
                 halation_weights = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
-                spread = blur_of([spread[0] / pitch, spread[1] / pitch, spread[2] / pitch]))
+                spread = held)
 
 ## Whether halation adds anything.
 pub func has_halation(blurs: const Plan*) -> bool:
@@ -85,26 +93,33 @@ struct Pass:
     var pitch: f64
 
 func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
-    let cx = (usize)(0 if x < 0 else (x if x < (i64)width else (i64)width - 1))
-    let cy = (usize)(0 if y < 0 else (y if y < (i64)height else (i64)height - 1))
-    let at = (cy * width + cx) * 4
+    let at = place(width, height, x, y)
     return [(f64)image[at], (f64)image[at + 1], (f64)image[at + 2]]
 
-func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[3]:
-    var sum: f64[3] = [0.0, 0.0, 0.0]
-    var weights: f64[3] = [0.0, 0.0, 0.0]
+func alpha(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64:
+    return (f64)image[place(width, height, x, y) + 3]
+
+## Texel (`x`, `y`)'s first value, held at the edges.
+func place(width: usize, height: usize, x: i64, y: i64) -> usize:
+    let cx = (usize)(0 if x < 0 else (x if x < (i64)width else (i64)width - 1))
+    let cy = (usize)(0 if y < 0 else (y if y < (i64)height else (i64)height - 1))
+    return (cy * width + cx) * 4
+
+func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[4]:
+    var sum: f64[4] = [0.0, 0.0, 0.0, 0.0]
+    var weights: f64[4] = [0.0, 0.0, 0.0, 0.0]
     let r = (i64)pass.blur.radius
     for i in -r..=r:
         let d = (f64)i
-        let value = texel(image, pass.width, pass.height, x + pass.dx * i, y + pass.dy * i)
-        for k in 0..<(usize)3:
-            let sigma = (f64)pass.blur.sigma[k]
+        let at = place(pass.width, pass.height, x + pass.dx * i, y + pass.dy * i)
+        for k in 0..<(usize)4:
+            let sigma = (f64)pass.blur.sigma[k] if k < 3 else (f64)pass.blur.alpha
             var w = 1.0 if i == 0 else 0.0
             if sigma > 1.0e-3:
-                w = math.exp(-math.abs(d) / sigma) if pass.blur.exponential else math.exp(-0.5 * d * d / (sigma * sigma))
-            sum[k] += w * value[k]
+                w = math.exp(-math.abs(d) / sigma) if pass.blur.exponential and k < 3 else math.exp(-0.5 * d * d / (sigma * sigma))
+            sum[k] += w * (f64)image[at + k]
             weights[k] += w
-    return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2]]
+    return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2], sum[3] / weights[3]]
 
 ## The developed negative at (`x`, `y`) µm: the pixel there, from the exposure
 ## (`first`) and the inhibitor (`second`).
@@ -112,7 +127,8 @@ func developed_at(context: void*, x: f64, y: f64) -> film.Developed:
     let pass = (Pass*)context
     let px = (i64)math.floor(x / pass.pitch)
     let py = (i64)math.floor(y / pass.pitch)
-    return film.developed(pass.film, texel(pass.first, pass.width, pass.height, px, py), texel(pass.second, pass.width, pass.height, px, py))
+    return film.developed(pass.film, texel(pass.first, pass.width, pass.height, px, py), texel(pass.second, pass.width, pass.height, px, py),
+                          alpha(pass.second, pass.width, pass.height, px, py))
 
 func run_row(context: void*, row: usize, worker: usize) -> !:
     let pass = (Pass*)context
@@ -120,6 +136,7 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
     for column in 0..<pass.width:
         let x = (i64)column
         var out: f64[3]
+        var spent = 1.0
         if pass.stage == 0:
             let camera = pass.source.value_at(row * pass.width + column)
             var c: f64[3]
@@ -138,7 +155,9 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
                     c[k] *= 1.0 + v[1] * 2.0 * t * t
             out = film.expose(pass.film, c)
         elif pass.stage == 1:
-            out = blurred(pass, pass.first, x, y)
+            let blur = blurred(pass, pass.first, x, y)
+            out = [blur[0], blur[1], blur[2]]
+            spent = blur[3]
         elif pass.stage == 2:
             let scattered = texel(pass.second, pass.width, pass.height, x, y)
             let halo = blurred(pass, pass.first, x, y)
@@ -146,6 +165,7 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
                 out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
         elif pass.stage == 3:
             out = film.neutral(pass.film, texel(pass.first, pass.width, pass.height, x, y))
+            spent = film.exhaustion(pass.film, out)
         else:
             if pass.film.value(6)[3] > 0.0:
                 # Grain: the image made of dye clouds, each the negative at its centre.
@@ -155,12 +175,12 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             else:
                 let e = texel(pass.first, pass.width, pass.height, x, y)
                 let held = texel(pass.second, pass.width, pass.height, x, y)
-                out = film.scan(pass.film, e, held, (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
+                out = film.scan(pass.film, e, held, alpha(pass.second, pass.width, pass.height, x, y), (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
         let at = (row * pass.width + column) * 4
         pass.out[at] = (f16)out[0]
         pass.out[at + 1] = (f16)out[1]
         pass.out[at + 2] = (f16)out[2]
-        pass.out[at + 3] = (f16)1.0
+        pass.out[at + 3] = (f16)spent
 
 ## `source` (camera values) through the film: the filmed scene, scene light in
 ## AP1 at the same size, which the caller closes. `matrix` takes the scene into

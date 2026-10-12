@@ -38,7 +38,7 @@ pub struct FilmPasses:
         let one = self.one else return scene
         let two = self.two else return scene
         let plan = film_passes.plan_for(source, (usize)width)
-        let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false)
+        let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false, alpha = 0.0f32)
         try self.pass(exposed, 0, scene, scene, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
         try self.pass(one, 1, exposed, exposed, tables, atlas, 1, 0, plan.scatter, plan, matrix, aspect)
         try self.pass(two, 1, one, one, tables, atlas, 0, 1, plan.scatter, plan, matrix, aspect)
@@ -73,7 +73,7 @@ pub struct FilmPasses:
             (f32)matrix[0], (f32)matrix[1], (f32)matrix[2], 0.0f32,
             (f32)matrix[3], (f32)matrix[4], (f32)matrix[5], 0.0f32,
             (f32)matrix[6], (f32)matrix[7], (f32)matrix[8], 0.0f32,
-            (f32)aspect, 0.0f32, 0.0f32, 0.0f32]
+            (f32)aspect, blur.alpha, 0.0f32, 0.0f32]
         let images: gpu.Texture[4] = [first, second, tables, atlas]
         try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
