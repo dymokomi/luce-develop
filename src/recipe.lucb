@@ -80,6 +80,8 @@ pub func stage_total() -> i64:
     return (i64)stage_count
 pub func stage_name(at: i64) -> str:
     return stage_names[(usize)at]
+pub func stage_key(at: i64) -> str:
+    return stage_keys[(usize)at]
 pub func stage_description(at: i64) -> str:
     return descriptions[(usize)at]
 pub func stage_input(at: i64) -> i64:

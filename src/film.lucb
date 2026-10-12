@@ -59,7 +59,9 @@
 ##          16 each layer's inhibitor spread (µm); 17 each layer's most dye,
 ##          the stock's kind; 18 grain clouds' spacing (µm), 1/(2σ²), and their
 ##          calibration's a and b; 19 the grain's spread per unit of strength
+import interop
 import memory
+from luce_std.collections import Buffer
 import time
 from luce_std import math
 from luce_color import spectral
@@ -149,14 +151,40 @@ pub func stock_count() -> i64:
 pub func stock_name(at: i64) -> str:
     return film_stocks.stock_at((usize)at).name
 
-## Stock `at`'s process (ECN-2, E-6, D-76), and its normal time (minutes) and
-## temperature (°C), which develop_time and develop_temperature of 0 mean.
-pub func stock_process(at: i64) -> str:
-    return film_develop.process_name(film_stocks.stock_at((usize)at).kind)
-pub func stock_time(at: i64) -> f64:
-    return film_develop.normal_time(film_stocks.stock_at((usize)at).kind)
-pub func stock_temperature(at: i64) -> f64:
-    return film_develop.normal_temperature(film_stocks.stock_at((usize)at).kind)
+## The processes (film_develop.lucb): how many, and process `at`'s name and
+## normal time (minutes) and temperature (°C), which develop_time and
+## develop_temperature of 0 mean.
+pub func process_total() -> i64:
+    return (i64)film_develop.process_count
+pub func process_name(at: i64) -> str:
+    return film_develop.processes[(usize)at].name
+pub func process_time(at: i64) -> f64:
+    return film_develop.processes[(usize)at].minutes
+pub func process_temperature(at: i64) -> f64:
+    return film_develop.processes[(usize)at].celsius
+
+## The process stock `at` develops in for develop_process `value`.
+pub func stock_process(at: i64, value: f64) -> i64:
+    return film_develop.chosen(film_stocks.stock_at((usize)at).kind, value)
+
+## The Process menu's items for stock `at`, "name=value|…": its standard
+## process first (value 0), then the others of its family.
+pub func stock_processes(at: i64) -> interop.Owned[str]!:
+    let kind = film_stocks.stock_at((usize)at).kind
+    let standard = film_develop.standard(kind)
+    var out: Buffer
+    defer out.destroy()
+    try out.put_text(film_develop.processes[(usize)standard].name)
+    try out.put_text(" (standard)=0")
+    for index in 0..<film_develop.process_count:
+        let process = film_develop.processes[index]
+        if (i64)index == standard or process.family != kind:
+            continue
+        try out.put_byte('|')
+        try out.put_text(process.name)
+        try out.put_byte('=')
+        try out.put_number((i64)index + 1)
+    return try interop.copy_text(out.text())
 
 # mark: Looks =================================================================
 
@@ -289,10 +317,12 @@ pub struct Film:
         # transfer for normal negatives does, so a push shows: more density,
         # more contrast, more grain.
         let kind = model.stock.kind
-        let grown = film_develop.development(kind, film_develop.ratio(kind, settings.get(.develop_time), settings.get(.develop_temperature)))
+        let process = film_develop.chosen(kind, settings.get(.develop_process))
+        let grown = film_develop.developing(kind, process, settings.get(.develop_time), settings.get(.develop_temperature))
+        let coarse = grown.gain * grown.grain
         for at in 0..<curve_samples:
             let grain = along_model(model.grain, log_h_at(at) + grown.shift)
-            self.put(grain_row, at, grain[0] * grown.gain, grain[1] * grown.gain, grain[2] * grown.gain, 1.0)
+            self.put(grain_row, at, grain[0] * coarse, grain[1] * coarse, grain[2] * coarse, 1.0)
         # Inhibition, and the development corrected for it: a neutral at log H x
         # develops at x − D·a(x); tabulate the inverse so it still reaches a(x).
         let strength = settings.get(.film_interimage) / 100.0
@@ -481,11 +511,17 @@ pub struct Film:
 ## Layer `layer`'s effective log H for neutral sample `at` under interimage `dir`.
 ## Layer `layer`'s dye at curve sample `at` once developed as `grown`: the
 ## normal curve read `shift` further along, its rise over the fog scaled by the
-## gain (film_develop.lucb).
+## gain and flattened above grey by the compensation (film_develop.lucb).
 func developed_amount(model: const Model*, grown: Development, layer: usize, at: usize) -> f64:
     let fog = model.neutral[layer]
     let normal = along_model(model.neutral, log_h_at(at) + grown.shift)
-    return fog + grown.gain * (normal[layer] - fog)
+    var rise = grown.gain * (normal[layer] - fog)
+    # Compensation: above grey the developer runs out, and the slope flattens.
+    if grown.compensation > 0.0 and model.stock.kind != 1:
+        let grey = grown.gain * (along_model(model.neutral, model.grey_log_h + grown.shift)[layer] - fog)
+        if rise > grey:
+            rise = grey + (rise - grey) * (1.0 - grown.compensation)
+    return fog + rise
 
 ## A curve of `curve_samples` × 3 values (a model's neutral or grain) at
 ## `log_h`, linearly, held at its ends.

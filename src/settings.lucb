@@ -14,8 +14,9 @@
 ##   Filter           a light-balancing filter (with film: the light as the
 ##                    film saw it) and a black-and-white color filter (film.lucb)
 ##   Film             stock (0 none), format, grain, halation, interimage
-##   Develop          time (minutes) and temperature (°C) in the stock's
-##                    process, 0 for its normal (film_develop.lucb)
+##   Develop          the process (0 the stock's standard), time (minutes)
+##                    and temperature (°C), 0 for the process's normal
+##                    (film_develop.lucb)
 ##   Scan             the transfer's warmth, tint, contrast and black
 ##   Tone             contrast, highlights, shadows, whites and blacks: a tone
 ##                    curve on luminance (tone.lucb)

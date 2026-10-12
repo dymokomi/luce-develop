@@ -1,16 +1,15 @@
-## Development: how long, and how warm, the film sits in its developer, and what
-## that does to its curve. Each kind of stock has its process and that
-## process's normal time and temperature:
-##
-##   color negative   ECN-2 developer, 3:00 at 41.1 °C (Kodak's motion picture
-##                     process)
-##   slide             E-6 first developer, 6:00 at 37.8 °C
-##   black and white   D-76 stock, 7:00 at 20 °C (Acros II's data sheet curve)
+## Development: the process the film goes through, how long and how warm, and
+## what that does to its curve. A process belongs to a family (color negative,
+## reversal, black and white) and has its normal time and temperature, its rate
+## (how much faster per degree), and what it does compared with its family's
+## reference developer: speed (log H), contrast and grain. Each stock names its
+## standard process (its data sheet's curves are developed in it); another
+## process of the family changes the stock by the ratio of the two.
 ##
 ## Time and temperature together give the development, as a ratio to normal:
-## r = (time / normal time) · e^(0.081 · (temperature − normal)), about 8 % more
-## per degree, as black-and-white time–temperature charts have it (the color
-## processes are run at theirs; the same rate stands in).
+## r = (time / normal time) · e^(rate · (temperature − normal)); D-76's table on
+## Acros II's data sheet (8½ to 4½ minutes from 18 to 26 °C) gives 0.08 per
+## degree, which stands in where a process publishes none.
 ##
 ## A negative developed r times normal (L = log2 r) reads, at log H x,
 ##   D(x) = fog + g · (D_normal(x + s) − fog)
@@ -19,7 +18,7 @@
 ## is within 0.013 and 0.031 density of the 4 and 10 minute curves):
 ##   under (L < 0):  s = 0.161 · L,  ln g = 0.231 · L
 ##   over  (L > 0):  s = 0.350 · L,  ln g = 0.211 · L
-## Colour negatives take the same shape: their data sheets publish one time.
+## Color negatives take the same shape: their data sheets publish one time.
 ##
 ## A slide's first developer makes its negative silver image, so developing it
 ## longer leaves less dye: the positive curve moves toward less exposure, the
@@ -28,57 +27,185 @@
 ## s = 0.301 · stops.
 from luce_std import math
 
-## The process each kind develops in, its normal time (minutes) and temperature
-## (°C), by stock kind (0 color negative, 1 slide, 2 black and white).
-pub let process_names: str[3] = ["ECN-2", "E-6", "D-76"]
-let normal_minutes: f64[3] = [3.0, 6.0, 7.0]
-let normal_celsius: f64[3] = [41.1, 37.8, 20.0]
+## Families of process: color negative, reversal, black and white (as stock kinds).
+pub let color_negative: i64 = 0
+pub let reversal: i64 = 1
+pub let black_and_white: i64 = 2
+
+## A process: its name, family, normal time (minutes) and temperature (°C) for
+## the stock it is tabled for, rate per degree, and against its family's
+## reference developer at the same contrast: speed (stops), contrast (ratio),
+## grain (ratio of RMS granularity) and compensation (how much the slope above
+## grey flattens as developer runs out in the highlights, 0..1). A fixed process
+## (a two-bath) takes no notice of time or temperature.
+pub struct Process:
+    pub var name: str
+    pub var family: i64
+    pub var minutes: f64
+    pub var celsius: f64
+    pub var rate: f64
+    pub var speed: f64
+    pub var contrast: f64
+    pub var grain: f64
+    pub var compensation: f64 = 0.0
+    pub var fixed: bool = false
+
+## The processes. Sources (research_notes/Film stocks and chemistry/
+## processes_and_developers.md): Kodak H-24 (ECN-2), Z-131 (C-41), Z-119 (E-6),
+## F-4017 and J-109 (Tri-X, D-76, XTOL, HC-110), the Acros II data sheet, Ilford's
+## developer sheets (ID-11, Microphen, Perceptol), Agfa's Rodinal sheet, the
+## Diafine sheet, and Kodak's 1968 SMPTE paper (ECN-1). Black-and-white times are
+## Acros II's at 20 °C: its own sheet's where it gives them (D-76, D-76 1:1,
+## Microfine), else Tri-X's times scaled by D-76's ratio between the two films
+## (7¼ / 6¾). Speeds and grain are published where the sheets give them; the
+## grain of most developers and all compensation are estimates from the
+## textbooks' consensus.
+pub let process_count: usize = 19
+pub let processes: Process[19] = [
+    # Kodak's motion picture negative process (SD-49, CD-3); the reference for
+    # color negatives. 8.5 % per degree (C-41's charts).
+    Process(name = "ECN-2", family = 0, minutes = 3.0, celsius = 41.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0),
+    # The still color negative process (CD-4). Motion picture film in it comes
+    # out contrastier and grainier, about a third of a stop faster.
+    Process(name = "C-41", family = 0, minutes = 3.25, celsius = 37.8, rate = 0.085, speed = 0.33, contrast = 1.17, grain = 1.15),
+    # The 1960s motion picture process (SD-30): 12 minutes at 21 °C, as Kodak's
+    # 1968 paper gives it; for the Eastman Color Negative of that decade.
+    Process(name = "ECN-1", family = 0, minutes = 12.0, celsius = 21.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0),
+    # The reversal process; times are its first developer's.
+    Process(name = "E-6", family = 1, minutes = 6.0, celsius = 37.8, rate = 0.08, speed = 0.0, contrast = 1.0, grain = 1.0),
+    # Kodak D-76 stock; the reference for black and white. Acros II: 7 min, the
+    # time of its sheet's middle curve, which the model is built on (its table
+    # says 7¼).
+    Process(name = "D-76", family = 2, minutes = 7.0, celsius = 20.0, rate = 0.087, speed = 0.0, contrast = 1.0, grain = 1.0),
+    # D-76 diluted 1:1 and used once: a little more grain and sharpness, less
+    # sensitive to temperature (5.5 % per degree).
+    Process(name = "D-76 1:1", family = 2, minutes = 10.5, celsius = 20.0, rate = 0.055, speed = 0.08, contrast = 1.0, grain = 1.07, compensation = 0.05),
+    # Ilford's ID-11, the same formula as D-76 (Acros II sheet: 6¾ min against
+    # D-76's 7¼).
+    Process(name = "ID-11", family = 2, minutes = 6.5, celsius = 20.0, rate = 0.1, speed = 0.0, contrast = 1.0, grain = 1.0),
+    # Kodak XTOL (ascorbate): a third of a stop more speed, finer grain.
+    Process(name = "XTOL", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = 0.33, contrast = 1.0, grain = 0.93, compensation = 0.05),
+    Process(name = "XTOL 1:1", family = 2, minutes = 9.7, celsius = 20.0, rate = 0.055, speed = 0.4, contrast = 1.0, grain = 1.0, compensation = 0.08),
+    # Kodak HC-110, dilution B.
+    Process(name = "HC-110 (B)", family = 2, minutes = 4.0, celsius = 20.0, rate = 0.098, speed = 0.0, contrast = 1.0, grain = 1.1, compensation = 0.05),
+    # Agfa Rodinal (p-aminophenol, almost no sulfite): sharp, defined grain,
+    # slower; more dilute, slower still and more compensating.
+    Process(name = "Rodinal 1+25", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = -0.33, contrast = 1.0, grain = 1.32, compensation = 0.05),
+    Process(name = "Rodinal 1+50", family = 2, minutes = 12.9, celsius = 20.0, rate = 0.07, speed = -0.5, contrast = 1.0, grain = 1.25, compensation = 0.12),
+    # An hour's stand in Rodinal 1+100, agitated only at the start.
+    Process(name = "Rodinal 1+100 stand", family = 2, minutes = 60.0, celsius = 20.0, rate = 0.05, speed = -0.67, contrast = 0.85, grain = 1.2, compensation = 0.3),
+    # Ilford Microphen (PQ, borax): up to half a stop more speed.
+    Process(name = "Microphen", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.1, speed = 0.5, contrast = 1.0, grain = 1.0),
+    # Ilford Perceptol (high sulfite, near neutral): much finer grain, slower.
+    Process(name = "Perceptol", family = 2, minutes = 10.7, celsius = 20.0, rate = 0.1, speed = -0.85, contrast = 1.0, grain = 0.8),
+    # Fujifilm Microfine: Acros II at EI 100 in 10 min (its sheet), fine grain;
+    # 12½ to 5¾ min from 18 to 26 °C.
+    Process(name = "Microfine", family = 2, minutes = 10.0, celsius = 20.0, rate = 0.097, speed = 0.0, contrast = 1.0, grain = 0.85),
+    # Kodak T-MAX developer 1:4.
+    Process(name = "T-MAX developer", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.09, speed = 0.33, contrast = 1.0, grain = 1.05),
+    # PMK pyro: its stain masks the grain and holds back the highlights.
+    Process(name = "PMK pyro", family = 2, minutes = 12.6, celsius = 20.0, rate = 0.087, speed = -0.2, contrast = 1.0, grain = 0.85, compensation = 0.2),
+    # Diafine, two baths of 3 minutes: the developer the emulsion soaked up runs
+    # out in the highlights, so time and temperature do not matter; Acros II
+    # rated at 200.
+    Process(name = "Diafine", family = 2, minutes = 6.0, celsius = 21.0, rate = 0.0, speed = 1.0, contrast = 1.0, grain = 1.15, compensation = 0.35, fixed = true)]
+
+## The standard process of each stock kind (an index into `processes`).
+let standards: i64[3] = [0, 3, 4]
+
+pub func standard(kind: i64) -> i64:
+    return standards[(usize)math.clamp((f64)kind, 0.0, 2.0)]
+
+## The process develop_process `value` chooses for a stock of `kind`: 0 is its
+## standard, n the n-th process (from 1); one of another family is the standard.
+pub func chosen(kind: i64, value: f64) -> i64:
+    let at = (i64)math.round(value) - 1
+    if at < 0 or at >= (i64)process_count or processes[(usize)at].family != kind:
+        return standard(kind)
+    return at
+
 ## Development beyond these ratios to normal is not modelled.
 let least: f64 = 0.4
 let most: f64 = 3.0
 
-pub func process_name(kind: i64) -> str:
-    return process_names[(usize)math.clamp((f64)kind, 0.0, 2.0)]
-pub func normal_time(kind: i64) -> f64:
-    return normal_minutes[(usize)math.clamp((f64)kind, 0.0, 2.0)]
-pub func normal_temperature(kind: i64) -> f64:
-    return normal_celsius[(usize)math.clamp((f64)kind, 0.0, 2.0)]
-
-## The development, as a ratio to normal, for `minutes` at `celsius` (0 for
-## either: the process's own).
-pub func ratio(kind: i64, minutes: f64, celsius: f64) -> f64:
-    let time = minutes if minutes > 0.0 else normal_time(kind)
-    let warmth = celsius if celsius > 0.0 else normal_temperature(kind)
-    return math.clamp(time / normal_time(kind) * math.exp(0.081 * (warmth - normal_temperature(kind))), least, most)
+## The development in process `process`, as a ratio to its normal, for
+## `minutes` at `celsius` (0 for either: the process's own).
+pub func ratio(process: i64, minutes: f64, celsius: f64) -> f64:
+    let used = processes[(usize)process]
+    if used.fixed:
+        return 1.0
+    let time = minutes if minutes > 0.0 else used.minutes
+    let warmth = celsius if celsius > 0.0 else used.celsius
+    return math.clamp(time / used.minutes * math.exp(used.rate * (warmth - used.celsius)), least, most)
 
 ## What development `degree` (a ratio to normal) does to a stock of `kind`'s curve: its shift in log H
 ## (positive: the film rates faster) and its contrast gain.
 pub struct Development:
     pub var shift: f64
     pub var gain: f64
+    ## The grain against the stock's standard development (1: as published),
+    ## and how much the slope above grey flattens.
+    pub var grain: f64 = 1.0
+    pub var compensation: f64 = 0.0
 
 pub func development(kind: i64, degree: f64) -> Development:
     let held = math.clamp(degree, least, most)
     let stops = math.log2(held)
-    if kind == 1:
-        return Development(shift = 0.30103 * math.log(held) / math.log(4.0 / 3.0), gain = 1.0)
+    if kind == reversal:
+        # E-6 push steps give less than their nominal stop (Ektachrome E200:
+        # 0.67, 1.67, 2.33 for 8, 11, 14 minutes): three quarters of it; the
+        # longer first developer leaves less dye for the blacks.
+        let push = math.log(held) / math.log(4.0 / 3.0)
+        return Development(shift = 0.30103 * 0.75 * push, gain = math.exp(-0.06 * push))
+    if kind == color_negative:
+        # ECN-2 pushed one and two stops (3:40, 4:40) gains under a third and
+        # about half a stop of real speed; C-41 pushes raise gamma about 10 and
+        # 25 % (Kodak H-24, Z-131).
+        return Development(shift = 0.25 * stops, gain = math.exp(0.5 * stops))
     if stops < 0.0:
         return Development(shift = 0.161 * stops, gain = math.exp(0.231 * stops))
     return Development(shift = 0.350 * stops, gain = math.exp(0.211 * stops))
 
-test "normal development changes nothing":
+## A stock of `kind` developed in process `process` (an index), `minutes` at
+## `celsius`: the development against the stock's standard, normal development.
+pub func developing(kind: i64, process: i64, minutes: f64, celsius: f64) -> Development:
+    var out = development(kind, ratio(process, minutes, celsius))
+    let used = processes[(usize)process]
+    let normal = processes[(usize)standard(kind)]
+    out.shift += 0.30103 * (used.speed - normal.speed)
+    out.gain *= used.contrast / normal.contrast
+    out.grain = used.grain / normal.grain
+    out.compensation = math.clamp(used.compensation - normal.compensation, 0.0, 0.9)
+    return out
+
+test "normal development in the standard process changes nothing":
     for kind in 0..<3:
-        let normal = development((i64)kind, ratio((i64)kind, 0.0, 0.0))
-        assert(math.abs(normal.shift) < 1.0e-12 and math.abs(normal.gain - 1.0) < 1.0e-12)
+        let normal = developing((i64)kind, standard((i64)kind), 0.0, 0.0)
+        assert(math.abs(normal.shift) < 1.0e-12 and math.abs(normal.gain - 1.0) < 1.0e-12 and normal.grain == 1.0)
 
 test "D-76 4 and 10 minutes give the fitted contrast and speed":
-    let short = development(2, ratio(2, 4.0, 20.0))
+    let d76 = standard(black_and_white)
+    let short = development(2, ratio(d76, 4.0, 20.0))
     assert(math.abs(short.shift + 0.13) < 0.005 and math.abs(short.gain - 0.83) < 0.005)
-    let long = development(2, ratio(2, 10.0, 0.0))
+    let long = development(2, ratio(d76, 10.0, 0.0))
     assert(math.abs(long.shift - 0.18) < 0.005 and math.abs(long.gain - 1.115) < 0.005)
     # Warmer develops faster: 7 minutes at 24 °C is more than at 20 °C.
-    assert(ratio(2, 7.0, 24.0) > 1.3)
+    assert(ratio(d76, 7.0, 24.0) > 1.3)
 
-test "an E-6 push of two minutes rates a slide a stop faster":
-    let push = development(1, ratio(1, 8.0, 0.0))
-    assert(math.abs(push.shift - 0.30103) < 1.0e-9 and push.gain == 1.0)
+test "a process of another family is the standard one":
+    assert(chosen(color_negative, 0.0) == 0 and chosen(color_negative, 2.0) == 1 and chosen(color_negative, 4.0) == 0)
+
+test "a two-bath ignores time and temperature; Rodinal stand is slow and compensating":
+    let diafine = 18
+    assert(processes[diafine].name == "Diafine" and ratio(diafine, 12.0, 28.0) == 1.0)
+    let stand = developing(black_and_white, 12, 0.0, 0.0)
+    assert(processes[12].name == "Rodinal 1+100 stand" and stand.shift < -0.15 and stand.compensation > 0.2)
+
+test "an ECN-2 push gains under a third of a stop, two pushes about half":
+    let one = developing(color_negative, 0, 3.0 + 40.0 / 60.0, 0.0)
+    let two = developing(color_negative, 0, 4.0 + 40.0 / 60.0, 0.0)
+    assert(one.shift / 0.30103 < 0.34 and math.abs(two.shift / 0.30103 - 0.5) < 0.1)
+
+test "E-6 push steps rate a slide as Ektachrome E200's did":
+    let push = development(reversal, ratio(standard(reversal), 8.0, 0.0))
+    assert(math.abs(push.shift / 0.30103 - 0.75) < 1.0e-9 and push.gain < 1.0)
