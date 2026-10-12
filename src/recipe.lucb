@@ -16,7 +16,7 @@ from parameters import Parameter, parameters, parameter_count
 
 # mark: Stages ==================================================================
 
-pub let stage_count: usize = 14
+pub let stage_count: usize = 15
 
 ## The stages: the file, then what the light meets before the film (white
 ## balance, exposure, lens, filter: each light in, light out, and all of them
@@ -38,19 +38,22 @@ pub enum Stage as i64:
     lightbox = 11
     view = 12
     easel = 13
+    ## Last, though it sits between Grade and Print: added after the others, so
+    ## their numbers stay.
+    record = 14
 
 ## What flows on a wire: none (a stage without an input), light, a latent
 ## exposure, processed film, a scanned image, display light.
 pub let medium_names: str[6] = ["none", "light", "exposure", "film", "image", "display"]
 
-pub let stage_names: str[14] = ["File", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Grade", "Print", "Project", "Lightbox", "View", "Easel"]
-let stage_keys: str[14] = ["file", "white_balance", "exposure", "lens", "filter", "film", "develop", "scan", "grade", "print", "project", "lightbox", "view", "easel"]
+pub let stage_names: str[15] = ["File", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Grade", "Print", "Project", "Lightbox", "View", "Easel", "Record"]
+let stage_keys: str[15] = ["file", "white_balance", "exposure", "lens", "filter", "film", "develop", "scan", "grade", "print", "project", "lightbox", "view", "easel", "record"]
 ## Each stage's input and output medium (indices into medium_names).
-let inputs: i64[14] = [0, 1, 1, 1, 1, 1, 2, 3, 4, 3, 3, 3, 4, 5]
-let outputs: i64[14] = [1, 1, 1, 1, 1, 2, 3, 4, 4, 3, 5, 5, 5, 5]
+let inputs: i64[15] = [0, 1, 1, 1, 1, 1, 2, 3, 4, 3, 3, 3, 4, 5, 4]
+let outputs: i64[15] = [1, 1, 1, 1, 1, 2, 3, 4, 4, 3, 5, 5, 5, 5, 3]
 ## The develop sections each stage owns, "|" between.
-let owned: str[14] = ["", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone|Levels|Curves|Color|Color Mixer|Color Grading|Black & White", "Print", "", "", "View", "Geometry|Crop|Vignette"]
-let descriptions: str[14] = [
+let owned: str[15] = ["", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone|Levels|Curves|Color|Color Mixer|Color Grading|Black & White", "Print", "", "", "View", "Geometry|Crop|Vignette", ""]
+let descriptions: str[15] = [
     "The photo picked in the library, as its raw recorded the light.",
     "The light on set: its color temperature and tint (as shot unless set).",
     "More or less light than the camera took, in stops.",
@@ -64,14 +67,15 @@ let descriptions: str[14] = [
     "The print projected: a xenon arc, a little flare.",
     "A slide on a D50 light table.",
     "The scan shown on a display: ACES 2.0, Standard or Linear.",
-    "The frame: perspective, crop and a vignette."]
+    "The frame: perspective, crop and a vignette.",
+    "A film recorder writes the graded scan back onto film, for printing: a digital intermediate."]
 
 ## The families of the process, which the graph colors its stages by: the
 ## source, the camera (the light before film), the chemistry (exposing and
 ## developing film), and the presentation (scanning, grading, printing,
 ## projecting, viewing and framing it).
 pub let category_names: str[4] = ["Source", "Camera", "Chemistry", "Presentation"]
-let categories: i64[14] = [0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3]
+let categories: i64[15] = [0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3]
 
 ## For Luce: how many stages there are, and stage `at`'s name, description,
 ## input and output media (indices into medium_names), develop sections ("|"
@@ -126,7 +130,7 @@ pub struct Node:
     pub var bypassed: bool
 
 pub struct Recipe:
-    pub var nodes: Node[14]
+    pub var nodes: Node[15]
     ## The stage whose result is shown (output A), and the one shown beside it
     ## for comparing (output B), -1 for none.
     pub var display: i64
@@ -242,25 +246,28 @@ pub struct Recipe:
 
 ## The stages on a path, in order.
 pub struct Path:
-    pub var stages: i64[14]
+    pub var stages: i64[15]
     pub var count: usize
 
 # mark: Modes ===================================================================
 
 ## Recipes to start from: the stages each mode chains, top to bottom, and the
 ## stock (film_stock: 0-based stock + 1) it starts with.
-pub let mode_count: usize = 5
-pub let mode_names: str[5] = ["Television", "Cinema", "Slide", "Black & White", "Super Panavision 70"]
-let mode_chains: str[5] = ["file|white_balance|exposure|film|develop|scan|grade|view|easel",
+pub let mode_count: usize = 6
+pub let mode_names: str[6] = ["Television", "Cinema", "Slide", "Black & White", "Super Panavision 70", "Digital Intermediate"]
+let mode_chains: str[6] = ["file|white_balance|exposure|film|develop|scan|grade|view|easel",
                            "file|white_balance|exposure|film|develop|print|project|easel",
                            "file|white_balance|exposure|film|develop|lightbox|easel",
                            "file|exposure|filter|film|develop|scan|grade|view|easel",
-                           "file|white_balance|exposure|film|develop|print|project|easel"]
+                           "file|white_balance|exposure|film|develop|print|project|easel",
+                           "file|white_balance|exposure|film|develop|scan|grade|record|print|project|easel"]
 ## Super Panavision 70 is 2001: A Space Odyssey's chain: Eastman Color Negative
 ## 5251 on 65 mm (developed in its ECN-1), printed and projected.
-let mode_stocks: f64[5] = [3.0, 1.0, 5.0, 6.0, 22.0]
+## Digital Intermediate is the 2000s chain: the negative scanned, graded, recorded
+## back to film and printed, as O Brother, Where Art Thou? was first.
+let mode_stocks: f64[6] = [3.0, 1.0, 5.0, 6.0, 22.0, 3.0]
 ## Settings a mode sets besides its stock, in the settings' text form.
-let mode_extras: str[5] = ["", "", "", "", "film_format=3"]
+let mode_extras: str[6] = ["", "", "", "", "film_format=3", "film_format=1"]
 ## The space between stages in a mode's graph, which runs top to bottom.
 let mode_spacing: f64 = 64.0
 
@@ -340,7 +347,7 @@ pub func parse(text: str) -> Recipe:
     var out = Recipe(display = -1)
     for index in 0..<stage_count:
         out.nodes[index].input = -1
-    var wanted: i64[14]
+    var wanted: i64[15]
     for index in 0..<stage_count:
         wanted[index] = -1
     let bytes = text.bytes

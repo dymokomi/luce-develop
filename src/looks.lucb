@@ -24,8 +24,9 @@ struct Look:
 ## Stocks are film_stock values (film_stocks.lucb's order, from 1): 1 EXR 500T
 ## 5298, 2 EXR 200T 5293, 3 Vision 500T 5279, 8 Vision3 200T 5213, 9 Vision3 250D
 ## 5207, 16 Ektachrome E100, 20 Double-X 5222, 22 Eastman Color Negative 5251,
-## 23 5254. Formats: 1 Super 35, 2 16 mm, 3 65 mm. Modes: 0 Television, 1 Cinema,
-## 3 Black & White, 4 Super Panavision 70.
+## 23 5254. Formats: 1 Super 35, 2 16 mm, 3 65 mm, 4 Super 16, 5 IMAX 15/70. Modes: 0
+## Television, 1 Cinema, 3 Black & White, 4 Super Panavision 70, 5 Digital
+## Intermediate.
 pub let look_count: usize = 20
 let looks: Look[20] = [
     # NBC, 1994–2004: tungsten negative telecined to tape, timed to the broadcast's
@@ -71,21 +72,22 @@ let looks: Look[20] = [
     # negative is not documented: EXR 200T stands in.
     Look(name = "Nineteen Eighty-Four (1984)", mode = 1, settings = "film_stock=2;print_silver=2.4"),
     # Deakins and Cinesite: 5279 and 5293, Super 35, then the first full digital
-    # intermediate: greens turned toward dry yellow and brown, color drained. The
-    # grade is an inference from their account (secondary hue shifts).
-    Look(name = "O Brother, Where Art Thou? (2000)", mode = 0, settings = "film_stock=3;film_format=1;green_hue=-100;aqua_hue=-50;green_saturation=-35;yellow_saturation=-15;saturation=-10;film_warmth=10"),
+    # intermediate: greens turned toward dry yellow and brown, color drained,
+    # recorded to film and printed. The grade is an inference from their account
+    # (secondary hue shifts).
+    Look(name = "O Brother, Where Art Thou? (2000)", mode = 5, settings = "film_stock=3;film_format=1;green_hue=-100;aqua_hue=-50;green_saturation=-35;yellow_saturation=-15;saturation=-10;film_warmth=10"),
     # Yeoman: Vision3 200T 7213 in Super 16, every frame, no 85 even in daylight;
     # the DI warmer and more saturated (his words; the amounts inferred).
-    Look(name = "Moonrise Kingdom (2012)", mode = 0, settings = "film_stock=8;film_format=2;film_warmth=15;saturation=12"),
+    Look(name = "Moonrise Kingdom (2012)", mode = 0, settings = "film_stock=8;film_format=4;film_warmth=15;saturation=12"),
     # The French Dispatch's black and white: Double-X 5222 on Super 35, normal
     # processing.
     Look(name = "The French Dispatch (2021), black and white", mode = 3, settings = "film_stock=20;film_format=1"),
-    # Van Hoytema: 65 mm (IMAX 15-perf and System 65; 65 mm stands in), Vision3
-    # 250D for day color ("Fission"), printed on film.
-    Look(name = "Oppenheimer (2023), color", mode = 1, settings = "film_stock=9;film_format=3"),
+    # Van Hoytema: IMAX 15-perf 65 mm (and System 65), Vision3 250D for day color
+    # ("Fission"), printed on film.
+    Look(name = "Oppenheimer (2023), color", mode = 1, settings = "film_stock=9;film_format=5"),
     # "Fusion": Double-X 5222 made in 65 mm for the film (its processing and
     # prints unpublished).
-    Look(name = "Oppenheimer (2023), black and white", mode = 3, settings = "film_stock=20;film_format=3")]
+    Look(name = "Oppenheimer (2023), black and white", mode = 3, settings = "film_stock=20;film_format=5")]
 
 ## How many looks there are, and look `at`'s name.
 pub func count() -> i64:

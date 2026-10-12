@@ -130,7 +130,7 @@ pub let parameters: ParameterSpec[102] = [
     ParameterSpec("whites", "Whites", "Tone", -100.0, 100.0, 0.0, 0),
     ParameterSpec("blacks", "Blacks", "Tone", -100.0, 100.0, 0.0, 0),
     ParameterSpec("film_stock", "Stock", "Film", 0.0, 31.0, 3.0, 0),
-    ParameterSpec("film_format", "Format", "Film", 0.0, 3.0, 0.0, 0),
+    ParameterSpec("film_format", "Format", "Film", 0.0, 5.0, 0.0, 0),
     ParameterSpec("film_filter", "Balance", "Filter", 0.0, 5.0, 0.0, 0),
     ParameterSpec("film_color_filter", "Color Filter", "Filter", 0.0, 5.0, 0.0, 0),
     ParameterSpec("develop_process", "Process", "Develop", 0.0, 31.0, 0.0, 0),

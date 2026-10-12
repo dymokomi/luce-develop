@@ -93,8 +93,9 @@ pub let grain_row: usize = 83
 pub let values_row: usize = 84
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
-## 4:3 television frame), Super 35, 16 mm and 65 mm.
-pub let frame_widths: f64[4] = [21950.0, 24890.0, 10260.0, 52480.0]
+## 4:3 television frame), Super 35, 16 mm, 65 mm (5-perf, Super Panavision 70),
+## Super 16 and IMAX's 15-perf 65 mm (70.41 × 52.63 mm).
+pub let frame_widths: f64[6] = [21950.0, 24890.0, 10260.0, 52480.0, 12520.0, 70410.0]
 
 ## Interimage at 100%: how much each layer's development is held back, in log
 ## exposure, per unit of dye its neighbours form (rows red, green, blue
@@ -396,7 +397,7 @@ pub struct Film:
         let grey = model.grey_log_h
         let contrast = 1.0 + settings.get(.film_contrast) / 200.0
         let black = settings.get(.film_black) / 100.0
-        let frame = frame_widths[(usize)math.clamp(settings.get(.film_format), 0.0, 3.0)]
+        let frame = frame_widths[(usize)math.clamp(settings.get(.film_format), 0.0, 5.0)]
         self.put(values_row, 6, grey, model.top, frame, settings.get(.film_grain) / 100.0)
         self.put(values_row, 17, model.most[0], model.most[1], model.most[2], (f64)kind)
         # The grain's clouds: their spacing, the Gaussian's 1/(2σ²) in cells, and
