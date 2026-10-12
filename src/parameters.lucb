@@ -33,93 +33,94 @@ pub enum Parameter as u8:
     film_interimage = 16
     film_grain = 17
     film_halation = 18
-    film_warmth = 19
-    film_tint = 20
-    film_contrast = 21
-    film_black = 22
-    scan_calibration = 23
-    levels_black = 24
-    levels_white = 25
-    levels_gamma = 26
-    levels_out_black = 27
-    levels_out_white = 28
-    vibrance = 29
-    saturation = 30
-    red_hue = 31
-    red_saturation = 32
-    red_luminance = 33
-    orange_hue = 34
-    orange_saturation = 35
-    orange_luminance = 36
-    yellow_hue = 37
-    yellow_saturation = 38
-    yellow_luminance = 39
-    green_hue = 40
-    green_saturation = 41
-    green_luminance = 42
-    aqua_hue = 43
-    aqua_saturation = 44
-    aqua_luminance = 45
-    blue_hue = 46
-    blue_saturation = 47
-    blue_luminance = 48
-    purple_hue = 49
-    purple_saturation = 50
-    purple_luminance = 51
-    magenta_hue = 52
-    magenta_saturation = 53
-    magenta_luminance = 54
-    grade_shadows_hue = 55
-    grade_shadows_saturation = 56
-    grade_shadows_luminance = 57
-    grade_midtones_hue = 58
-    grade_midtones_saturation = 59
-    grade_midtones_luminance = 60
-    grade_highlights_hue = 61
-    grade_highlights_saturation = 62
-    grade_highlights_luminance = 63
-    grade_global_hue = 64
-    grade_global_saturation = 65
-    grade_global_luminance = 66
-    grade_balance = 67
-    grade_blending = 68
-    bw = 69
-    bw_red = 70
-    bw_orange = 71
-    bw_yellow = 72
-    bw_green = 73
-    bw_aqua = 74
-    bw_blue = 75
-    bw_purple = 76
-    bw_magenta = 77
-    bw_tint_hue = 78
-    bw_tint_amount = 79
-    lens_vignetting = 80
-    lens_midpoint = 81
-    vignette_amount = 82
-    vignette_midpoint = 83
-    vignette_roundness = 84
-    vignette_feather = 85
-    geometry_rotate = 86
-    geometry_vertical = 87
-    geometry_horizontal = 88
-    geometry_aspect = 89
-    geometry_scale = 90
-    geometry_autocrop = 91
-    crop_left = 92
-    crop_top = 93
-    crop_right = 94
-    crop_bottom = 95
-    print_red = 96
-    print_green = 97
-    print_blue = 98
-    print_silver = 99
-    view = 100
+    film_flash = 19
+    film_warmth = 20
+    film_tint = 21
+    film_contrast = 22
+    film_black = 23
+    scan_calibration = 24
+    levels_black = 25
+    levels_white = 26
+    levels_gamma = 27
+    levels_out_black = 28
+    levels_out_white = 29
+    vibrance = 30
+    saturation = 31
+    red_hue = 32
+    red_saturation = 33
+    red_luminance = 34
+    orange_hue = 35
+    orange_saturation = 36
+    orange_luminance = 37
+    yellow_hue = 38
+    yellow_saturation = 39
+    yellow_luminance = 40
+    green_hue = 41
+    green_saturation = 42
+    green_luminance = 43
+    aqua_hue = 44
+    aqua_saturation = 45
+    aqua_luminance = 46
+    blue_hue = 47
+    blue_saturation = 48
+    blue_luminance = 49
+    purple_hue = 50
+    purple_saturation = 51
+    purple_luminance = 52
+    magenta_hue = 53
+    magenta_saturation = 54
+    magenta_luminance = 55
+    grade_shadows_hue = 56
+    grade_shadows_saturation = 57
+    grade_shadows_luminance = 58
+    grade_midtones_hue = 59
+    grade_midtones_saturation = 60
+    grade_midtones_luminance = 61
+    grade_highlights_hue = 62
+    grade_highlights_saturation = 63
+    grade_highlights_luminance = 64
+    grade_global_hue = 65
+    grade_global_saturation = 66
+    grade_global_luminance = 67
+    grade_balance = 68
+    grade_blending = 69
+    bw = 70
+    bw_red = 71
+    bw_orange = 72
+    bw_yellow = 73
+    bw_green = 74
+    bw_aqua = 75
+    bw_blue = 76
+    bw_purple = 77
+    bw_magenta = 78
+    bw_tint_hue = 79
+    bw_tint_amount = 80
+    lens_vignetting = 81
+    lens_midpoint = 82
+    vignette_amount = 83
+    vignette_midpoint = 84
+    vignette_roundness = 85
+    vignette_feather = 86
+    geometry_rotate = 87
+    geometry_vertical = 88
+    geometry_horizontal = 89
+    geometry_aspect = 90
+    geometry_scale = 91
+    geometry_autocrop = 92
+    crop_left = 93
+    crop_top = 94
+    crop_right = 95
+    crop_bottom = 96
+    print_red = 97
+    print_green = 98
+    print_blue = 99
+    print_silver = 100
+    view = 101
 
 ## How many parameters there are.
-pub let parameter_count: usize = 101
+pub let parameter_count: usize = 102
 
-pub let parameters: ParameterSpec[101] = [
+pub let parameters: ParameterSpec[102] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -130,7 +131,7 @@ pub let parameters: ParameterSpec[101] = [
     ParameterSpec("blacks", "Blacks", "Tone", -100.0, 100.0, 0.0, 0),
     ParameterSpec("film_stock", "Stock", "Film", 0.0, 31.0, 3.0, 0),
     ParameterSpec("film_format", "Format", "Film", 0.0, 3.0, 0.0, 0),
-    ParameterSpec("film_filter", "Balance", "Filter", 0.0, 2.0, 0.0, 0),
+    ParameterSpec("film_filter", "Balance", "Filter", 0.0, 5.0, 0.0, 0),
     ParameterSpec("film_color_filter", "Color Filter", "Filter", 0.0, 5.0, 0.0, 0),
     ParameterSpec("develop_process", "Process", "Develop", 0.0, 31.0, 0.0, 0),
     ParameterSpec("develop_time", "Time", "Develop", 0.0, 30.0, 0.0, 2),
@@ -139,6 +140,7 @@ pub let parameters: ParameterSpec[101] = [
     ParameterSpec("film_interimage", "Interimage", "Film", 0.0, 200.0, 100.0, 0),
     ParameterSpec("film_grain", "Grain", "Film", 0.0, 200.0, 100.0, 0),
     ParameterSpec("film_halation", "Halation", "Film", 0.0, 300.0, 100.0, 0),
+    ParameterSpec("film_flash", "Flashing", "Film", 0.0, 50.0, 0.0, 1),
     ParameterSpec("film_warmth", "Warmth", "Scan", -100.0, 100.0, 0.0, 0),
     ParameterSpec("film_tint", "Tint", "Scan", -100.0, 100.0, 0.0, 0),
     ParameterSpec("film_contrast", "Contrast", "Scan", -100.0, 100.0, 0.0, 0),
@@ -219,5 +221,5 @@ pub let parameters: ParameterSpec[101] = [
     ParameterSpec("print_red", "Red", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_green", "Green", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_blue", "Blue", "Print", -24.0, 24.0, 0.0, 0),
-    ParameterSpec("print_silver", "Bleach Bypass", "Print", 0.0, 100.0, 0.0, 0),
+    ParameterSpec("print_silver", "Silver (IR)", "Print", 0.6, 2.4, 0.6, 2),
     ParameterSpec("view", "View", "View", 0.0, 3.0, 0.0, 0)]

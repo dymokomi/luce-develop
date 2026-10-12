@@ -165,6 +165,13 @@ func build_model():
 ## where the print is dense, in the shadows: blacks deepen, color drains there.
 let print_silver_density: f64 = 0.45
 
+## The share of a print's silver kept for its infrared density at D-max, the
+## number labs set ENR and CCE by (an IR densitometer at 1000 nm, which sees the
+## silver and hardly the dyes): a normal print reads 0.60, one with no bleach at
+## all 2.40 (ENR runs 0.40–1.00, CCE about 1.85; American Cinematographer, 1998).
+pub func silver_kept(infrared: f64) -> f64:
+    return math.clamp((infrared - 0.6) / 1.8, 0.0, 1.0)
+
 ## Scene light `rgb` (AP1) printed and projected: XYZ adapted to D65, the print's
 ## white at Y = 1. `silver` is the share of the print's silver kept (0..1).
 pub func projected(rgb: f64[3], silver: f64 = 0.0) -> xyz.XYZ:

@@ -15,6 +15,7 @@ from tables import Tables
 import scene
 import tables
 import view
+import film_print
 import geometry
 import film
 import film_passes
@@ -233,7 +234,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
     let height = (usize)out_height
     let camera = film.camera_settings(settings)
     let develop = Develop(matrix = try source.matrix(&camera), tables = tables.build(settings),
-                          shown = (View)(i64)settings.get(.view), silver = settings.get(.print_silver) / 100.0, to_display = view.working_to_output(output), output = output,
+                          shown = (View)(i64)settings.get(.view), silver = film_print.silver_kept(settings.get(.print_silver)), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     var out = Rendering(develop = develop, source = source, width = width, height = height)

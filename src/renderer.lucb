@@ -22,6 +22,7 @@ import scene
 import tables
 import geometry
 import view
+import film_print
 import film
 from film import Film
 from film_gpu import FilmPasses
@@ -400,12 +401,12 @@ pub struct Renderer:
             which.tables_stale = false
             which.film_stale = true
         # The view, and the print view's silver kept, as one key.
-        let baked = (i64)which.settings.get(.view) * 1000 + (i64)math.round(which.settings.get(.print_silver) * 5.0)
+        let baked = (i64)which.settings.get(.view) * 1000 + (i64)math.round(which.settings.get(.print_silver) * 100.0)
         if which.view_texture == none or which.view_baked != baked:
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
-            view.bake((View)(i64)which.settings.get(.view), table, which.settings.get(.print_silver) / 100.0)
+            view.bake((View)(i64)which.settings.get(.view), table, film_print.silver_kept(which.settings.get(.print_silver)))
             if which.view_texture == none:
                 which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
             let held = which.view_texture else return

@@ -214,6 +214,22 @@ bands (Gaussians at Status M's band centres) are estimates, labelled where
 they are made. The model builds in about 0.2 s when a stock is first chosen;
 after that a settings change only recomputes the development and the timing.
 
+## Looks (`looks`)
+
+Looks are the film process of particular pictures, as their makers documented
+it (American Cinematographer, Kodak, the labs): a mode and the settings that
+make it that picture. Munich, Saving Private Ryan, Se7en, Fight Club, The
+Godfather, Barry Lyndon, Days of Heaven, Lawrence of Arabia, 2001, Three
+Kings, Nineteen Eighty-Four, O Brother, Where Art Thou?, Moonrise Kingdom, The
+French Dispatch and Oppenheimer, besides Friends. They use what the engine
+models for them: silver kept on the negative or on the print (as the labs set
+ENR and CCE, by infrared density: 0.60 a normal print, 2.40 none bleached),
+flashing, push and pull, the 85, 81 and Coral filters, Eastman Color Negative
+5254 (5251 a stop faster, as Kodak's 1968 paper describes it), and stand-ins
+where a stock is not here, each named in `looks.lucb`. Dye-transfer prints, Low
+Contrast filters, uncoated lenses and intermediate generations are not modelled
+yet.
+
 ## Tests
 
 `luc test` runs the module tests and the test programs in `tests/<name>/`. One of

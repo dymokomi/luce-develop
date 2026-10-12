@@ -66,7 +66,8 @@
 ##          calibration's a and b; 19 the grain's spread per unit of strength;
 ##          20 the retained silver's density per unit of dye density, the
 ##          scan's mean density at the fog, the edge effects' strength (log H
-##          per unit of exhaustion) and width (µm)
+##          per unit of exhaustion) and width (µm); 21 flashing, a share of
+##          grey's exposure added evenly
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -109,12 +110,15 @@ let halation: f64[3] = [0.025, 0.008, 0.0005]
 let halation_spread: f64 = 70.0
 
 
-## Filters on the camera, by the Film Filter setting: Matched (the light balanced
-## to the stock, as a white balance does), None, and a Wratten 85, which warms
-## daylight (5500 K) to about tungsten's 3200 K and takes 2/3 of a stop. Their
-## shift in mireds and the stops they take.
-let filter_mireds: f64[3] = [0.0, 0.0, 112.0]
-let filter_stops: f64[3] = [0.0, 0.0, 0.667]
+## Filters on the camera, by the Filter node's Balance: Matched (the light
+## balanced to the stock, as a white balance does), None, a Wratten 85, which
+## warms daylight (5500 K) to about tungsten's 3200 K and takes 2/3 of a stop,
+## the lighter warming 81A and 81EF (Kodak's mired shifts, +18 and +52, 1/3 and
+## 2/3 of a stop), and a Tiffen ½ Coral, which Saving Private Ryan used in place
+## of the 85 (Tiffen publishes no figure: an estimate, about an 81C). Their shift
+## in mireds and the stops they take.
+let filter_mireds: f64[6] = [0.0, 0.0, 112.0, 18.0, 52.0, 35.0]
+let filter_stops: f64[6] = [0.0, 0.0, 0.667, 0.333, 0.667, 0.333]
 
 ## Color filters on the lens, by the Color Filter setting, the black-and-white
 ## photographer's: none, Yellow (Wratten 8), Orange (21), Red (25), Green (11)
@@ -208,33 +212,6 @@ pub func stock_processes(at: i64) -> interop.Owned[str]!:
         try out.put_number((i64)index + 1)
     return try interop.copy_text(out.text())
 
-# mark: Looks =================================================================
-
-## Film looks that come with the develop: settings (the text form) for a
-## recognisable picture. A Presets pane lists them after the photographer's own.
-##
-## Friends (NBC, 1994–2004) was shot on 35 mm tungsten negative under bright
-## multi-camera set light and graded on a telecine to tape, never printed. No
-## source names its stocks; EXR 500T fits the first seasons and Vision 500T the
-## later ones. Their timing is matched to 24 stills of the 4:3 standard-definition
-## broadcast (12 from each half): the near-neutral pixels' cast in Oklab, about
-## +0.010 a and +0.005 b early (warm, toward red-magenta) and +0.007 a and +0.007 b
-## later, measured as each look shifts a photo's neutrals. The early look is also
-## flatter and grainier, as the stills and reviewers have it.
-let look_names: str[2] = ["Film · Friends, Seasons 1–5", "Film · Friends, Seasons 6–10"]
-let look_texts: str[2] = ["film_stock=1;film_warmth=12;film_tint=7;film_contrast=-12;film_black=75;film_grain=110",
-                          "film_stock=3;film_warmth=21;film_tint=2;film_black=60;film_grain=85"]
-
-pub func look_count() -> i64:
-    return 2
-
-## Look `at`'s name and settings.
-pub func look_name(at: i64) -> str:
-    return look_names[(usize)at]
-
-pub func look_text(at: i64) -> str:
-    return look_texts[(usize)at]
-
 # mark: Film ==================================================================
 
 ## A stock's model and the atlas for some settings: what a renderer or an export
@@ -299,7 +276,7 @@ pub struct Film:
         let chosen = settings.get(.temperature)
         let kelvin = chosen if chosen > 0.0 else shot_kelvin
         let tint = settings.get(.tint) if chosen > 0.0 else shot_tint
-        let filter = (usize)math.clamp(settings.get(.film_filter), 0.0, 2.0)
+        let filter = (usize)math.clamp(settings.get(.film_filter), 0.0, 5.0)
         let through = 1.0e6 / (1.0e6 / math.max(kelvin, 1000.0) + filter_mireds[filter])
         let light = temperature.white(through, tint)
         var to_film = xyz.multiply(xyz.adapt(xyz.aces_white, light), xyz.rgb_to_xyz(xyz.aces_ap1)).m
@@ -432,6 +409,7 @@ pub struct Film:
         # No silver while the scan is set up and its matrix fitted: the lab's scan
         # is set for a bleached negative.
         let fog_density = (fog_scan[0] + fog_scan[1] + fog_scan[2]) / 3.0
+        self.put(values_row, 21, settings.get(.film_flash) / 100.0, 0.0, 0.0, 0.0)
         self.put(values_row, 20, 0.0, fog_density, edge, grown.edge_width)
         let warmth = settings.get(.film_warmth) / 100.0
         let tint = settings.get(.film_tint) / 100.0
@@ -645,12 +623,15 @@ pub func expose(film: const Film*, c: f64[3]) -> f64[3]:
     let y = to_film[1][0] * c[0] + to_film[1][1] * c[1] + to_film[1][2] * c[2]
     let z = to_film[2][0] * c[0] + to_film[2][1] * c[1] + to_film[2][2] * c[2]
     let sum = x + y + z
+    # Flashing: an even exposure over the whole negative, a share of grey's
+    # (grey exposes each layer 0.18).
+    let flash = film.value(21)[0] * 0.18
     if sum <= 1.0e-12 or y <= 1.0e-12:
-        return [1.0e-8, 1.0e-8, 1.0e-8]
+        return [1.0e-8 + flash, 1.0e-8 + flash, 1.0e-8 + flash]
     let gx = math.clamp(x / sum / spectral.x_span, 0.0, 1.0) * (f64)(grid_size - 1)
     let gy = math.clamp(y / sum / spectral.y_span, 0.0, 1.0) * (f64)(grid_size - 1)
     let per_y = film.bilinear(gx, (f64)exposure_row + gy)
-    return [per_y[0] * y, per_y[1] * y, per_y[2] * y]
+    return [per_y[0] * y + flash, per_y[1] * y + flash, per_y[2] * y + flash]
 
 func log_exposure(film: const Film*, e: f64[3]) -> f64[3]:
     let grey = film.value(6)[0]
