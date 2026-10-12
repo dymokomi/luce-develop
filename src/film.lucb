@@ -61,6 +61,8 @@ import memory
 import time
 from luce_std import math
 from luce_color import spectral
+from luce_color import temperature
+from luce_color import xyz
 import film_stocks
 from film_model import Model, build_model, invert3, log_h_at, lut_size, grid_size, curve_samples, log_low, log_high
 from settings import Settings, defaults
@@ -97,6 +99,28 @@ let halation_spread: f64 = 70.0
 ## calibrated so a 48 µm aperture reads the stock's rms granularity whatever
 ## their size (`grain_gain`).
 let grain_cell: f64 = 8.0
+
+## Filters on the camera, by the Film Filter setting: Matched (the light balanced
+## to the stock, as a white balance does), None, and a Wratten 85, which warms
+## daylight (5500 K) to about tungsten's 3200 K and takes 2/3 of a stop. Their
+## shift in mireds and the stops they take.
+let filter_mireds: f64[3] = [0.0, 0.0, 112.0]
+let filter_stops: f64[3] = [0.0, 0.0, 0.667]
+
+## Whether the film sees the light on set: film on, with a Filter (not Matched).
+## White Balance's Temperature and Tint are then that light, not a correction,
+## and the scene comes to the film as the camera saw it (`camera_settings`).
+pub func sees_the_light(settings: const Settings*) -> bool:
+    return settings.get(.film_stock) > 0.0 and settings.get(.film_filter) >= 1.0
+
+## The settings the scene's matrix takes: as shot when the film sees the light
+## on set (it, not the white balance, then decides the color), else `settings`.
+pub func camera_settings(settings: const Settings*) -> Settings:
+    var out = *settings
+    if sees_the_light(settings):
+        out.set(.temperature, 0.0)
+        out.set(.tint, 0.0)
+    return out
 
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
 ## setting is one more), for building a menu.
@@ -156,8 +180,10 @@ pub struct Film:
         return self.on
 
     ## Make the atlas match `settings`: the stock's model when the stock changed,
-    ## the development, the grey and the timing every time.
-    pub func prepare(settings: const Settings*) -> !:
+    ## the development, the grey, the timing and the light every time. The photo
+    ## was taken under `shot_kelvin` and `shot_tint` (its camera's as-shot white
+    ## balance), which is the light on set unless White Balance says otherwise.
+    pub func prepare(settings: const Settings*, shot_kelvin: f64 = 6500.0, shot_tint: f64 = 0.0) -> !:
         let choice = (i64)settings.get(.film_stock)
         if self.texels.length == 0:
             self.texels = try new f32[atlas_width * atlas_rows * 4] --- in memory.heap
@@ -174,6 +200,27 @@ pub struct Film:
             self.fill_model()
         self.on = true
         self.fill_settings(settings)
+        self.fill_light(settings, shot_kelvin, shot_tint)
+
+    ## The light the film sees: by default the light it is balanced for, so the
+    ## develop's white balance, which made the scene neutral, makes it neutral
+    ## on the film too. With a Filter chosen (None or 85), the light on set:
+    ## White Balance's Temperature and Tint (as shot when not set), through the
+    ## filter, so a daylight scene on tungsten film goes blue unless an 85 warms
+    ## it, and the filter takes the light it absorbs.
+    func fill_light(settings: const Settings*, shot_kelvin: f64, shot_tint: f64):
+        if not sees_the_light(settings):
+            return
+        let chosen = settings.get(.temperature)
+        let kelvin = chosen if chosen > 0.0 else shot_kelvin
+        let tint = settings.get(.tint) if chosen > 0.0 else shot_tint
+        let filter = (usize)math.clamp(settings.get(.film_filter), 0.0, 2.0)
+        let through = 1.0e6 / (1.0e6 / math.max(kelvin, 1000.0) + filter_mireds[filter])
+        let light = temperature.white(through, tint)
+        var to_film = xyz.multiply(xyz.adapt(xyz.aces_white, light), xyz.rgb_to_xyz(xyz.aces_ap1)).m
+        let passed = math.exp2(-filter_stops[filter])
+        for row in 0..<(usize)3:
+            self.put(values_row, row, to_film[row * 3] * passed, to_film[row * 3 + 1] * passed, to_film[row * 3 + 2] * passed, 0.0)
 
     func put(row: usize, column: usize, r: f64, g: f64, b: f64, a: f64):
         let at = (row * atlas_width + column) * 4
@@ -648,6 +695,27 @@ test "grain through a 48 µm aperture reads its granularity":
     let deviation = math.sqrt(squares / count - (sum / count) * (sum / count))
     print(f"grain through 42 µm: {deviation / wanted} of the granularity")
     assert(math.abs(deviation / wanted - 1.0) < 0.12)
+
+test "tungsten film in daylight goes blue, an 85 brings it back":
+    var settings = defaults_with_film()
+    settings.set(.film_grain, 0.0)
+    var shown: f64[9]
+    for (index, filter) in [0.0, 1.0, 2.0].indexed():
+        settings.set(.film_filter, filter)
+        var film = Film()
+        film.prepare(&settings, 5500.0, 0.0) catch failure:
+            assert(false)
+            return
+        defer film.release()
+        let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 20.0)
+        for k in 0..<(usize)3:
+            shown[index * 3 + k] = grey[k]
+    # Matched: neutral. None: blue. 85: near neutral again, two thirds of a stop darker.
+    assert(math.abs(math.log2(shown[2] / shown[0])) < 0.05)
+    assert(shown[5] / shown[3] > 1.4)
+    assert(math.abs(math.log2(shown[8] / shown[6])) < 0.25)
+    let darker = math.log2(shown[7] / shown[1])
+    assert(darker < -0.4 and darker > -1.0)
 
 func defaults_with_film() -> Settings:
     var out = defaults()

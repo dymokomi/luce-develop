@@ -106,7 +106,12 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
    each layer is exposed to it through its spectral sensitivity. Middle grey
    lands on the stock's normal exposure; Film Exposure over- or underexposes
-   the negative, and the transfer brings grey back.
+   the negative, and the transfer brings grey back. Exposure is the camera's
+   exposure onto the negative. Filter decides the light: Matched (the default)
+   balances it to the stock, as White Balance does; with None or 85, White
+   Balance's Temperature and Tint become the light on set (as shot unless
+   set), so daylight on tungsten film goes blue unless an 85 warms it (and
+   takes its 2/3 of a stop).
 2. **Light in the emulsion.** Each layer's exposure scatters (an exponential,
    the emulsion's classic spread of light); Halation adds light that came back
    off the base, mostly to the red layer, weak behind rem-jet backing.
