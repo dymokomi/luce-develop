@@ -82,7 +82,8 @@
 ##          misses, so the two together hold it to about 22 bits (the weights
 ##          partly cancel, and grey must land exactly); 48–50 reciprocity
 ##          failure's q, p, t0 for the red, green and blue layers; 51 the
-##          exposure time (s); 52–54 the development's kinetics; 64–319 the
+##          exposure time (s); 52–54 the development's kinetics; 55 its steps
+##          and the share of a step's used developer left a step later; 64–319 the
 ##          halation's samples, offsets in µm; 320–328 the grain populations,
 ##          per layer three: where half develop (log H), how gradually, and
 ##          their strength; 329–337 the stochastic render's grains, per layer
@@ -489,6 +490,10 @@ pub struct Film:
         self.put(values_row, 52, grown.saturation[0], grown.saturation[1], grown.saturation[2], grown.induction)
         self.put(values_row, 53, grown.rate_slope[0], grown.rate_slope[1], grown.rate_slope[2], grown.grey_log_h)
         self.put(values_row, 54, grown.time, grown.minutes, grown.renewal, kept_share(&grown, grown.renewal))
+        # The steps, and the share of a step's used developer still missing
+        # one step later (the bath's renewal), for the even field's exhaustion.
+        let step_keep = math.exp(-grown.minutes / (f64)chemistry_steps / math.max(grown.renewal, 1.0e-6))
+        self.put(values_row, 55, (f64)chemistry_steps, step_keep, 0.0, 0.0)
         # The bleach bypassed (develop_silver): silver stays where the dye
         # formed, adding its own grain. Only a color negative's silver is extra.
         let retained = settings.get(.develop_silver) / 100.0 if kind == 0 else 0.0
@@ -1148,6 +1153,27 @@ pub func neutral(film: const Film*, e: f64[3]) -> f64[3]:
     return inhibitor((i64)v17[3], [v17[0], v17[1], v17[2]],
                      [film.curve(neutral_row, 0, log_h[0]), film.curve(neutral_row, 1, log_h[1]), film.curve(neutral_row, 2, log_h[2])])
 
+## How much developer a large even field of exposure `e` still misses at the
+## end of the development: what each step used (as each layer developed then,
+## by the kinetics at this exposure), less what the bath renewed since: the
+## same sum the steps' fields make (film_passes.lucb's `develop_steps`), so an
+## even field has no edge effect at any agitation.
+pub func even_exhaustion(film: const Film*, e: f64[3]) -> f64:
+    let log_h = log_exposure(film, e)
+    let held = neutral(film, e)
+    let most = film.value(17)
+    let v55 = film.value(55)
+    let n = (usize)v55[0]
+    var sum = 0.0
+    var before: f64[3] = [0.0, 0.0, 0.0]
+    for step in 1..=n:
+        let now = progress(film, log_h, (f64)step / (f64)n)
+        let kept = math.pow(v55[1], (f64)(n - step))
+        for k in 0..<(usize)3:
+            sum += kept * held[k] / math.max(most[k], 1.0e-9) * (now[k] - before[k]) / 3.0
+        before = now
+    return sum
+
 ## A place on the developed negative: each layer's dye, and the effective log
 ## H it developed at (which sets its granularity).
 pub struct Developed:
@@ -1170,7 +1196,7 @@ pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, s
     # The edge effects: developer missing beyond what an even field of this
     # exposure would miss (Eberhard: a dense border beside a thin one gets the
     # thin one's to spare).
-    let even = exhaustion(film, neutral(film, e)) * film.value(54)[3]
+    let even = even_exhaustion(film, e)
     var out: Developed
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
@@ -1437,7 +1463,7 @@ pub func develop(film: const Film*, c: f64[3], x: f64, y: f64, pitch: f64, matri
     let held = neutral(film, e)
     # The bath renewed the developer it used as it went (values 54: the share
     # still missing at the end).
-    return scan(film, e, held, exhaustion(film, held) * film.value(54)[3], x, y, pitch, matrix)
+    return scan(film, e, held, even_exhaustion(film, e), x, y, pitch, matrix)
 
 # mark: Tests =================================================================
 
@@ -1666,6 +1692,75 @@ test "every format films a grey card (IMAX's frame fits the atlas)":
         for k in 0..<(usize)3:
             assert(out[k] > 0.05 and out[k] < 1.0)
 
+## The scanned red density of a large even field where the layers'
+## exposures are `e` (relative, 0.18 grey), developed with each other's
+## inhibitor (interimage).
+func red_density(film: const Film*, e: f64[3]) -> f64:
+    let held = neutral(film, e)
+    let here = developed(film, e, held, even_exhaustion(film, e))
+    return film.density_read(here.amounts)[0]
+
+test "interimage makes a single colour steeper than a neutral, as colour negatives are":
+    # Vision3 250D: the red record's gamma (scanned density per log H, ±0.3
+    # about grey) exposed with the others (a grey scale) and alone (the others
+    # held at grey). With the others developing too, their inhibitor holds the
+    # red back; alone it develops freely: the "gamma ratio" of colour
+    # negatives, 1.0–1.3 (research: docs/PHYSICAL-FILM.md, part 4).
+    var settings = defaults()
+    settings.set(.film_stock, 9.0)
+    var made = Film()
+    made.prepare(&settings) catch failure:
+        assert(false)
+        return
+    defer made.release()
+    let low = 0.18 * math.pow(10.0, -0.3)
+    let high = 0.18 * math.pow(10.0, 0.3)
+    let neutral_gamma = (red_density(&made, [high, high, high]) - red_density(&made, [low, low, low])) / 0.6
+    let alone_gamma = (red_density(&made, [high, 0.18, 0.18]) - red_density(&made, [low, 0.18, 0.18])) / 0.6
+    print(f"Vision3 250D red gamma: neutral {neutral_gamma}, alone {alone_gamma}, ratio {alone_gamma / neutral_gamma}")
+    assert(alone_gamma / neutral_gamma > 1.0 and alone_gamma / neutral_gamma < 1.3)
+
+test "every stock's grains make its published granularity":
+    # The stochastic render's fitted grains (Campbell's variance of the field)
+    # against each stock's granularity, in its layers' dye, across its curve
+    # (toe to shoulder, where the dye is a tenth to nine tenths of its range).
+    var worst = 0.0
+    for stock in 1..=film_stocks.stock_count:
+        var settings = defaults()
+        settings.set(.film_stock, (f64)stock)
+        var made = Film()
+        made.prepare(&settings) catch failure:
+            assert(false)
+            return
+        defer made.release()
+        made.fit_grains() catch failure:
+            assert(false)
+            return
+        let layers: usize = 1 if made.value(17)[3] == 2.0 else 3
+        for layer in 0..<layers:
+            var low = 1.0e9
+            var high = -1.0e9
+            for at in 0..<curve_samples:
+                let v = made.curve(developed_row, layer, log_h_at(at))
+                low = math.min(low, v)
+                high = math.max(high, v)
+            for at in 0..<curve_samples:
+                if at % 16 != 0:
+                    continue
+                let h = log_h_at(at)
+                let v = made.curve(developed_row, layer, h)
+                if v < low + 0.1 * (high - low) or v > low + 0.9 * (high - low):
+                    continue
+                let amounts = [made.curve(developed_row, 0, h), made.curve(developed_row, 1, h), made.curve(developed_row, 2, h)]
+                let slopes = made.scan_slopes(amounts)
+                let own = slopes[0] + slopes[3] + slopes[6] if layers == 1 else slopes[layer * 4]
+                let wanted = made.granularity_at(layer, h) / math.max(own, 0.05)
+                let fitted = made.grain_granularity(layer, h)
+                if wanted > 1.0e-4:
+                    worst = math.max(worst, math.abs(fitted / wanted - 1.0))
+    print(f"grain fit: worst {worst * 100.0} % from the published granularity")
+    assert(worst < 0.02)
+
 func defaults_with_film() -> Settings:
     var out = defaults()
     out.set(.film_stock, 1.0)
@@ -1729,7 +1824,7 @@ test "a push develops more of the same grains: its grain follows the normal one'
         defer film.release()
         let e = expose(&film, [0.09, 0.09, 0.09])
         let held = neutral(&film, e)
-        var here = developed(&film, e, held, exhaustion(&film, held) * film.value(54)[3])
+        var here = developed(&film, e, held, even_exhaustion(&film, e))
         for at in 0..<400:
             let (amounts, _) = clouded(&film, (f64)(at % 20) * 3.0, (f64)(at // 20) * 3.0, 3.0, same_everywhere, (void*)&here)
             noises[(usize)index * 400 + (usize)at] = amounts[1] - here.amounts[1]

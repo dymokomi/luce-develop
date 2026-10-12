@@ -261,7 +261,17 @@ void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
     vec3 dye = film_curve(33.0, log_h);
     vec4 v17 = film_value(17.0);
     vec3 neutral_held = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
-    float even = dot(neutral_held / max(v17.rgb, vec3(1e-9)), vec3(1.0 / 3.0)) * film_value(54.0).w;
+    // The developer an even field of this exposure still misses at the end
+    // (film.lucb's `even_exhaustion`): each step's use, less the bath's renewal.
+    vec4 v55 = film_value(55.0);
+    int steps = int(v55.x + 0.5);
+    float even = 0.0;
+    vec3 before = vec3(0.0);
+    for (int step = 1; step <= steps; step++) {
+        vec3 now = progress(log_h, float(step) / float(steps));
+        even += pow(v55.y, float(steps - step)) * dot(neutral_held / max(v17.rgb, vec3(1e-9)), now - before) / 3.0;
+        before = now;
+    }
     effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held))
               - film_value(20.0).z * (around.a - even);
     amounts = film_curve(34.0, effective);

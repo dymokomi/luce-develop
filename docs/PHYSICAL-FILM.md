@@ -51,7 +51,13 @@ pixel size only decides how finely the film is sampled.
    covering power, or through dye yield for colour stocks. It replaces the
    fitted shift and scale rule. Exit tests: Kodak's Z-131 control deltas
    (±40 s around 3:15); D-76 time series for Acros, Tri-X and HP5; E-6 push
-   speeds of EI 320/640/1000 at 8/11/14 min.
+   speeds of EI 320/640/1000 at 8/11/14 min. *Status:* C-41 ±40 s met; Tri-X
+   D-76 6/10/12 min within 0.08; Acros II D-76 4/10 min within 0.1 (one rate per
+   exposure: Fujifilm's 4 minutes is slower in the midtones than that allows;
+   per-population kinetics would separate it); HP5 has no published series
+   (it borrows Tri-X's); Ektachrome E100's E-6 pushes: the layers' mean within
+   0.15 stop of Kodak's, blue up to 0.4 more (one rate shared by the layers).
+   The black-and-white kinetics are fitted in exactly the form they develop in.
 
 3. **Spectral print chain** (done: 2383 printed straight from the negative
    through printing density; color paper through its own layers' sensitivity
@@ -59,7 +65,11 @@ pixel size only decides how finely the film is sampled.
    negative's spectral density: lamp × printer filters × print-stock (or paper)
    sensitivity × 10^(−D_neg(λ)), with printer points of 0.025 log E. This
    replaces the Cineon-encoded scene. Exit tests: 2383 LAD aim of Status A
-   1.09/1.06/1.03; 0.07 D per point.
+   1.09/1.06/1.03; 0.07 D per point. *Status:* printer lights print Kodak's
+   LAD patch (0.05 below grey on the negative) as the 1.0 visual neutral; read
+   through Status A (tabulated, python-colormath) it is 1.08 / 1.06 / 1.06. A
+   printer point moves it 0.11, as 2383's datasheet slope says; Kodak's rule
+   of thumb, 0.07, is lower than its own sensitometry.
 
 4. **Reaction–diffusion development (progressive)** (done in a first form,
    see "As built" below). Development runs as a
@@ -72,7 +82,13 @@ pixel size only decides how finely the film is sampled.
    "watch it develop"); the final state is what export uses. Exit tests:
    gamma ratios 0.8–1.3 (scan films); Nelson's adjacency (e-folding ≈ 20 µm,
    2–5 %); stand development's strong edges; agitation changing edges, not
-   contrast.
+   contrast. *Status:* a single colour on Vision3 250D develops 1.05× the
+   neutral's gamma; stand edges stronger than continuous; agitation leaves even
+   areas within 1 % (each pixel's even-field exhaustion is now exact at its own
+   exposure). Portra 400's edge overshoots 13 % with a 27 µm e-folding: the
+   length is Nelson's, the strength what Portra 400's own MTF (1.11 at 12
+   cycles/mm) implies; Nelson's fit to Kodak Gold 200 weighs it 2.3–5.3 %. The
+   data disagree between films; measured edge traces per stock would settle it.
 
    *How it runs.* A film-plane grid per layer at the chemistry's scale (cells
    no wider than 10 µm, or the pixel when that is finer), holding per layer:
@@ -122,7 +138,11 @@ pixel size only decides how finely the film is sampled.
    (mean, variance, the measured spectrum's shape), so zoomed-out views stay
    fast. Exit tests: 48 µm RMS against density, including the bump, for every
    stock with a published curve; two-scale noise power spectrum; Print Grain
-   Index ordering for Portra 400.
+   Index ordering for Portra 400. *Status:* every stock's fitted grains make
+   its granularity from toe to shoulder within 0.05 % (each population's clouds
+   at least as large as its share of the toe needs); Portra 160 < 400 < 800 in
+   the render. The two-scale spectrum waits on cluster data (dye cloud sizes,
+   noise power spectra).
 
 6. **Halation** (done: 256 samples drawn from the computed distribution,
    gathered at reduced resolution; strengths are estimates). A geometric point-spread function: the base's thickness and

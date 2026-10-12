@@ -351,7 +351,7 @@ let headroom: f64 = 1.6
 
 ## A cloud is at most this dense at its middle (a dye cloud is never opaque;
 ## a developed silver grain nearly is): where a density needs more, the
-## populations get more grains instead. Its strength stays above 0.05.
+## populations get more grains instead. Its strength stays above 0.01.
 let densest: f64 = 2.5
 
 ## Every eighth sample is solved; between them, interpolated.
@@ -379,7 +379,10 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
     let most = nonnegative3(normal, right)
     # The fast population's radius from the granularity where the curve is
     # halfway up (first order: σ²·S = Σ D·ρ²·F(q)·E[s⁴]/E[s²]); the others'
-    # in proportion.
+    # in proportion. Then no smaller than each population needs where it makes
+    # most of the dye: there, at the clouds' densest, first order (which never
+    # overstates Campbell's variance) still has to reach the granularity (in a
+    # toe the fast grains alone make it: faster emulsions, larger grains).
     var top = 0.0
     for at2 in 0..<table_samples:
         top = math.max(top, curves[at2 * 3 + layer])
@@ -395,6 +398,25 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
         weighed += most[p] * share(populations_at, layer, p, log_h_at(middle), reversal) * radius_ratio[p] * radius_ratio[p] * light_taken(peak)
     let fourth_over_second = 1.3251199999999998 / size_square_mean
     let fast = math.sqrt(math.max(wanted, 1.0e-12) / math.max(weighed * fourth_over_second, 1.0e-12))
+    var radii: f64[3]
+    for p in 0..<populations:
+        radii[p] = fast * radius_ratio[p]
+    let densest_taken = light_taken(densest)
+    var at3: usize = 0
+    while at3 < table_samples:
+        let dye = curves[at3 * 3 + layer]
+        if dye >= 0.1 * top and dye <= 0.9 * top:
+            var dominant: usize = 0
+            var largest_dye = -1.0
+            for p in 0..<populations:
+                let part = most[p] * share(populations_at, layer, p, log_h_at(at3), reversal)
+                if part > largest_dye:
+                    largest_dye = part
+                    dominant = p
+            let variance = granularity[at3 * 3 + layer] * granularity[at3 * 3 + layer] * aperture_area
+            let needed = math.sqrt(variance / math.max(dye * densest_taken * fourth_over_second, 1.0e-12))
+            radii[dominant] = math.max(radii[dominant], needed)
+        at3 += 4
     # At each exposure, how far the populations have developed and how strong
     # their clouds are, so the field's density is the curve's and its rms the
     # granularity's. The populations develop along their own logistics at a
@@ -412,7 +434,7 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
     var more = headroom
     for _ in 0..<10:
         for p in 0..<populations:
-            let radius = math.clamp(fast * radius_ratio[p], 0.2, 12.0)
+            let radius = math.clamp(radii[p], 0.2, 12.0)
             let density = more * most[p] / (radius * radius * size_square_mean * light_taken(peak))
             geometry[p] = Geometry(density = density, peak = peak, radius = radius)
             out.geometry[layer * 3 + p] = geometry[p]
@@ -421,7 +443,7 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
             let sample = index * solved_every if index * solved_every < table_samples else table_samples - 1
             let target = curves[sample * 3 + layer]
             let variance = granularity[sample * 3 + layer] * granularity[sample * 3 + layer]
-            var low = math.log(0.05)
+            var low = math.log(0.01)
             var high = math.log(math.max(densest / peak, 0.06))
             var strength = 1.0
             var warp = log_low - 3.0 if not reversal else log_high + 3.0
