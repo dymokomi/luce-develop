@@ -15,8 +15,7 @@
 ##                offsets, luminance factor) for shadows, midtones, highlights and
 ##                global; 4 grading balance, blending, B&W on, B&W tint a; 5 B&W tint
 ##                b, lens vignetting, its midpoint, vignette amount; 6 vignette
-##                midpoint, roundness, feather, grain amount; 7 grain size and
-##                roughness
+##                midpoint, roundness, feather
 from luce_std import math
 from settings import Settings, defaults
 from parameters import Parameter
@@ -133,8 +132,7 @@ pub func build(settings: const Settings*) -> Tables:
     let (tint_a, tint_b) = wheel(settings.get(.bw_tint_hue), settings.get(.bw_tint_amount) * 0.5)
     out.put(3, 4, settings.get(.grade_balance) / 100.0, settings.get(.grade_blending) / 100.0, settings.get(.bw), tint_a)
     out.put(3, 5, tint_b, settings.get(.lens_vignetting) / 100.0, settings.get(.lens_midpoint) / 100.0, settings.get(.vignette_amount) / 100.0)
-    out.put(3, 6, settings.get(.vignette_midpoint) / 100.0, settings.get(.vignette_roundness) / 100.0, settings.get(.vignette_feather) / 100.0, settings.get(.grain_amount) / 100.0)
-    out.put(3, 7, settings.get(.grain_size) / 100.0, settings.get(.grain_roughness) / 100.0, 0.0, 0.0)
+    out.put(3, 6, settings.get(.vignette_midpoint) / 100.0, settings.get(.vignette_roundness) / 100.0, settings.get(.vignette_feather) / 100.0, 0.0)
     return out
 
 ## The tables as half floats, for the texture.

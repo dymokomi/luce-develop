@@ -5,15 +5,19 @@
 ## value by its Parameter; Luce holds a Look, an object with get and set by name,
 ## and builds its controls from the parameter table.
 ##
-## What the parameters do, by section (ranges are in parameters.lucb):
-##   White Balance    temperature (kelvin; 0 = as shot, tint then ignored), tint
-##   Exposure & Tone  exposure (stops); contrast, highlights, shadows, whites,
-##                    blacks: a tone curve on luminance (tone.lucb)
-##   Film             stock (0 none), format, filter (the light on set: matched
-##                    to the stock, or White Balance's as the film saw it), a
-##                    color filter on the lens (black and white's),
-##                    film exposure, interimage, grain, halation, and the
-##                    transfer's warmth, tint, contrast and black (film.lucb)
+## What the parameters do, by section (ranges are in parameters.lucb). The
+## sections follow the film process (luced-photo shows each as a node's):
+##   White Balance    the light on set (temperature in kelvin, 0 = as shot, tint
+##                    then ignored; tint)
+##   Exposure         stops over or under the camera's exposure
+##   Lens             vignetting correction and where it starts
+##   Filter           a light-balancing filter (with film: the light as the
+##                    film saw it) and a black-and-white color filter (film.lucb)
+##   Film             stock (0 none), format, grain, halation, interimage
+##   Develop          push and pull
+##   Scan             the transfer's warmth, tint, contrast and black
+##   Tone             contrast, highlights, shadows, whites and blacks: a tone
+##                    curve on luminance (tone.lucb)
 ##   Levels           input black and white, gamma, output black and white, on
 ##                    the display's encoded values
 ##   Color            vibrance and saturation, in Oklab
@@ -22,11 +26,11 @@
 ##                    highlights and the whole; balance and blending
 ##   Black & White    on/off, how much each hue band counts toward the grey,
 ##                    a tint
-##   Lens             vignetting correction and where it starts
 ##   Geometry         rotate, vertical and horizontal perspective, aspect, scale,
 ##                    crop to fit; and up to four guides, lines drawn on the
 ##                    photo that should be vertical or horizontal (geometry.lucb)
-##   Effects          a post-crop vignette; film grain
+##   Crop             the crop
+##   Vignette         a vignette after the crop
 ##   View             the view transform (View)
 import interop
 import memory
@@ -34,6 +38,8 @@ import ownership
 from luce_std import math
 from luce_std.collections import Buffer
 from parameters import Parameter, ParameterSpec, parameters, parameter_count
+from recipe import Recipe
+import recipe
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -121,6 +127,8 @@ pub struct Settings:
     var curves: Curve[5]
     var lines: Guide[4]
     var guide_count: usize
+    ## The film process the photo goes through (recipe.lucb).
+    pub var recipe: Recipe
 
     pub func get(which: Parameter) -> f64:
         return self.values[(usize)which]
@@ -174,12 +182,55 @@ pub struct Settings:
                 return false
         return true
 
-## The settings a photo starts with: as shot, untouched, the ACES 2.0 view.
+## The settings a photo starts with: as shot, untouched, through the default
+## recipe (Television) and the ACES 2.0 view.
 pub func defaults() -> Settings:
-    var out: Settings
+    var out = Settings(recipe = recipe.default_recipe())
     for at in 0..<parameter_count:
         out.values[at] = parameters[at].default
     return out
+
+## What `settings` render with: only the stages on the path to the displayed
+## one at work (a stage elsewhere, bypassed or missing leaves its sections at
+## their defaults; its curves and guides too), and the engine's mode as the
+## path has it: film on with a Film stage (its stock), off without; a Project
+## stage (after Print) the 2383 print view; a Lightbox a slide, seen through the
+## ACES view; a View stage its own. A recipe whose displayed stage does not reach
+## a File renders as shot, without film.
+pub func compile(settings: const Settings*) -> Settings:
+    var out = *settings
+    let plan = settings.recipe
+    let base = defaults()
+    for at in 0..<parameter_count:
+        let owner = recipe.owner_of(parameters[at].section)
+        if owner >= 0 and not plan.active(owner):
+            out.values[at] = base.values[at]
+    if not plan.active((i64)recipe.Stage.grade):
+        for at in 0..<curve_count:
+            out.curves[at] = Curve()
+    if not plan.active((i64)recipe.Stage.easel):
+        out.guide_count = 0
+    if not plan.active((i64)recipe.Stage.film):
+        out.set(.film_stock, 0.0)
+    if plan.active((i64)recipe.Stage.project) and plan.active((i64)recipe.Stage.print):
+        out.set(.view, (f64)(i64)View.print)
+    elif plan.active((i64)recipe.Stage.lightbox):
+        out.set(.view, (f64)(i64)View.aces)
+    elif not plan.active((i64)recipe.Stage.view):
+        out.set(.view, (f64)(i64)View.aces)
+    return out
+
+## Mode `at` (recipe.mode_names) as settings text to stack on a photo: its
+## recipe and its stock.
+pub func mode_text(at: i64) -> interop.Owned[str]!:
+    var out: Buffer
+    defer out.destroy()
+    let chosen = recipe.mode((usize)at)
+    try out.put_text("recipe=")
+    try recipe.text_of(&chosen, &out)
+    try out.put_text(";film_stock=")
+    try put_decimal(&out, recipe.mode_stock((usize)at))
+    return try interop.copy_text(out.text())
 
 ## The parameter named `name`, or none.
 pub func named(name: str) -> Parameter?:
@@ -229,6 +280,19 @@ pub func text_of(settings: const Settings*, out: Buffer*) -> !:
                 if index > 0:
                     try out.put_byte(',')
                 try put_decimal(out, value)
+    # The recipe, when it is not the default one.
+    var mine: Buffer
+    defer mine.destroy()
+    try recipe.text_of(&settings.recipe, &mine)
+    var usual: Buffer
+    defer usual.destroy()
+    let fallback = recipe.default_recipe()
+    try recipe.text_of(&fallback, &usual)
+    if mine.text() != usual.text():
+        if out.length() > 0:
+            try out.put_byte(';')
+        try out.put_text("recipe=")
+        try out.put_text(mine.text())
 
 ## Settings from their text form; unknown names and malformed pairs are passed
 ## over, so text from a newer version still opens.
@@ -258,6 +322,8 @@ pub func parse(text: str) -> Settings:
                 parse_curve(&out, at, value)
         if name == "guides":
             parse_guides(&out, value)
+        if name == "recipe":
+            out.recipe = recipe.parse(value)
     if out.get(.temperature) > 0.0 and out.get(.temperature) < 1667.0:
         out.set(.temperature, 1667.0)
     return out
@@ -434,6 +500,59 @@ pub struct Look:
     pub func load(text: str):
         self.settings = parse(text)
 
+    # mark: the recipe ------------------------------------------------------------
+
+    ## Whether stage `stage` (recipe.Stage) is in the recipe, where it sits, the
+    ## stage its input comes from (-1 none), and whether it is bypassed.
+    pub func has_stage(stage: i64) -> bool:
+        return self.settings.recipe.has(stage)
+    pub func stage_x(stage: i64) -> f64:
+        return self.settings.recipe.nodes[(usize)stage].x if self.settings.recipe.has(stage) else 0.0
+    pub func stage_y(stage: i64) -> f64:
+        return self.settings.recipe.nodes[(usize)stage].y if self.settings.recipe.has(stage) else 0.0
+    pub func stage_source(stage: i64) -> i64:
+        return self.settings.recipe.nodes[(usize)stage].input if self.settings.recipe.has(stage) else -1
+    pub func stage_bypassed(stage: i64) -> bool:
+        return self.settings.recipe.has(stage) and self.settings.recipe.nodes[(usize)stage].bypassed
+    ## The displayed stage (-1 none), and whether it reaches a File.
+    pub func display_stage() -> i64:
+        return self.settings.recipe.display
+    pub func recipe_works() -> bool:
+        return self.settings.recipe.path().count > 0
+    ## Whether `stage` is at work: on the path to the displayed stage, not bypassed.
+    pub func stage_active(stage: i64) -> bool:
+        return self.settings.recipe.active(stage)
+
+    pub func add_stage(stage: i64, x: f64, y: f64) -> bool:
+        return self.settings.recipe.add(stage, x, y)
+    pub func remove_stage(stage: i64):
+        self.settings.recipe.remove(stage)
+    ## Wire `source` into `target`; whether the media matched (and it made no loop).
+    pub func connect(source: i64, target: i64) -> bool:
+        return self.settings.recipe.connect(source, target)
+    pub func disconnect(to: i64):
+        self.settings.recipe.disconnect(to)
+    pub func move_stage(stage: i64, x: f64, y: f64):
+        self.settings.recipe.move(stage, x, y)
+    pub func set_bypassed(stage: i64, bypassed: bool):
+        self.settings.recipe.set_bypassed(stage, bypassed)
+    pub func set_display(stage: i64):
+        self.settings.recipe.set_display(stage)
+
+    ## The recipe as a part of settings text, "recipe=…", even when it is the
+    ## default one (a saved recipe names its graph whatever it is).
+    pub func recipe_text() -> interop.Owned[str]!:
+        var out: Buffer
+        defer out.destroy()
+        try out.put_text("recipe=")
+        try recipe.text_of(&self.settings.recipe, &out)
+        return try interop.copy_text(out.text())
+
+    ## Start from mode `at` (recipe.mode_names): its stages and its stock.
+    pub func use_mode(at: i64):
+        self.settings.recipe = recipe.mode((usize)at)
+        self.settings.set(.film_stock, recipe.mode_stock((usize)at))
+
     ## A copy, for undo or copy and paste.
     pub func copy() -> interop.Reference[Look]!:
         return try adopt(self.settings)
@@ -525,3 +644,32 @@ test "curves pass their points and never overshoot":
         let y = curve.evaluate((f64)step / 100.0)
         assert(y >= previous and y <= 1.0)
         previous = y
+
+test "a recipe compiles to the stages at work and its mode":
+    var wanted = defaults()
+    wanted.set(.contrast, 20.0)
+    wanted.set(.film_grain, 50.0)
+    wanted.set(.lens_vignetting, 30.0)
+    # Television: film, graded, through the ACES view.
+    var out = compile(&wanted)
+    assert(out.get(.contrast) == 20.0)
+    assert(out.get(.film_stock) == 3.0)
+    assert(out.get(.view) == (f64)(i64)View.aces)
+    # Without a Lens, no vignetting; a bypassed Exposure leaves its stops out
+    # and keeps them for later.
+    assert(out.get(.lens_vignetting) == 0.0)
+    wanted.set(.exposure, 1.5)
+    wanted.recipe.set_bypassed((i64)recipe.Stage.exposure, true)
+    out = compile(&wanted)
+    assert(out.get(.exposure) == 0.0)
+    assert(wanted.get(.exposure) == 1.5)
+    # Cinema: printed and projected, nothing graded.
+    wanted.recipe = recipe.mode(1)
+    out = compile(&wanted)
+    assert(out.get(.contrast) == 0.0)
+    assert(out.get(.film_grain) == 50.0)
+    assert(out.get(.view) == (f64)(i64)View.print)
+    # Shown before the film: no film at all.
+    wanted.recipe.set_display((i64)recipe.Stage.exposure)
+    out = compile(&wanted)
+    assert(out.get(.film_stock) == 0.0)

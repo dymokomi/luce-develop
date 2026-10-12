@@ -12,7 +12,7 @@ import sync
 import thread
 from luce_gpu import gpu
 from luce_std import math
-from settings import Settings, View, Look, defaults
+from settings import Settings, View, Look, defaults, compile
 from scene import Scene
 import scene
 import tables
@@ -210,7 +210,7 @@ pub struct Renderer:
 
     ## Develop with `settings` from the next draw on.
     pub func set_settings(settings: Settings):
-        self.settings = settings
+        self.settings = compile(&settings)
         self.tables_stale = true
 
     ## The matrix from the scene into AP1: the white balance's, or as shot when

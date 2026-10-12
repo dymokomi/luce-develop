@@ -125,7 +125,7 @@ func pass_above(nm: f64, edge: f64, width: f64) -> f64:
     return 0.02 + 0.9 / (1.0 + math.exp(-(nm - edge) / width))
 
 ## Whether the film sees the light on set: film on, with a Filter (not Matched).
-## White Balance's Temperature and Tint are then that light, not a correction,
+## the White Balance's Temperature and Tint are then that light, not a correction,
 ## and the scene comes to the film as the camera saw it (`camera_settings`).
 pub func sees_the_light(settings: const Settings*) -> bool:
     return settings.get(.film_stock) > 0.0 and settings.get(.film_filter) >= 1.0
@@ -201,7 +201,7 @@ pub struct Film:
     ## Make the atlas match `settings`: the stock's model when the stock changed,
     ## the development, the grey, the timing and the light every time. The photo
     ## was taken under `shot_kelvin` and `shot_tint` (its camera's as-shot white
-    ## balance), which is the light on set unless White Balance says otherwise.
+    ## balance), which is the light on set unless the White Balance's Temperature says otherwise.
     pub func prepare(settings: const Settings*, shot_kelvin: f64 = 6500.0, shot_tint: f64 = 0.0) -> !:
         let choice = (i64)settings.get(.film_stock)
         if self.texels.length == 0:
@@ -224,7 +224,7 @@ pub struct Film:
     ## The light the film sees: by default the light it is balanced for, so the
     ## develop's white balance, which made the scene neutral, makes it neutral
     ## on the film too. With a Filter chosen (None or 85), the light on set:
-    ## White Balance's Temperature and Tint (as shot when not set), through the
+    ## the White Balance's Temperature and Tint (as shot when not set), through the
     ## filter, so a daylight scene on tungsten film goes blue unless an 85 warms
     ## it, and the filter takes the light it absorbs.
     func fill_light(settings: const Settings*, shot_kelvin: f64, shot_tint: f64):

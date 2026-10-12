@@ -96,45 +96,42 @@ pub enum Parameter as u8:
     vignette_midpoint = 79
     vignette_roundness = 80
     vignette_feather = 81
-    grain_amount = 82
-    grain_size = 83
-    grain_roughness = 84
-    geometry_rotate = 85
-    geometry_vertical = 86
-    geometry_horizontal = 87
-    geometry_aspect = 88
-    geometry_scale = 89
-    geometry_autocrop = 90
-    crop_left = 91
-    crop_top = 92
-    crop_right = 93
-    crop_bottom = 94
-    view = 95
+    geometry_rotate = 82
+    geometry_vertical = 83
+    geometry_horizontal = 84
+    geometry_aspect = 85
+    geometry_scale = 86
+    geometry_autocrop = 87
+    crop_left = 88
+    crop_top = 89
+    crop_right = 90
+    crop_bottom = 91
+    view = 92
 
 ## How many parameters there are.
-pub let parameter_count: usize = 96
+pub let parameter_count: usize = 93
 
-pub let parameters: ParameterSpec[96] = [
+pub let parameters: ParameterSpec[93] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
-    ParameterSpec("exposure", "Exposure", "Exposure & Tone", -6.0, 6.0, 0.0, 2),
-    ParameterSpec("contrast", "Contrast", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("highlights", "Highlights", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("shadows", "Shadows", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("whites", "Whites", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("blacks", "Blacks", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("film_stock", "Stock", "Film", 0.0, 6.0, 0.0, 0),
+    ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
+    ParameterSpec("contrast", "Contrast", "Tone", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("highlights", "Highlights", "Tone", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("shadows", "Shadows", "Tone", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("whites", "Whites", "Tone", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("blacks", "Blacks", "Tone", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("film_stock", "Stock", "Film", 0.0, 6.0, 3.0, 0),
     ParameterSpec("film_format", "Format", "Film", 0.0, 3.0, 0.0, 0),
-    ParameterSpec("film_filter", "Filter", "Film", 0.0, 2.0, 0.0, 0),
-    ParameterSpec("film_color_filter", "Color Filter", "Film", 0.0, 5.0, 0.0, 0),
-    ParameterSpec("film_exposure", "Film Exposure", "Film", -3.0, 3.0, 0.0, 2),
+    ParameterSpec("film_filter", "Balance", "Filter", 0.0, 2.0, 0.0, 0),
+    ParameterSpec("film_color_filter", "Color Filter", "Filter", 0.0, 5.0, 0.0, 0),
+    ParameterSpec("film_exposure", "Push / Pull", "Develop", -3.0, 3.0, 0.0, 2),
     ParameterSpec("film_interimage", "Interimage", "Film", 0.0, 200.0, 100.0, 0),
     ParameterSpec("film_grain", "Grain", "Film", 0.0, 200.0, 100.0, 0),
     ParameterSpec("film_halation", "Halation", "Film", 0.0, 300.0, 100.0, 0),
-    ParameterSpec("film_warmth", "Warmth", "Film", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("film_tint", "Tint", "Film", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("film_contrast", "Contrast", "Film", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("film_black", "Black", "Film", 0.0, 100.0, 50.0, 0),
+    ParameterSpec("film_warmth", "Warmth", "Scan", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("film_tint", "Tint", "Scan", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("film_contrast", "Contrast", "Scan", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("film_black", "Black", "Scan", 0.0, 100.0, 50.0, 0),
     ParameterSpec("levels_black", "Input Black", "Levels", 0.0, 1.0, 0.0, 3),
     ParameterSpec("levels_white", "Input White", "Levels", 0.0, 1.0, 1.0, 3),
     ParameterSpec("levels_gamma", "Gamma", "Levels", 0.1, 10.0, 1.0, 2),
@@ -193,13 +190,10 @@ pub let parameters: ParameterSpec[96] = [
     ParameterSpec("bw_tint_amount", "Tint Amount", "Black & White", 0.0, 100.0, 0.0, 0),
     ParameterSpec("lens_vignetting", "Vignetting", "Lens", 0.0, 100.0, 0.0, 0),
     ParameterSpec("lens_midpoint", "Midpoint", "Lens", 0.0, 100.0, 50.0, 0),
-    ParameterSpec("vignette_amount", "Amount", "Effects", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("vignette_midpoint", "Midpoint", "Effects", 0.0, 100.0, 50.0, 0),
-    ParameterSpec("vignette_roundness", "Roundness", "Effects", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("vignette_feather", "Feather", "Effects", 0.0, 100.0, 50.0, 0),
-    ParameterSpec("grain_amount", "Grain", "Effects", 0.0, 100.0, 0.0, 0),
-    ParameterSpec("grain_size", "Grain Size", "Effects", 0.0, 100.0, 25.0, 0),
-    ParameterSpec("grain_roughness", "Roughness", "Effects", 0.0, 100.0, 50.0, 0),
+    ParameterSpec("vignette_amount", "Amount", "Vignette", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("vignette_midpoint", "Midpoint", "Vignette", 0.0, 100.0, 50.0, 0),
+    ParameterSpec("vignette_roundness", "Roundness", "Vignette", -100.0, 100.0, 0.0, 0),
+    ParameterSpec("vignette_feather", "Feather", "Vignette", 0.0, 100.0, 50.0, 0),
     ParameterSpec("geometry_rotate", "Rotate", "Geometry", -45.0, 45.0, 0.0, 1),
     ParameterSpec("geometry_vertical", "Vertical", "Geometry", -100.0, 100.0, 0.0, 0),
     ParameterSpec("geometry_horizontal", "Horizontal", "Geometry", -100.0, 100.0, 0.0, 0),

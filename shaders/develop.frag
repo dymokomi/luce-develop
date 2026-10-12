@@ -19,7 +19,7 @@
 // by film.frag, which hands this the filmed scene); the tone curve on
 // luminance, keeping each pixel's ratios; in Oklab vibrance and saturation, the Color Mixer, Color Grading and
 // Black & White; the view transform to display-linear sRGB; Levels and Curves on
-// encoded values; the vignette and grain. The window's sRGB framebuffer encodes.
+// encoded values; the vignette. The window's sRGB framebuffer encodes.
 #version 450
 layout(location = 0) in vec4 vertex_color;
 layout(location = 0) out vec4 fragment_color;
@@ -212,30 +212,6 @@ vec3 with_vignette(vec3 c, vec2 uv, float aspect) {
     return c + (vec3(1.0) - c) * (amount * edge);
 }
 
-// A hash of a cell to 0..1, the same as process.lucb's.
-float hashed(uvec2 p) {
-    uint x = p.x * 1664525u + p.y * 1013904223u;
-    x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
-    return float(x >> 8) / 16777216.0;
-}
-
-vec3 with_grain(vec3 c, vec2 uv, float aspect) {
-    vec4 v6 = value(6.0), v7 = value(7.0);
-    float amount = v6.w;
-    if (amount <= 0.0) return c;
-    // Grain is the image's own, the same at any display size: 1500 cells high
-    // at the finest size, 300 at the coarsest.
-    vec2 at = uv * vec2(aspect, 1.0) * (1500.0 / (1.0 + 4.0 * v7.x));
-    uvec2 cell = uvec2(floor(at));
-    vec2 f = at - floor(at);
-    f = f * f * (3.0 - 2.0 * f);
-    float smooth_noise = mix(mix(hashed(cell), hashed(cell + uvec2(1u, 0u)), f.x), mix(hashed(cell + uvec2(0u, 1u)), hashed(cell + uvec2(1u, 1u)), f.x), f.y);
-    float rough_noise = hashed(cell * 7u + uvec2(3u, 5u));
-    float noise = mix(smooth_noise, rough_noise, v7.y * 0.5) * 2.0 - 1.0;
-    float luma = dot(encode(clamp(c, 0.0, 1.0)), vec3(0.2126, 0.7152, 0.0722));
-    return max(c * (1.0 + amount * 0.6 * noise * 4.0 * luma * (1.0 - luma)), 0.0);
-}
-
 // Whether film is on: the scene is then the filmed one (film.frag), its lens
 // vignetting already applied, and the matrix the identity.
 bool filmed() {
@@ -259,6 +235,5 @@ void main() {
     c = through_view(c);
     c = with_curves(c);
     c = with_vignette(c, uv, aspect);
-    c = with_grain(c, uv, aspect);
     fragment_color = vec4(c, 1.0);
 }

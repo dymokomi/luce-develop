@@ -1,0 +1,395 @@
+## Recipes: the film process a photo goes through, as a small graph of stages.
+## The camera's light is exposed on a stock, developed, and then scanned (and
+## graded and viewed), printed and projected, or seen as a slide on a lightbox.
+## Each stage owns sections of the develop parameters; what a photo is rendered
+## with (`compile`) is its settings with only the stages on the path to the
+## displayed one at work, and the engine's mode chosen by that path.
+##
+## What flows between stages is typed, so a recipe can only say something
+## physical: light from the scene, a latent exposure on film, processed film, a
+## scanned image (scene light again), and display light. One stage of each kind
+## at most, so a stage's parameters are its own.
+import memory
+from luce_std import math
+from luce_std.collections import Buffer
+from parameters import Parameter, parameters, parameter_count
+
+# mark: Stages ==================================================================
+
+pub let stage_count: usize = 14
+
+## The stages: the file, then what the light meets before the film (white
+## balance, exposure, lens, filter: each light in, light out, and all of them
+## scale the light, so their order does not change it), the film and its
+## development, and then a scan (graded, viewed), a print (projected) or a
+## lightbox; the easel frames what shows.
+pub enum Stage as i64:
+    file = 0
+    white_balance = 1
+    exposure = 2
+    lens = 3
+    filter = 4
+    film = 5
+    develop = 6
+    scan = 7
+    grade = 8
+    print = 9
+    project = 10
+    lightbox = 11
+    view = 12
+    easel = 13
+
+## What flows on a wire: none (a stage without an input), light, a latent
+## exposure, processed film, a scanned image, display light.
+pub let medium_names: str[6] = ["none", "light", "exposure", "film", "image", "display"]
+
+pub let stage_names: str[14] = ["File", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Grade", "Print", "Project", "Lightbox", "View", "Easel"]
+let stage_keys: str[14] = ["file", "white_balance", "exposure", "lens", "filter", "film", "develop", "scan", "grade", "print", "project", "lightbox", "view", "easel"]
+## Each stage's input and output medium (indices into medium_names).
+let inputs: i64[14] = [0, 1, 1, 1, 1, 1, 2, 3, 4, 3, 3, 3, 4, 5]
+let outputs: i64[14] = [1, 1, 1, 1, 1, 2, 3, 4, 4, 3, 5, 5, 5, 5]
+## The develop sections each stage owns, "|" between.
+let owned: str[14] = ["", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone|Levels|Curves|Color|Color Mixer|Color Grading|Black & White", "", "", "", "View", "Geometry|Crop|Vignette"]
+let descriptions: str[14] = [
+    "The photo picked in the library, as its raw recorded the light.",
+    "The light on set: its color temperature and tint (as shot unless set).",
+    "More or less light than the camera took, in stops.",
+    "Light through the lens: its vignetting.",
+    "A filter on the lens: light-balancing (85) or a black-and-white color filter.",
+    "A film stock exposed to the light: its format, grain, halation and interimage.",
+    "The negative or slide developed: push and pull.",
+    "A scanner or telecine reads the film back to light: timing, contrast and black.",
+    "The colorist's tools: tone, levels, curves, color, the mixer, wheels and black and white.",
+    "The negative printed on Kodak Vision 2383 print film.",
+    "The print projected: a xenon arc, a little flare.",
+    "A slide on a D50 light table.",
+    "The scan shown on a display: ACES 2.0, Standard or Linear.",
+    "The frame: perspective, crop and a vignette."]
+
+## The families of the process, which the graph colors its stages by: the
+## source, the camera (the light before film), the chemistry (exposing and
+## developing film), and the presentation (scanning, grading, printing,
+## projecting, viewing and framing it).
+pub let category_names: str[4] = ["Source", "Camera", "Chemistry", "Presentation"]
+let categories: i64[14] = [0, 1, 1, 1, 1, 2, 2, 3, 3, 3, 3, 3, 3, 3]
+
+## For Luce: how many stages there are, and stage `at`'s name, description,
+## input and output media (indices into medium_names), develop sections ("|"
+## between) and family (category_names); the media's names; the modes.
+pub func stage_total() -> i64:
+    return (i64)stage_count
+pub func stage_name(at: i64) -> str:
+    return stage_names[(usize)at]
+pub func stage_description(at: i64) -> str:
+    return descriptions[(usize)at]
+pub func stage_input(at: i64) -> i64:
+    return inputs[(usize)at]
+pub func stage_output(at: i64) -> i64:
+    return outputs[(usize)at]
+pub func stage_sections(at: i64) -> str:
+    return owned[(usize)at]
+pub func stage_category(at: i64) -> i64:
+    return categories[(usize)at]
+pub func category_name(at: i64) -> str:
+    return category_names[(usize)at]
+pub func medium_name(at: i64) -> str:
+    return medium_names[(usize)at]
+pub func mode_total() -> i64:
+    return (i64)mode_count
+pub func mode_name(at: i64) -> str:
+    return mode_names[(usize)at]
+
+## The stage owning develop section `section`, or -1.
+pub func owner_of(section: str) -> i64:
+    for at in 0..<stage_count:
+        let list = owned[at]
+        var first: usize = 0
+        let bytes = list.bytes
+        for index in 0..=bytes.length:
+            if index == bytes.length or bytes[index] == '|':
+                if (str)bytes[first..<index] == section:
+                    return (i64)at
+                first = index + 1
+    return -1
+
+# mark: Recipes =================================================================
+
+## A stage in a recipe: whether it is there, where it sits (for the graph
+## view), the stage its input comes from (-1 none), and whether it is bypassed.
+pub struct Node:
+    pub var present: bool
+    pub var x: f64
+    pub var y: f64
+    pub var input: i64
+    pub var bypassed: bool
+
+pub struct Recipe:
+    pub var nodes: Node[14]
+    ## The stage whose result is shown.
+    pub var display: i64
+
+    pub func has(stage: i64) -> bool:
+        return stage >= 0 and stage < (i64)stage_count and self.nodes[(usize)stage].present
+
+    ## Add `stage` at (`x`, `y`), unwired; false when it is there already.
+    pub func add(stage: i64, x: f64, y: f64) -> bool:
+        if stage < 0 or stage >= (i64)stage_count or self.has(stage):
+            return false
+        self.nodes[(usize)stage] = Node(present = true, x = x, y = y, input = -1)
+        return true
+
+    ## Remove `stage`, and the wires into and out of it.
+    pub func remove(stage: i64):
+        if not self.has(stage):
+            return
+        self.nodes[(usize)stage] = Node(input = -1)
+        for at in 0..<stage_count:
+            if self.nodes[at].input == stage:
+                self.nodes[at].input = -1
+        if self.display == stage:
+            self.display = -1
+
+    ## Wire `source`'s output into `to`'s input, if the media match and it makes
+    ## no loop; whether it did.
+    pub func connect(source: i64, to: i64) -> bool:
+        if not self.has(source) or not self.has(to) or source == to:
+            return false
+        if outputs[(usize)source] != inputs[(usize)to]:
+            return false
+        # A loop: `to` is upstream of `source` already.
+        var at = source
+        var steps = 0
+        while at >= 0 and steps < (i64)stage_count:
+            if at == to:
+                return false
+            at = self.nodes[(usize)at].input
+            steps += 1
+        self.nodes[(usize)to].input = source
+        return true
+
+    pub func disconnect(to: i64):
+        if self.has(to):
+            self.nodes[(usize)to].input = -1
+
+    pub func move(stage: i64, x: f64, y: f64):
+        if self.has(stage):
+            self.nodes[(usize)stage].x = x
+            self.nodes[(usize)stage].y = y
+
+    pub func set_bypassed(stage: i64, bypassed: bool):
+        if self.has(stage):
+            self.nodes[(usize)stage].bypassed = bypassed
+
+    pub func set_display(stage: i64):
+        if self.has(stage):
+            self.display = stage
+
+    ## The stages from the photo to the displayed one, in that order; empty
+    ## when the displayed stage does not reach a File.
+    pub func path() -> Path:
+        var out: Path
+        var at = self.display
+        while at >= 0 and out.count < stage_count:
+            out.stages[out.count] = at
+            out.count += 1
+            if not self.has(at):
+                out.count = 0
+                return out
+            at = self.nodes[(usize)at].input
+        if out.count == 0 or out.stages[out.count - 1] != (i64)Stage.file:
+            out.count = 0
+            return out
+        # The File first.
+        for index in 0..<out.count // 2:
+            let swap = out.stages[index]
+            out.stages[index] = out.stages[out.count - 1 - index]
+            out.stages[out.count - 1 - index] = swap
+        return out
+
+    ## Whether `stage` is on the path to the displayed stage and not bypassed.
+    pub func active(stage: i64) -> bool:
+        let route = self.path()
+        for at in 0..<route.count:
+            if route.stages[at] == stage:
+                return not self.nodes[(usize)stage].bypassed
+        return false
+
+## The stages on a path, in order.
+pub struct Path:
+    pub var stages: i64[14]
+    pub var count: usize
+
+# mark: Modes ===================================================================
+
+## Recipes to start from: the stages each mode chains, top to bottom, and the
+## stock (film_stock: 0-based stock + 1) it starts with.
+pub let mode_count: usize = 4
+pub let mode_names: str[4] = ["Television", "Cinema", "Slide", "Black & White"]
+let mode_chains: str[4] = ["file|white_balance|exposure|film|develop|scan|grade|view|easel",
+                           "file|white_balance|exposure|film|develop|print|project|easel",
+                           "file|white_balance|exposure|film|develop|lightbox|easel",
+                           "file|exposure|filter|film|develop|scan|grade|view|easel"]
+let mode_stocks: f64[4] = [3.0, 1.0, 5.0, 6.0]
+## The space between stages in a mode's graph, which runs top to bottom.
+let mode_spacing: f64 = 64.0
+
+## Mode `at`'s recipe.
+pub func mode(at: usize) -> Recipe:
+    var out = Recipe(display = -1)
+    for index in 0..<stage_count:
+        out.nodes[index].input = -1
+    let bytes = mode_chains[at].bytes
+    var first: usize = 0
+    var previous: i64 = -1
+    var row = 0.0
+    for index in 0..=bytes.length:
+        if index == bytes.length or bytes[index] == '|':
+            let stage = key_stage((str)bytes[first..<index])
+            first = index + 1
+            if stage < 0:
+                continue
+            _ = out.add(stage, 0.0, row * mode_spacing)
+            if previous >= 0:
+                _ = out.connect(previous, stage)
+            previous = stage
+            row += 1.0
+    out.display = previous
+    return out
+
+## The stock mode `at` starts with (the film_stock value).
+pub func mode_stock(at: usize) -> f64:
+    return mode_stocks[at]
+
+## The recipe a photo has when its settings name none: Television.
+pub func default_recipe() -> Recipe:
+    return mode(0)
+
+func key_stage(key: str) -> i64:
+    for at in 0..<stage_count:
+        if stage_keys[at] == key:
+            return (i64)at
+    return -1
+
+# mark: Text form ===============================================================
+
+## The recipe's text form, the value of settings' "recipe=": its stages, "|"
+## between, each "key:x:y:input" (input a stage's key, or empty) followed by
+## ":b" when bypassed and ":d" for the displayed one.
+pub func text_of(recipe: const Recipe*, out: Buffer*) -> !:
+    var first = true
+    for at in 0..<stage_count:
+        let node = recipe.nodes[at]
+        if not node.present:
+            continue
+        if not first:
+            try out.put_byte('|')
+        first = false
+        try out.put_text(stage_keys[at])
+        try out.put_byte(':')
+        try out.put_number((i64)math.round(node.x))
+        try out.put_byte(':')
+        try out.put_number((i64)math.round(node.y))
+        try out.put_byte(':')
+        if node.input >= 0:
+            try out.put_text(stage_keys[(usize)node.input])
+        if node.bypassed:
+            try out.put_text(":b")
+        if recipe.display == (i64)at:
+            try out.put_text(":d")
+
+## A recipe from its text form; stages it cannot read are passed over, and
+## wires are made only where the media match.
+pub func parse(text: str) -> Recipe:
+    var out = Recipe(display = -1)
+    for index in 0..<stage_count:
+        out.nodes[index].input = -1
+    var wanted: i64[14]
+    for index in 0..<stage_count:
+        wanted[index] = -1
+    let bytes = text.bytes
+    var first: usize = 0
+    for index in 0..=bytes.length:
+        if index != bytes.length and bytes[index] != '|':
+            continue
+        let part = (str)bytes[first..<index]
+        first = index + 1
+        # key:x:y:input[:b][:d]
+        var fields: str[6]
+        var count: usize = 0
+        var start: usize = 0
+        let piece = part.bytes
+        for at in 0..=piece.length:
+            if (at == piece.length or piece[at] == ':') and count < 6:
+                fields[count] = (str)piece[start..<at]
+                count += 1
+                start = at + 1
+        if count < 4:
+            continue
+        let stage = key_stage(fields[0])
+        if stage < 0:
+            continue
+        _ = out.add(stage, whole(fields[1]), whole(fields[2]))
+        wanted[(usize)stage] = key_stage(fields[3])
+        for flag in 4..<count:
+            if fields[flag] == "b":
+                out.nodes[(usize)stage].bypassed = true
+            elif fields[flag] == "d":
+                out.display = stage
+    for at in 0..<stage_count:
+        if wanted[at] >= 0:
+            _ = out.connect(wanted[at], (i64)at)
+    return out
+
+## A whole number, or 0.
+func whole(text: str) -> f64:
+    var value: i64 = 0
+    var sign: i64 = 1
+    for (at, byte) in text.bytes.indexed():
+        if at == 0 and byte == '-':
+            sign = -1
+        elif byte >= '0' and byte <= '9':
+            value = value * 10 + (i64)(byte - '0')
+        else:
+            return 0.0
+    return (f64)(value * sign)
+
+# mark: Tests ===================================================================
+
+test "modes chain their stages and show the last":
+    for at in 0..<mode_count:
+        let recipe = mode(at)
+        let route = recipe.path()
+        assert(route.count >= 6 and route.stages[0] == (i64)Stage.file)
+        assert(recipe.display == (i64)Stage.easel)
+    let cinema = mode(1)
+    assert(cinema.active((i64)Stage.print) and not cinema.active((i64)Stage.scan))
+
+test "only matching media wire up, and never in a loop":
+    var recipe = mode(0)
+    # A scan's image cannot go into a Develop (it takes an exposure).
+    assert(not recipe.connect((i64)Stage.scan, (i64)Stage.develop))
+    # Film's output into a Scan (which takes processed film) neither.
+    assert(not recipe.connect((i64)Stage.film, (i64)Stage.scan))
+    # A stage into itself, or light back into the light it came from, is a loop.
+    assert(not recipe.connect((i64)Stage.exposure, (i64)Stage.exposure))
+    assert(not recipe.connect((i64)Stage.exposure, (i64)Stage.white_balance))
+    # Light stages chain in any order.
+    assert(recipe.add((i64)Stage.lens, 0.0, 0.0) and recipe.connect((i64)Stage.exposure, (i64)Stage.lens))
+    assert(recipe.connect((i64)Stage.lens, (i64)Stage.film) and recipe.active((i64)Stage.lens))
+
+test "the text form round-trips":
+    var recipe = mode(1)
+    recipe.set_bypassed((i64)Stage.exposure, true)
+    recipe.move((i64)Stage.film, 30.0, -12.0)
+    var out: Buffer
+    defer out.destroy()
+    text_of(&recipe, &out) catch failure:
+        assert(false)
+        return
+    let back = parse(out.text())
+    for at in 0..<stage_count:
+        assert(back.nodes[at].present == recipe.nodes[at].present)
+        assert(back.nodes[at].input == recipe.nodes[at].input)
+        assert(back.nodes[at].bypassed == recipe.nodes[at].bypassed)
+        assert(back.nodes[at].x == recipe.nodes[at].x and back.nodes[at].y == recipe.nodes[at].y)
+    assert(back.display == recipe.display)

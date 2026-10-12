@@ -60,7 +60,7 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
    Linear; or Print, the scene printed on Kodak Vision 2383 and projected
    (`film_print`, below).
 7. Levels and Curves (all channels, R, G, B, luma) on the display's encoded values.
-8. The vignette and grain.
+8. The vignette.
 
 - **Parameters.** All 85 are in `tools/parameters.py`, which generates
   `src/parameters.lucb`: each one's name, label, Properties section, range,
@@ -93,6 +93,21 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
   paths agree to within a level on average, and to 3 levels for Standard and
   Linear.
 
+## Recipes (`recipe`)
+
+A photo's settings carry its recipe, the film process as a graph of stages
+(File, White Balance, Exposure, Lens, Filter, Film, Develop, Scan, Grade,
+Print, Project, Lightbox, View, Easel) with typed wires: light, a latent exposure, processed film, a scanned
+image, display light. Each stage owns parameter sections (`stage_sections`).
+`settings.compile(settings)` is what renders: only the stages on the path to
+the displayed one are at work, the rest of the sections at their defaults, and
+the path picks the engine's mode (film on with a Film stage, the 2383 print view
+with Print and Project). The renderer, `process` and export compile on entry.
+Recipes are stored as `recipe=` in the settings text; `Look` edits the graph
+(`add_stage`, `connect`, `set_bypassed`, `set_display`, `use_mode`…), and
+`mode_text(at)` gives a mode (Television, Cinema, Slide, Black & White) as
+settings to stack on a photo.
+
 ## Film (`film`)
 
 The Film section turns the develop into a color negative and its transfer, the
@@ -108,8 +123,8 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    lands on the stock's normal exposure; Film Exposure over- or underexposes
    the negative, and the transfer brings grey back. Exposure is the camera's
    exposure onto the negative. Filter decides the light: Matched (the default)
-   balances it to the stock, as White Balance does; with None or 85, White
-   Balance's Temperature and Tint become the light on set (as shot unless
+   balances it to the stock, as a white balance does; with None or 85, the
+   White Balance's Temperature and Tint become the light on set (as shot unless
    set), so daylight on tungsten film goes blue unless an 85 warms it (and
    takes its 2/3 of a stop). Color Filter puts a black-and-white
    photographer's filter on the lens (Yellow 8, Orange 21, Red 25, Green 11,

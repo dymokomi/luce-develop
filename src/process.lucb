@@ -8,6 +8,7 @@ from luce_std import parallel
 from luce_std import math
 from luce_color import transfer
 from settings import Settings, View
+import settings as settings_module
 from scene import Scene
 from picture import Picture, adopt
 from tables import Tables
@@ -153,40 +154,6 @@ func with_vignette(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
         out[at] = c[at] * (1.0 + amount * edge) if amount < 0.0 else c[at] + (1.0 - c[at]) * (amount * edge)
     return out
 
-## A hash of a cell to 0..1, the same as the shader's.
-func hashed(px: u32, py: u32) -> f64:
-    var x = px *% 1664525 +% py *% 1013904223
-    x = x ^ (x >> 16)
-    x = x *% 0x7feb352d
-    x = x ^ (x >> 15)
-    x = x *% 0x846ca68b
-    x = x ^ (x >> 16)
-    return (f64)(x >> 8) / 16777216.0
-
-func with_grain(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
-    let v6 = d.tables.value(6)
-    let v7 = d.tables.value(7)
-    let amount = v6[3]
-    if amount <= 0.0:
-        return c
-    let scale = 1500.0 / (1.0 + 4.0 * v7[0])
-    let ax = u * d.aspect * scale
-    let ay = v * scale
-    let cx = (u32)math.floor(ax)
-    let cy = (u32)math.floor(ay)
-    var fx = ax - math.floor(ax)
-    var fy = ay - math.floor(ay)
-    fx = fx * fx * (3.0 - 2.0 * fx)
-    fy = fy * fy * (3.0 - 2.0 * fy)
-    let top = hashed(cx, cy) + (hashed(cx + 1, cy) - hashed(cx, cy)) * fx
-    let bottom = hashed(cx, cy + 1) + (hashed(cx + 1, cy + 1) - hashed(cx, cy + 1)) * fx
-    let smooth_noise = top + (bottom - top) * fy
-    let rough_noise = hashed(cx *% 7 +% 3, cy *% 7 +% 5)
-    let noise = (smooth_noise + (rough_noise - smooth_noise) * v7[1] * 0.5) * 2.0 - 1.0
-    let luma = encode(math.clamp(c[0], 0.0, 1.0)) * 0.2126 + encode(math.clamp(c[1], 0.0, 1.0)) * 0.7152 + encode(math.clamp(c[2], 0.0, 1.0)) * 0.0722
-    let gain = 1.0 + amount * 0.6 * noise * 4.0 * luma * (1.0 - luma)
-    return [math.max(c[0] * gain, 0.0), math.max(c[1] * gain, 0.0), math.max(c[2] * gain, 0.0)]
-
 ## One pixel's develop at output position (`u`, `v`), 0..1, to display-linear
 ## sRGB: black where the geometry leaves the photo.
 func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f64[3]:
@@ -209,8 +176,7 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
     c = with_color(d, c)
     c = view.display(d.shown, c, d.to_display, d.output)
     c = with_curves(d, c)
-    c = with_vignette(d, c, u, v)
-    return with_grain(d, c, u, v)
+    return with_vignette(d, c, u, v)
 
 ## A render under way: the develop, the scene, and where rows go: 8-bit RGBA
 ## (`bytes`) or 16-bit RGBA (`words`), both sRGB-encoded.
@@ -255,7 +221,10 @@ func render_row(context: void*, y: usize, worker: usize) -> !:
                 job.words[at * 4 + channel] = (u16)(encoded * 65535.0 + 0.5)
             job.words[at * 4 + 3] = 65535
 
-func rendering(source: const Scene*, settings: const Settings*, output: view.Output) -> Rendering!:
+func rendering(source: const Scene*, wanted: const Settings*, output: view.Output) -> Rendering!:
+    # What renders: the recipe's stages at work and its mode.
+    let compiled = settings_module.compile(wanted)
+    let settings = &compiled
     # The output is the crop at the scene's scale.
     let (out_width, out_height) = geometry.output_size(settings, (f64)source.width(), (f64)source.height())
     let width = (usize)out_width
