@@ -49,7 +49,7 @@ let stage_keys: str[14] = ["file", "white_balance", "exposure", "lens", "filter"
 let inputs: i64[14] = [0, 1, 1, 1, 1, 1, 2, 3, 4, 3, 3, 3, 4, 5]
 let outputs: i64[14] = [1, 1, 1, 1, 1, 2, 3, 4, 4, 3, 5, 5, 5, 5]
 ## The develop sections each stage owns, "|" between.
-let owned: str[14] = ["", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone|Levels|Curves|Color|Color Mixer|Color Grading|Black & White", "", "", "", "View", "Geometry|Crop|Vignette"]
+let owned: str[14] = ["", "White Balance", "Exposure", "Lens", "Filter", "Film", "Develop", "Scan", "Tone|Levels|Curves|Color|Color Mixer|Color Grading|Black & White", "Print", "", "", "View", "Geometry|Crop|Vignette"]
 let descriptions: str[14] = [
     "The photo picked in the library, as its raw recorded the light.",
     "The light on set: its color temperature and tint (as shot unless set).",
@@ -60,7 +60,7 @@ let descriptions: str[14] = [
     "The negative or slide developed in its process: time and temperature, to push or pull it.",
     "A scanner or telecine reads the film back to light: timing, contrast and black.",
     "The colorist's tools: tone, levels, curves, color, the mixer, wheels and black and white.",
-    "The negative printed on Kodak Vision 2383 print film.",
+    "The negative printed on Kodak Vision 2383 print film, timed with printer lights.",
     "The print projected: a xenon arc, a little flare.",
     "A slide on a D50 light table.",
     "The scan shown on a display: ACES 2.0, Standard or Linear.",
@@ -256,6 +256,8 @@ let mode_chains: str[4] = ["file|white_balance|exposure|film|develop|scan|grade|
                            "file|white_balance|exposure|film|develop|lightbox|easel",
                            "file|exposure|filter|film|develop|scan|grade|view|easel"]
 let mode_stocks: f64[4] = [3.0, 1.0, 5.0, 6.0]
+## Settings a mode sets besides its stock, in the settings' text form.
+let mode_extras: str[4] = ["", "", "", ""]
 ## The space between stages in a mode's graph, which runs top to bottom.
 let mode_spacing: f64 = 64.0
 
@@ -282,9 +284,12 @@ pub func mode(at: usize) -> Recipe:
     out.display = previous
     return out
 
-## The stock mode `at` starts with (the film_stock value).
+## The stock mode `at` starts with (the film_stock value), and the other
+## settings it sets (text form, "" none).
 pub func mode_stock(at: usize) -> f64:
     return mode_stocks[at]
+pub func mode_extra(at: usize) -> str:
+    return mode_extras[at]
 
 ## The recipe a photo has when its settings name none: Television.
 pub func default_recipe() -> Recipe:

@@ -109,12 +109,15 @@ pub enum Parameter as u8:
     crop_top = 92
     crop_right = 93
     crop_bottom = 94
-    view = 95
+    print_red = 95
+    print_green = 96
+    print_blue = 97
+    view = 98
 
 ## How many parameters there are.
-pub let parameter_count: usize = 96
+pub let parameter_count: usize = 99
 
-pub let parameters: ParameterSpec[96] = [
+pub let parameters: ParameterSpec[99] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -210,4 +213,7 @@ pub let parameters: ParameterSpec[96] = [
     ParameterSpec("crop_top", "Crop Top", "Crop", 0.0, 1.0, 0.0, 4),
     ParameterSpec("crop_right", "Crop Right", "Crop", 0.0, 1.0, 1.0, 4),
     ParameterSpec("crop_bottom", "Crop Bottom", "Crop", 0.0, 1.0, 1.0, 4),
+    ParameterSpec("print_red", "Red", "Print", -24.0, 24.0, 0.0, 0),
+    ParameterSpec("print_green", "Green", "Print", -24.0, 24.0, 0.0, 0),
+    ParameterSpec("print_blue", "Blue", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("view", "View", "View", 0.0, 3.0, 0.0, 0)]

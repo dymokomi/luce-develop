@@ -18,6 +18,8 @@
 ##                    and temperature (°C), 0 for the process's normal
 ##                    (film_develop.lucb)
 ##   Scan             the transfer's warmth, tint, contrast and black
+##   Print            printer lights, red, green and blue, in points (0.025 log
+##                    exposure on the print each)
 ##   Tone             contrast, highlights, shadows, whites and blacks: a tone
 ##                    curve on luminance (tone.lucb)
 ##   Levels           input black and white, gamma, output black and white, on
@@ -238,6 +240,9 @@ pub func mode_text(at: i64) -> interop.Owned[str]!:
     try recipe.text_of(&chosen, &out)
     try out.put_text(";film_stock=")
     try put_decimal(&out, recipe.mode_stock((usize)at))
+    if recipe.mode_extra((usize)at).length > 0:
+        try out.put_byte(';')
+        try out.put_text(recipe.mode_extra((usize)at))
     return try interop.copy_text(out.text())
 
 ## The parameter named `name`, or none.
@@ -564,10 +569,16 @@ pub struct Look:
         try recipe.text_of(&self.settings.recipe, &out)
         return try interop.copy_text(out.text())
 
-    ## Start from mode `at` (recipe.mode_names): its stages and its stock.
+    ## Start from mode `at` (recipe.mode_names): its stages, its stock and the
+    ## other settings it sets.
     pub func use_mode(at: i64):
         self.settings.recipe = recipe.mode((usize)at)
         self.settings.set(.film_stock, recipe.mode_stock((usize)at))
+        let extras = parse(recipe.mode_extra((usize)at))
+        let base = defaults()
+        for index in 0..<parameter_count:
+            if extras.values[index] != base.values[index]:
+                self.settings.values[index] = extras.values[index]
 
     ## A copy, for undo or copy and paste.
     pub func copy() -> interop.Reference[Look]!:

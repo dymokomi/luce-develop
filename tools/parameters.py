@@ -62,6 +62,7 @@ add("geometry_scale","Scale","Geometry",50,150,100)
 add("geometry_autocrop","Crop to Fit","Geometry",0,1,1)
 for n,d in [("left",0),("top",0),("right",1),("bottom",1)]:
     add("crop_"+n,"Crop "+n.capitalize(),"Crop",0,1,d,4)
+for n in ["red","green","blue"]: add("print_"+n,n.capitalize(),"Print",-24,24,0,0)
 add("view","View","View",0,3,0,0)
 enum="\n".join(f"    {p[0]} = {i}" for i,p in enumerate(P))
 def num(v): return repr(float(v))

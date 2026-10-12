@@ -427,7 +427,13 @@ pub struct Film:
         self.put(values_row, 20, 0.0, fog_density, edge, grown.edge_width)
         let warmth = settings.get(.film_warmth) / 100.0
         let tint = settings.get(.film_tint) / 100.0
-        self.put(values_row, 10, math.exp2(0.5 * warmth), math.exp2(-0.5 * tint), math.exp2(-0.5 * warmth), 0.0)
+        # Printer lights (the Print stage), in points of 0.025 log exposure on the
+        # print: a gain on the scene light before printing density's 0.6 per
+        # decade (film_print.lucb); more red light prints more cyan.
+        let point = -0.025 / 0.6
+        let lights = [math.pow(10.0, point * settings.get(.print_red)), math.pow(10.0, point * settings.get(.print_green)),
+                      math.pow(10.0, point * settings.get(.print_blue))]
+        self.put(values_row, 10, math.exp2(0.5 * warmth) * lights[0], math.exp2(-0.5 * tint) * lights[1], math.exp2(-0.5 * warmth) * lights[2], 0.0)
         self.put(values_row, 14, model.scatter[0], model.scatter[1], model.scatter[2], 0.0)
         self.put(values_row, 16, model.spread[0], model.spread[1], model.spread[2], 0.0)
         let halo = settings.get(.film_halation) / 100.0
