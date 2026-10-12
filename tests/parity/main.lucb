@@ -21,7 +21,7 @@ from luce_develop import renderer
 from luce_develop.settings import parse, Settings
 from luce_develop import recipe
 
-let cases: str[20] = [
+let cases: str[21] = [
     "",
     "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50",
@@ -41,7 +41,8 @@ let cases: str[20] = [
     "view=1;film_stock=5;film_grain=80",
     "view=1;film_stock=6;film_grain=120;develop_time=10;develop_temperature=22",
     "view=1;film_stock=3;film_grain=0;develop_silver=100;exposure=-1",
-    "view=1;film_stock=6;film_grain=0;develop_process=13"]
+    "view=1;film_stock=6;film_grain=0;develop_process=13",
+    "view=1;film_stock=5;film_grain=0;develop_process=2"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",

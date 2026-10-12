@@ -26,6 +26,8 @@
 ## 6:00, and each stop further about as much again: stops = log(r) / log(4/3),
 ## s = 0.301 · stops.
 from luce_std import math
+from film_stocks import Stock
+import film_stocks
 
 ## Families of process: color negative, reversal, black and white (as stock kinds).
 pub let color_negative: i64 = 0
@@ -122,12 +124,41 @@ pub func standard(kind: i64) -> i64:
     return standards[(usize)math.clamp((f64)kind, 0.0, 2.0)]
 
 ## The process develop_process `value` chooses for a stock of `kind`: 0 is its
-## standard, n the n-th process (from 1); one of another family is the standard.
+## standard, n the n-th process (from 1); one it cannot go through is the
+## standard. Its own family's processes, and a slide's cross-process, C-41.
 pub func chosen(kind: i64, value: f64) -> i64:
     let at = (i64)math.round(value) - 1
-    if at < 0 or at >= (i64)process_count or processes[(usize)at].family != kind:
+    if at < 0 or at >= (i64)process_count or not (processes[(usize)at].family == kind or crossed(kind, at)):
         return standard(kind)
     return at
+
+## Whether process `process` cross-processes a stock of `kind`: slide film in
+## C-41, the cross-process labs ran (the "xpro" look).
+pub func crossed(kind: i64, process: i64) -> bool:
+    return kind == reversal and processes[(usize)process].name == "C-41"
+
+## A slide stock as C-41 develops it: a negative. Its color developer forms dye
+## where the first developer would have made silver, the complement of the
+## slide's dye, at a lower contrast (a reversal emulsion's slope of 1.6–1.9 gives
+## a negative of 1.0–1.5: 0.7 of it, an estimate) over a clear base, with no
+## orange mask to correct its dyes.
+pub func cross_processed(slide: Stock) -> Stock:
+    var out = slide
+    out.kind = color_negative
+    let n = slide.curve_count
+    for layer in 0..<(usize)3:
+        let first = layer * film_stocks.curve_most
+        var densest = 0.0
+        for at in 0..<n:
+            densest = math.max(densest, slide.curves[first + at])
+        for at in 0..<film_stocks.curve_most:
+            let positive = slide.curves[first + (at if at < n else n - 1)]
+            out.curves[first + at] = clear_base + cross_contrast * (densest - positive)
+    return out
+
+let cross_contrast: f64 = 0.7
+## A clear base's density, without the mask (an estimate, 0.05–0.15).
+let clear_base: f64 = 0.1
 
 ## Development beyond these ratios to normal is not modelled.
 let least: f64 = 0.4
@@ -177,10 +208,14 @@ pub func development(kind: i64, degree: f64) -> Development:
 
 ## A stock of `kind` developed in process `process` (an index), `minutes` at
 ## `celsius`: the development against the stock's standard, normal development.
+## Cross-processed, the stock is already the negative its process makes
+## (`cross_processed`): only time and temperature apply.
 pub func developing(kind: i64, process: i64, minutes: f64, celsius: f64) -> Development:
-    var out = development(kind, ratio(process, minutes, celsius))
+    let cross = crossed(kind, process)
+    let shape = color_negative if cross else kind
+    var out = development(shape, ratio(process, minutes, celsius))
     let used = processes[(usize)process]
-    let normal = processes[(usize)standard(kind)]
+    let normal = used if cross else processes[(usize)standard(kind)]
     out.shift += 0.30103 * (used.speed - normal.speed)
     out.gain *= used.contrast / normal.contrast
     out.grain = used.grain / normal.grain
@@ -216,6 +251,16 @@ test "an ECN-2 push gains under a third of a stop, two pushes about half":
     let one = developing(color_negative, 0, 3.0 + 40.0 / 60.0, 0.0)
     let two = developing(color_negative, 0, 4.0 + 40.0 / 60.0, 0.0)
     assert(one.shift / 0.30103 < 0.34 and math.abs(two.shift / 0.30103 - 0.5) < 0.1)
+
+test "a slide in C-41 becomes a negative, steeper than a negative stock":
+    let c41 = 1
+    assert(chosen(reversal, (f64)(c41 + 1)) == c41 and crossed(reversal, c41) and not crossed(color_negative, c41))
+    let velvia = film_stocks.stock_at(4)
+    let negative = cross_processed(velvia)
+    assert(negative.kind == color_negative)
+    # Density now rises with exposure: the first reading thinnest.
+    let n = negative.curve_count
+    assert(negative.curves[0] < negative.curves[n - 1] and negative.curves[0] < 0.2)
 
 test "E-6 push steps rate a slide as Ektachrome E200's did":
     let push = development(reversal, ratio(standard(reversal), 8.0, 0.0))

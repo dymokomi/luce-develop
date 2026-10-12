@@ -178,7 +178,8 @@ pub func stock_process(at: i64, value: f64) -> i64:
     return film_develop.chosen(film_stocks.stock_at((usize)at).kind, value)
 
 ## The Process menu's items for stock `at`, "name=value|…": its standard
-## process first (value 0), then the others of its family.
+## process first (value 0), then the others of its family and its
+## cross-process.
 pub func stock_processes(at: i64) -> interop.Owned[str]!:
     let kind = film_stocks.stock_at((usize)at).kind
     let standard = film_develop.standard(kind)
@@ -188,10 +189,13 @@ pub func stock_processes(at: i64) -> interop.Owned[str]!:
     try out.put_text(" (standard)=0")
     for index in 0..<film_develop.process_count:
         let process = film_develop.processes[index]
-        if (i64)index == standard or process.family != kind:
+        let cross = film_develop.crossed(kind, (i64)index)
+        if (i64)index == standard or not (process.family == kind or cross):
             continue
         try out.put_byte('|')
         try out.put_text(process.name)
+        if cross:
+            try out.put_text(" (cross-processed)")
         try out.put_byte('=')
         try out.put_number((i64)index + 1)
     return try interop.copy_text(out.text())
@@ -233,6 +237,8 @@ pub struct Film:
     pub var texels: f32[]
     var model: Model
     var stock: i64
+    ## Whether the model is the stock cross-processed (film_develop.lucb).
+    var cross: bool
     var on: bool
 
     pub func release():
@@ -261,10 +267,13 @@ pub struct Film:
             self.on = false
             self.put(values_row, 7, 0.0, 0.0, 0.0, 0.0)
             return
-        if choice != self.stock:
+        let chosen = film_stocks.stock_at((usize)(choice - 1))
+        let cross = film_develop.crossed(chosen.kind, film_develop.chosen(chosen.kind, settings.get(.develop_process)))
+        if choice != self.stock or cross != self.cross:
             self.model.release()
-            self.model = try build_model(film_stocks.stock_at((usize)(choice - 1)))
+            self.model = try build_model(film_develop.cross_processed(chosen) if cross else chosen)
             self.stock = choice
+            self.cross = cross
             self.fill_model()
         self.on = true
         self.fill_settings(settings)
@@ -327,8 +336,10 @@ pub struct Film:
         # transfer for normal negatives does, so a push shows: more density,
         # more contrast, more grain.
         let kind = model.stock.kind
-        let process = film_develop.chosen(kind, settings.get(.develop_process))
-        let grown = film_develop.developing(kind, process, settings.get(.develop_time), settings.get(.develop_temperature))
+        # The stock as published (a cross-processed slide's model is a negative).
+        let published = film_stocks.stock_at((usize)(self.stock - 1)).kind
+        let process = film_develop.chosen(published, settings.get(.develop_process))
+        let grown = film_develop.developing(published, process, settings.get(.develop_time), settings.get(.develop_temperature))
         # The bleach bypassed (develop_silver): silver stays where the dye
         # formed, adding its own grain. Only a color negative's silver is extra.
         let retained = settings.get(.develop_silver) / 100.0 if kind == 0 else 0.0
@@ -442,8 +453,10 @@ pub struct Film:
         self.put(values_row, 8, inverse[0], inverse[1], inverse[2], black)
         self.put(values_row, 9, floors[0], floors[1], floors[2], 0.0)
         # The scan's matrix, fitted (the identity while fitting). Black and white
-        # comes out neutral by itself.
-        if kind == 2:
+        # comes out neutral by itself; a cross-processed slide is scanned as any
+        # negative, its crossovers and loud color left as they are.
+        if kind == 2 or self.cross:
+            self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
             return
         let fitted = self.fit_matrix()
         for row in 0..<(usize)3:
