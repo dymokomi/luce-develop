@@ -9,6 +9,9 @@
 ##   White Balance    temperature (kelvin; 0 = as shot, tint then ignored), tint
 ##   Exposure & Tone  exposure (stops); contrast, highlights, shadows, whites,
 ##                    blacks: a tone curve on luminance (tone.lucb)
+##   Film             stock (0 none), format, film exposure, interimage, grain,
+##                    and the transfer's warmth, tint, contrast and black
+##                    (film.lucb)
 ##   Levels           input black and white, gamma, output black and white, on
 ##                    the display's encoded values
 ##   Color            vibrance and saturation, in Oklab

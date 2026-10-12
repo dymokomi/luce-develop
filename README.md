@@ -48,18 +48,20 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 
 1. The matrix: white balance, camera color and exposure.
 2. Lens vignetting correction.
-3. Tone: contrast, highlights, shadows, whites and blacks as one gain over
+3. Film, when a stock is chosen: the scene exposed onto a color negative,
+   developed, and scanned back to AP1 (`film`, below).
+4. Tone: contrast, highlights, shadows, whites and blacks as one gain over
    luminance, so hues hold (`tone`).
-4. In Oklab: vibrance and saturation; the Color Mixer (eight hue bands' hue,
+5. In Oklab: vibrance and saturation; the Color Mixer (eight hue bands' hue,
    saturation and luminance); Color Grading (shadows, midtones, highlights and
    global wheels, balance, blending); Black & White (hue weights, tint).
-5. The view: ACES 2.0 SDR (luce-color), lifted one stop so photographs land as
+6. The view: ACES 2.0 SDR (luce-color), lifted one stop so photographs land as
    a camera renders them, which is the default; Standard, a neutral filmic curve;
    or Linear.
-6. Levels and Curves (all channels, R, G, B, luma) on the display's encoded values.
-7. The vignette and grain.
+7. Levels and Curves (all channels, R, G, B, luma) on the display's encoded values.
+8. The vignette and grain.
 
-- **Parameters.** All 76 are in `tools/parameters.py`, which generates
+- **Parameters.** All 85 are in `tools/parameters.py`, which generates
   `src/parameters.lucb`: each one's name, label, Properties section, range,
   default and decimals.
 - **Tables.** Everything per hue, per tone or per curve is built into one 1024×4
@@ -89,6 +91,45 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 - **Parity.** `tests/parity/main.lucb` holds the GPU to the CPU for every tool. Both
   paths agree to within a level on average, and to 3 levels for Standard and
   Linear.
+
+## Film (`film`)
+
+The Film section turns the develop into a color negative and its transfer, the
+way television shot on film reached the screen: Kodak negative, developed,
+scanned on a telecine and graded on tape. It sits after the white balance and
+exposure, so the tone and color tools grade the scan, and the view stays the
+only tone scale. Everything comes from the stock's datasheet
+(`film_stocks.lucb`):
+
+1. **Exposure.** A color gets a smooth spectrum (luce-color's `spectral`
+   upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
+   each layer is exposed to it through its spectral sensitivity. Middle grey
+   lands on the stock's normal exposure, 4 stops over the green layer's
+   threshold; Film Exposure over- or underexposes the negative, and the
+   transfer brings grey back.
+2. **Development.** The characteristic curves (Status M) are unmixed into
+   cyan, magenta and yellow dye amounts. Interimage effects (DIR couplers) hold
+   a layer back by the dye its neighbours form, which saturates colors and
+   shifts hues the way the stock does; the curves are corrected so neutrals
+   keep the datasheet's densities.
+3. **Grain**, per layer in dye density at the stock's rms granularity, scaled
+   from Kodak's 48 µm aperture to what a pixel covers on the negative (Format's
+   frame width over the output's width), and calibrated so a 48 µm aperture
+   over the rendered grain reads Kodak's number.
+4. **Scan.** The dyes' spectral density over D-min (the orange mask removed),
+   inverted per channel at grey, the clear negative's floor taken out by Black,
+   a matrix fitted per stock back to AP1, then the telecine's Warmth, Tint and
+   Contrast.
+
+Stocks: Kodak EXR 500T 5298 (1993). Its curves were read off Kodak's TI2082
+datasheet (`dev/film`: the digitized readings, the scripts that read them, and
+`make_stocks.py`, which writes `film_stocks.lucb`); the sheet has no per-dye
+spectra, so the dye shapes are EXR 200T 5293's from its datasheet's vector
+graphs. Kodak publishes nothing above log H 0, no interimage numbers and no
+Status M tables: the shoulder, the interimage matrix and the densitometer's
+bands (Gaussians at Status M's band centres) are estimates, labelled where
+they are made. The model builds in about 0.1 s when a stock is first chosen;
+after that a settings change only recomputes the development and the timing.
 
 ## Tests
 

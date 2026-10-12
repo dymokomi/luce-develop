@@ -18,6 +18,8 @@ import scene
 import tables
 import geometry
 import view
+import film
+from film import Film
 from shaders import develop_frag_words, develop_frag_msl
 import codes
 
@@ -91,6 +93,9 @@ pub struct Renderer:
     var scene_texture: gpu.Texture?
     var tables_texture: gpu.Texture?
     var view_texture: gpu.Texture?
+    ## The film stock's model and atlas, and its texture.
+    var film: Film
+    var film_texture: gpu.Texture?
     var problem: u8[256]
     var problem_length: usize
     ## The format of the targets drawn into: the window's when none.
@@ -216,6 +221,7 @@ pub struct Renderer:
         let scene_texture = self.scene_texture else return
         let tables_texture = self.tables_texture else return
         let view_texture = self.view_texture else return
+        let film_texture = self.film_texture else return
         let place = try checked.placement()
         let size = try checked.size()
         let scale = size.pixel_width / size.width if size.width > 0.0 else 1.0
@@ -228,7 +234,7 @@ pub struct Renderer:
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
             (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)(out_width / out_height),
             (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
-        let images: gpu.Texture[3] = [scene_texture, tables_texture, view_texture]
+        let images: gpu.Texture[4] = [scene_texture, tables_texture, view_texture, film_texture]
         try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
 
     ## Count the develop as shown into the histogram (`histogram`): the photo is
@@ -306,6 +312,15 @@ pub struct Renderer:
                 self.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
             let held = self.tables_texture else return
             try held.upload(u8[]((u8*)texels.data, texels.length * 2))
+            try self.film.prepare(&self.settings)
+            let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
+            defer free(atlas) in memory.heap
+            for at in 0..<atlas.length:
+                atlas[at] = (f16)self.film.texels[at]
+            if self.film_texture == none:
+                self.film_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
+            let film_held = self.film_texture else return
+            try film_held.upload(u8[]((u8*)atlas.data, atlas.length * 2))
             self.tables_stale = false
         if self.view_texture == none or self.view_baked != (i64)self.settings.get(.view):
             let n = view.lut_size
@@ -333,7 +348,8 @@ pub struct Renderer:
             free(loading) in memory.heap
         self.loading = none
         self.shown.close()
-        for slot in [&self.scene_texture, &self.tables_texture, &self.view_texture]:
+        self.film.release()
+        for slot in [&self.scene_texture, &self.tables_texture, &self.view_texture, &self.film_texture]:
             if let held = *slot:
                 var gone = held
                 gone.destroy()

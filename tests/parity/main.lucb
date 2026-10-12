@@ -18,7 +18,7 @@ from luce_develop import process
 from luce_develop import renderer
 from luce_develop.settings import parse
 
-let cases: str[10] = [
+let cases: str[12] = [
     "",
     "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50",
@@ -28,7 +28,9 @@ let cases: str[10] = [
     "bw=1;bw_tint_hue=40;bw_tint_amount=30;bw_red=120;bw_blue=-80;levels_black=0.05;levels_gamma=1.3;curve_rgb=0,0 0.25,0.2 0.75,0.85 1,1;curve_blue=0,0.05 1,0.95;curve_luma=0,0 0.5,0.55 1,1",
     "lens_vignetting=60;lens_midpoint=30;vignette_amount=-60;vignette_feather=70;vignette_roundness=40;grain_amount=40;grain_size=30;grain_roughness=60",
     "view=1;geometry_vertical=40;geometry_rotate=4;geometry_aspect=20;guides=0.1,0.1,0.12,0.9",
-    "view=1;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40"]
+    "view=1;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40",
+    "view=1;film_stock=1;film_grain=0",
+    "view=1;film_stock=1;film_exposure=1;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",

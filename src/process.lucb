@@ -1,5 +1,5 @@
 ## The develop on the CPU: shaders/develop.frag step for step, reading the same
-## tables (tables.lucb) with the same filtering, except that the view is
+## tables (tables.lucb, film.lucb) with the same filtering, except that the view is
 ## evaluated exactly instead of through its table. Export uses it, and the
 ## tests hold the GPU to it. Change both together.
 import interop
@@ -15,6 +15,8 @@ import scene
 import tables
 import view
 import geometry
+import film
+from film import Film
 
 ## AP1's luminance weights, and AP1 (D60) to and from Oklab's LMS (D65): the
 ## shader's constants, row-major here.
@@ -45,6 +47,10 @@ struct Develop:
     var map: geometry.Matrix
     ## The display the view renders for (its primaries; sRGB's curve encodes either).
     var output: view.Output
+    ## The film stock's model and tables, when one is chosen; the output's width
+    ## in pixels, which sizes its grain.
+    var film: Film
+    var width: f64
 
 func radius(u: f64, v: f64, aspect: f64) -> f64:
     let x = (u - 0.5) * 2.0 * aspect
@@ -198,6 +204,8 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
     for at in 0..<(usize)3:
         c[at] = math.max(c[at], 0.0)
     c = with_lens(d, c, su, sv)
+    if d.film.active():
+        c = film.develop(&d.film, c, u, v, d.aspect, d.width)
     c = with_tone(d, c)
     c = with_color(d, c)
     c = view.display(d.shown, c, d.to_display, d.output)
@@ -240,14 +248,20 @@ func rendering(source: const Scene*, settings: const Settings*, output: view.Out
     let develop = Develop(matrix = try source.matrix(settings), tables = tables.build(settings),
                           shown = (View)(i64)settings.get(.view), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
-                          aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
-    return Rendering(develop = develop, source = source, width = width, height = height)
+                          aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()),
+                          width = out_width)
+    var out = Rendering(develop = develop, source = source, width = width, height = height)
+    out.develop.film.prepare(settings) catch failure:
+        out.develop.film.release()
+        error(failure.code, failure.message)
+    return out
 
 ## `scene` developed with `settings` for `output` (sRGB or Display P3 primaries,
 ## sRGB's curve) into an 8-bit picture of its size, on
 ## every processor.
 pub func render(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> Picture!:
     var job = try rendering(source, &settings, output)
+    defer job.develop.film.release()
     var out = try Picture.create(job.width, job.height)
     errdefer out.close()
     job.bytes = out.bytes()
@@ -258,6 +272,7 @@ pub func render(source: const Scene*, settings: Settings, output: view.Output = 
 ## packed, on every processor; the caller frees it.
 pub func render16(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> u16[]!:
     var job = try rendering(source, &settings, output)
+    defer job.develop.film.release()
     job.words = try new u16[job.width * job.height * 4] --- in memory.heap
     errdefer free(job.words) in memory.heap
     try parallel.for_each(job.height, (void*)&job, render_row)
