@@ -337,6 +337,82 @@ test "Tri-X in D-76 for 6, 10 and 12 minutes develops as Kodak's curves show":
             let predicted = base + grown.fog(0) + (normal[at] - base) * grown.factor(0, xs[at])
             assert(math.abs(predicted - published[index * 4 + at]) < 0.08)
 
+test "Acros II in D-76 for 4 and 10 minutes develops as Fujifilm's curves show":
+    # Fujifilm's Acros II sheet's D-76 series (dev/film/fuji_acros_ii.json) at
+    # log H −2.05, −1.45, −0.85 and −0.25: 7 minutes (the stock's curve), then 4
+    # and 10. One rate per exposure (dev/film/fit_development.py fits exactly
+    # this form) misses Fujifilm's 4 minutes by up to 0.09 in the midtones: its
+    # populations develop at their own rates, which the kinetics do not yet
+    # separate (docs/PHYSICAL-FILM.md, part 2).
+    let acros = film_stocks.stock_at(5)
+    let d76 = standard_of(&acros)
+    let base = acros.curves[0]
+    let xs: f64[4] = [-2.05, -1.45, -0.85, -0.25]
+    let normal: f64[4] = [0.2147, 0.4699, 0.8125, 1.3235]
+    let minutes: f64[2] = [4.0, 10.0]
+    let published: f64[8] = [0.1368, 0.3475, 0.6299, 0.9979, 0.3061, 0.6673, 1.0611, 1.5947]
+    for (index, time) in minutes.indexed():
+        let grown = developing(&acros, d76, time, 20.0)
+        for at in 0..<(usize)4:
+            let predicted = base + grown.fog(0) + (normal[at] - base) * grown.factor(0, xs[at])
+            assert(math.abs(predicted - published[index * 4 + at]) < 0.1)
+
+## Stock `stock`'s channel `channel` curve at log H `x`, held at its ends.
+func stock_curve(stock: const Stock*, channel: usize, x: f64) -> f64:
+    let n = stock.curve_count
+    let place = math.clamp((x - stock.curve_first) / stock.curve_step, 0.0, (f64)(n - 1))
+    let below = (usize)math.min(math.floor(place), (f64)(n - 2))
+    let t = place - (f64)below
+    let row = channel * film_stocks.curve_most
+    return stock.curves[row + below] * (1.0 - t) + stock.curves[row + below + 1] * t
+
+test "Ektachrome E100 pushed in E-6 gains Kodak's push speeds":
+    # Kodak E-28: the first developer at 8, 11 and 14 minutes (6 normal) pushes
+    # 2/3, 5/3 and 7/3 stops, read where the slide is 1.0 over its D-min. The
+    # first developer's negative image grows (film.lucb's `developed_amount`).
+    let e100 = film_stocks.stock_at(15)
+    let e6 = standard_of(&e100)
+    let minutes: f64[3] = [8.0, 11.0, 14.0]
+    let stops: f64[3] = [2.0 / 3.0, 5.0 / 3.0, 7.0 / 3.0]
+    var mean_gain: f64[3] = [0.0, 0.0, 0.0]
+    for channel in 0..<(usize)3:
+        var top = -1.0e9
+        var bottom = 1.0e9
+        for at in 0..<e100.curve_count:
+            let v = e100.curves[channel * film_stocks.curve_most + at]
+            top = math.max(top, v)
+            bottom = math.min(bottom, v)
+        let level = bottom + 1.0
+        let normal_speed = speed_at(&e100, developing(&e100, e6, 6.0, 38.0), channel, top, bottom, level)
+        for (index, time) in minutes.indexed():
+            let pushed = speed_at(&e100, developing(&e100, e6, time, 38.0), channel, top, bottom, level)
+            let gained = (normal_speed - pushed) / 0.30103
+            mean_gain[index] += gained / 3.0
+            # Kodak gives one speed for the film; the layers share one rate,
+            # and the blue gains up to 0.4 stop more (its fog is larger).
+            assert(math.abs(gained - stops[index]) < 0.45)
+    for index in 0..<(usize)3:
+        assert(math.abs(mean_gain[index] - stops[index]) < 0.15)
+
+## Where (log H) slide `stock`'s channel, developed as `grown`, falls to `level`.
+func speed_at(stock: const Stock*, grown: Development, channel: usize, top: f64, bottom: f64, level: f64) -> f64:
+    let span = top - bottom
+    var previous = 0.0
+    var x = stock.curve_first
+    let last = stock.curve_first + stock.curve_step * (f64)(stock.curve_count - 1)
+    var first = true
+    while x <= last:
+        let normal = stock_curve(stock, channel, x + grown.shift)
+        var taken = math.min(1.0, (top - normal) / span * grown.factor(channel, x + grown.shift))
+        taken += grown.fog(channel) * (1.0 - taken)
+        let positive = bottom + span * (1.0 - math.clamp(taken, 0.0, 1.0)) * grown.gain
+        if not first and previous >= level and positive < level:
+            return x - 0.01 + (previous - level) / math.max(previous - positive, 1.0e-9) * 0.01
+        previous = positive
+        first = false
+        x += 0.01
+    return last
+
 test "warmer develops faster, and fog faster still":
     let d76 = standard(black_and_white)
     assert(ratio(d76, 7.0, 24.0) > 1.3)

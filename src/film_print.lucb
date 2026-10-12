@@ -30,6 +30,12 @@ import film_stocks
 
 ## The printing-density encoding: density per decade of scene light, and grey's.
 let negative_gamma: f64 = 0.6
+## Kodak's LAD aim for a projection print (H-61B): the LAD patch, 0.05 below an
+## 18 % grey card in printing density on the negative (Kodak's Digital LAD
+## guide, H-387), prints as the 1.0 visual-density neutral, which on 2383 reads
+## Status A 1.09 red, 1.06 green, 1.03 blue.
+let lad_below_grey: f64 = 0.05
+let lad_status_a: f64[3] = [1.09, 1.06, 1.03]
 let grey_density: f64 = 0.7
 ## Projector flare, a share of white; and the projector's light.
 let projector_flare: f64 = 0.002
@@ -89,18 +95,36 @@ pub struct PrintModel:
         let t = position - (f64)below
         return self.curve[below * 3 + layer] * (1.0 - t) + self.curve[(below + 1) * 3 + layer] * t
 
-## Status A densitometry's bands (blue near 440 nm, green 545, red 610), as
-## Gaussians: the standard's tables are not public.
+## Status A densitometry's spectral products (ISO 5-3), red, green, blue, every
+## 10 nm from 380 nm, linear, peak 100: as python-colormath tabulates them
+## (density_standards.py, BSD-3, © 2008–2023 Greg Taylor; ISO's own tables
+## are paid). Peaks at 620, 530 and 440 nm, the red with a long tail.
+let status_a_red: f64[41] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                             0.37, 43.45, 100.0, 74.30, 40.18, 19.32, 7.94, 3.56, 1.46, 0.60, 0.24, 0.09, 0.04, 0.01, 0.01, 0.0, 0.0, 0.0, 0.0]
+let status_a_green: f64[41] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.04, 6.64, 60.53, 100.0, 80.54, 44.06, 16.63, 4.06, 0.58, 0.04,
+                               0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+let status_a_blue: f64[41] = [0.0, 0.0, 0.0, 0.0, 4.00, 65.92, 100.0, 81.66, 41.69, 10.96, 0.79, 0.04, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                              0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+## Status A's bands on the spectral samples (linear between the 10 nm table's
+## entries), each summing to 1.
 func status_a() -> f64[243]:
     var out: f64[243]
-    let centers: f64[3] = [610.0, 545.0, 440.0]
-    let widths: f64[3] = [12.0, 12.0, 12.0]
     for channel in 0..<(usize)3:
         var sum = 0.0
         for at in 0..<spectral.samples:
-            let d = (spectral.wavelength(at) - centers[channel]) / widths[channel]
-            out[channel * 81 + at] = math.exp(-0.5 * d * d)
-            sum += out[channel * 81 + at]
+            let place = math.clamp((spectral.wavelength(at) - 380.0) / 10.0, 0.0, 40.0)
+            let below = (usize)math.min(math.floor(place), 39.0)
+            let t = place - (f64)below
+            var value = 0.0
+            if channel == 0:
+                value = status_a_red[below] * (1.0 - t) + status_a_red[below + 1] * t
+            elif channel == 1:
+                value = status_a_green[below] * (1.0 - t) + status_a_green[below + 1] * t
+            else:
+                value = status_a_blue[below] * (1.0 - t) + status_a_blue[below + 1] * t
+            out[channel * 81 + at] = value
+            sum += value
         for at in 0..<spectral.samples:
             out[channel * 81 + at] /= sum
     return out
@@ -167,10 +191,24 @@ func build(out: PrintModel*):
     out.adapt = xyz.adapt(white_point, xyz.d65)
     if out.grey_density < 0.0:
         visual_grey(out)
+        # The aim is the LAD patch's, not grey's: grey's printer light is that
+        # far below it.
+        for layer in 0..<(usize)3:
+            out.printer[layer] -= lad_below_grey
 
-## Printer lights that print grey as a visual neutral at a tenth of white, where
-## 2383 prints it: the dye amounts that look so (Newton on Y and x, y), and each
-## layer's log H where it forms its amount.
+## Each layer's log H where `out` forms dye `amounts`, as its printer lights.
+func printers_for(out: PrintModel*, amounts: f64[3]):
+    for layer in 0..<(usize)3:
+        for at in 1..<samples:
+            if out.curve[at * 3 + layer] >= amounts[layer]:
+                let low = out.curve[(at - 1) * 3 + layer]
+                let high = out.curve[at * 3 + layer]
+                let t = (amounts[layer] - low) / math.max(high - low, 1.0e-9)
+                out.printer[layer] = out.low + (out.high - out.low) * ((f64)(at - 1) + t) / (f64)(samples - 1)
+                break
+
+## Printer lights that print the LAD patch as a visual neutral at a tenth of
+## white: the dye amounts that look so (Newton on Y and x, y), and their log H.
 func visual_grey(out: PrintModel*):
     var amounts: f64[3] = [1.0, 1.0, 1.0]
     for _ in 0..<40:
@@ -188,14 +226,7 @@ func visual_grey(out: PrintModel*):
         for k in 0..<(usize)3:
             amounts[k] -= inverse[k * 3] * miss[0] + inverse[k * 3 + 1] * miss[1] + inverse[k * 3 + 2] * miss[2]
             amounts[k] = math.max(amounts[k], 0.0)
-    for layer in 0..<(usize)3:
-        for at in 1..<samples:
-            if out.curve[at * 3 + layer] >= amounts[layer]:
-                let low = out.curve[(at - 1) * 3 + layer]
-                let high = out.curve[at * 3 + layer]
-                let t = (amounts[layer] - low) / math.max(high - low, 1.0e-9)
-                out.printer[layer] = out.low + (out.high - out.low) * ((f64)(at - 1) + t) / (f64)(samples - 1)
-                break
+    printers_for(out, amounts)
 
 ## How far dye `amounts` look from a neutral grey at a tenth of white: log Y,
 ## and the chromaticity off D65's.
@@ -346,11 +377,11 @@ var built: PrintModel*? = none
 var built_once: sync.Once
 
 func build_model():
-    built = make(kodak_2383(), projector_kelvin, -1.5, 3.5, 0.0, projector_flare)
+    built = make(kodak_2383(), projector_kelvin, -1.5, 3.5, -1.0, projector_flare)
 
 ## A model of `stock` seen by a black body of `kelvin`, developed over log H
-## `low`..`high`, grey at `grey_at` density over base (0: dye 1.0; below 0: a
-## visual neutral at a tenth of white), with `flare`
+## `low`..`high`, grey at `grey_at` density over base (0: dye 1.0; below 0: the
+## LAD patch a visual neutral at a tenth of white, Kodak's aim), with `flare`
 ## (a share of white); kept for the program's life.
 pub func make(stock: PrintStock, kelvin: f64, low: f64, high: f64, grey_at: f64, flare: f64, reflective: bool = false) -> PrintModel*:
     let made = new PrintModel(stock = stock, low = low, high = high, grey_density = grey_at, flare = flare, bands = status_a(),
@@ -450,9 +481,36 @@ pub func projected(rgb: f64[3], silver: f64 = 0.0, material: i64 = 0) -> xyz.XYZ
     let kept = silver * print_silver_density * math.max((amounts[0] + amounts[1] + amounts[2]) / 3.0, 0.0)
     return seen(model, amounts, kept)
 
-test "grey prints near a tenth of white, neutral; white shows white and black near black":
-    # Kodak's normalized dyes, as read, make a visual density of 0.93, not 1.0.
-    let grey = projected([0.18, 0.18, 0.18])
+test "2383 prints the LAD patch near Kodak's Status A aim; a printer point moves it about 0.07–0.1":
+    built_once.run(build_model)
+    let model = built else trap("the print model was not built")
+    var at_lad: f64[3]
+    var lighter: f64[3]
+    for layer in 0..<(usize)3:
+        # The LAD patch: 0.05 below grey in printing density (grey is 0 here).
+        at_lad[layer] = model.amount(layer, model.printer[layer] + lad_below_grey)
+        lighter[layer] = model.amount(layer, model.printer[layer] + lad_below_grey + 0.025)
+    let read = model.read(at_lad)
+    let moved = model.read(lighter)
+    var point = 0.0
+    for k in 0..<(usize)3:
+        point += (moved[k] - read[k]) / 3.0
+    # The patch prints a visual neutral (Kodak's intent); read through this
+    # model's Status A (Gaussian bands: the standard's tables are not public) it
+    # comes within a few hundredths of Kodak's 1.09 / 1.06 / 1.03.
+    print(f"2383 LAD patch reads Status A {read[0]} {read[1]} {read[2]} (Kodak 1.09 1.06 1.03); a printer point {point}")
+    for k in 0..<(usize)3:
+        assert(math.abs(read[k] - lad_status_a[k]) < 0.04)
+    # Kodak's practical figure (H-61B) is "about 0.07"; its datasheet curves,
+    # which the model follows, are steeper at the LAD patch (3.1–4.4 per log E:
+    # 0.08–0.11 a point). The rule of thumb is lower than its own sensitometry.
+    assert(point > 0.07 and point < 0.115)
+
+test "the LAD patch prints near a tenth of white, neutral; white shows white and black near black":
+    # The LAD patch at Status A 1.09 / 1.06 / 1.03 is about a visual 1.0
+    # (projector flare lifts it a little); grey, two printer points lighter.
+    let patch = 0.18 * math.pow(10.0, -lad_below_grey / negative_gamma)
+    let grey = projected([patch, patch, patch])
     assert(grey.y > 0.09 and grey.y < 0.13)
     let x = grey.x / (grey.x + grey.y + grey.z)
     let y = grey.y / (grey.x + grey.y + grey.z)
