@@ -43,6 +43,8 @@ pub struct Input:
     ## it, unless the White Balance says otherwise.
     pub var shot_kelvin: f64 = 6500.0
     pub var shot_tint: f64 = 0.0
+    ## How long it was exposed (seconds), unless the Shutter says otherwise.
+    pub var shot_seconds: f64 = 1.0 / 60.0
 
 ## How many terms the conversion has.
 pub let term_count: usize = 13
@@ -70,6 +72,18 @@ pub func apply(fitted: const Fit*, c: f64[3]) -> f64[3]:
             e[layer] += fitted.weights[k * 3 + layer] * t[k]
     let floor = 0.02 * (e[0] + e[1] + e[2]) / 3.0
     return [math.max(e[0], floor), math.max(e[1], floor), math.max(e[2], floor)]
+
+## Reciprocity failure (dev/film/reciprocity.py): the stops layer `layer`
+## loses at exposure `e` (relative, grey 0.18) when grey was exposed for
+## `seconds`. Its irradiance sets it: a part of the picture half as bright
+## builds its exposure over twice the time, as a longer exposure would.
+## `law` is the stock's q, p and t0 per layer (red first).
+pub func failure(law: const f64[9], layer: usize, seconds: f64, e: f64) -> f64:
+    let q = law[layer * 3]
+    if q <= 0.0:
+        return 0.0
+    let longer = seconds * 0.18 / math.max(e, 1.0e-6)
+    return q * math.log2(1.0 + math.pow(longer / law[layer * 3 + 2], law[layer * 3 + 1]))
 
 ## Sky seen beside sunlit surfaces: daylight of these temperatures over the
 ## 5500 K sun's, at these strengths, weighed `sky_weight` surfaces each. The
@@ -243,3 +257,23 @@ test "through a measured camera the fit finds the film's exposures, and white ex
             missed += math.abs(math.log2(got[layer] / (truth / through_light)))
     print(f"exposure fit through a Sony A7 III onto Portra 400 at 3200 K: {missed / (f64)(camera.training_count() * 3)} stops on average")
     assert(missed / (f64)(camera.training_count() * 3) < 0.2)
+
+test "long exposures lose what the makers' tables say, the shadows more":
+    # Kodak E-31: Tri-X at 10 s needs 50 s (2.32 stops), at 100 s 1200 s (3.58).
+    let tri_x = film_stocks.stock_at(17)
+    assert(math.abs(failure(tri_x.reciprocity, 1, 10.0, 0.18) - 2.32) < 0.15)
+    assert(math.abs(failure(tri_x.reciprocity, 1, 100.0, 0.18) - 3.58) < 0.15)
+    assert(failure(tri_x.reciprocity, 1, 1.0 / 125.0, 0.18) < 0.02)
+    # A part two stops darker fails as a longer exposure does.
+    assert(failure(tri_x.reciprocity, 1, 10.0, 0.045) > failure(tri_x.reciprocity, 1, 10.0, 0.18) + 0.5)
+    # Fujifilm: Velvia 50 at 32 s, +1 stop with CC12.5M: green holds best.
+    let velvia = film_stocks.stock_at(4)
+    let lost: f64[3] = [failure(velvia.reciprocity, 0, 32.0, 0.18), failure(velvia.reciprocity, 1, 32.0, 0.18),
+                        failure(velvia.reciprocity, 2, 32.0, 0.18)]
+    assert(math.abs((lost[0] + lost[1] + lost[2]) / 3.0 - 1.0) < 0.15 and lost[1] < lost[0] and lost[1] < lost[2])
+    # Kodak: Vision3 500T none to 1 s; at 10 s +1 stop with CC10R, red failing most.
+    let vision = film_stocks.stock_at(6)
+    assert(failure(vision.reciprocity, 0, 1.0, 0.18) < 0.25)
+    let red = failure(vision.reciprocity, 0, 10.0, 0.18)
+    let green = failure(vision.reciprocity, 1, 10.0, 0.18)
+    assert(red > green and math.abs((red + 2.0 * green) / 3.0 - 1.0) < 0.2)

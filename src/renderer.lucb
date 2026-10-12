@@ -220,6 +220,9 @@ pub struct Renderer:
         return self.shown.shot_temperature
     pub func shot_tint() -> f64:
         return self.shown.shot_tint
+    ## How long the shown photo was exposed (seconds; zero when unknown).
+    pub func shot_seconds() -> f64:
+        return self.shown.shot_seconds
 
     ## Apply the geometry (perspective, rotation, crop to fit) or show the photo
     ## as it was taken, for drawing guides on.

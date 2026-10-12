@@ -13,6 +13,7 @@ import strings
 from luce_std import files
 from luce_std import math
 from luce_raw import raw
+from luce_exif import exif
 from luce_color import temperature
 from luce_color import xyz
 from luce_color import spectral
@@ -40,6 +41,8 @@ pub struct Scene:
     var as_shot: f64[3]
     pub var shot_temperature: f64
     pub var shot_tint: f64
+    ## How long it was exposed (seconds, from EXIF; zero when unknown).
+    pub var shot_seconds: f64
     ## A raw camera's spectral sensitivities in the units of `pixels` (its
     ## curves times the as-shot multipliers).
     var response: Response
@@ -136,7 +139,8 @@ pub struct Scene:
     ## scene's matrix takes: film.camera_settings): the camera, and the way from
     ## the AP1 light the film receives back to the scene's values.
     pub func film_input(settings: const Settings*) -> film_exposure.Input!:
-        var out = film_exposure.Input(response = self.response, raw = self.is_raw(), shot_kelvin = self.shot_temperature, shot_tint = self.shot_tint)
+        var out = film_exposure.Input(response = self.response, raw = self.is_raw(), shot_kelvin = self.shot_temperature, shot_tint = self.shot_tint,
+                                      shot_seconds = self.shot_seconds if self.shot_seconds > 0.0 else 1.0 / 60.0)
         if self.is_raw():
             var plain = *settings
             plain.set(.exposure, 0.0)
@@ -213,7 +217,9 @@ pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
     if edge != 0 and edge < 16:
         error(invalid, "a scene needs a size")
     if raw.detect(data):
-        return try raw_scene(data, edge)
+        var made = try raw_scene(data, edge)
+        made.shot_seconds = shutter_of(data)
+        return made
     var picture = try source.preview(data, edge if edge > 0 else 65536)
     defer picture.close()
     var scene = Scene(columns = (usize)picture.width(), rows = (usize)picture.height(), as_shot = [1.0, 1.0, 1.0], shot_temperature = 6500.0)
@@ -221,7 +227,17 @@ pub func from_bytes(data: const u8[], edge: usize) -> Scene!:
     errdefer free(scene.pixels) in memory.heap
     var job = Undisplay(bytes = picture.pixels(), pixels = scene.pixels, columns = scene.columns)
     try parallel.for_each(scene.rows, (void*)&job, undisplay_row)
+    scene.shot_seconds = shutter_of(data)
     return scene
+
+## How long the photo in `data` was exposed, in seconds, as its EXIF says (a
+## sixtieth when it says nothing).
+func shutter_of(data: const u8[]) -> f64:
+    let found = exif.read(data) catch failure:
+        return 1.0 / 60.0
+    defer found.release()
+    let seconds = found.value.exposure_time
+    return seconds if seconds > 0.0 else 1.0 / 60.0
 
 ## A display-referred picture's rows into scene light, in parallel.
 struct Undisplay:

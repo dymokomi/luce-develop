@@ -145,6 +145,16 @@ vec3 expose(vec3 c) {
     // Each weight in two halves (film.lucb): the half float and what it misses.
     for (int k = 0; k < 13; k++) e += (film_value(22.0 + float(k)).rgb + film_value(35.0 + float(k)).rgb) * t[k];
     e = max(e, vec3(0.02 * (e.r + e.g + e.b) / 3.0));
+    // Reciprocity failure, each layer at its own exposure (film_exposure.lucb's
+    // `failure`): stops q·log2(1 + (t·0.18/e / t0)^p).
+    float seconds = film_value(51.0).x;
+    for (int layer = 0; layer < 3; layer++) {
+        vec3 law = film_value(48.0 + float(layer)).rgb;
+        if (law.x > 0.0) {
+            float longer = seconds * 0.18 / max(e[layer], 1e-6);
+            e[layer] *= exp2(-law.x * log2(1.0 + pow(longer / law.z, law.y)));
+        }
+    }
     // Flashing: an even share of grey's exposure (film.lucb's `expose`).
     float flash = film_value(21.0).x * 0.18;
     return max(e, vec3(1e-8)) + flash;

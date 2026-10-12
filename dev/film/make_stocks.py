@@ -370,6 +370,9 @@ DEVELOPMENT = json.load(open(here / 'development.json'))
 BORROWED = {'ilford_hp5_plus': 'kodak_tri_x_400'}
 
 
+from reciprocity import reciprocity
+
+
 def kinetics(key, data):
     """The development kinetics for stock `key` (dev/film/fit_development.py)."""
     if key in DEVELOPMENT or key in BORROWED:
@@ -423,7 +426,9 @@ pub func {key}() -> Stock:
         saturation = {block(developing['saturation'], 3)},
         rate_slope = {block(developing['slope'], 3)},
         induction = {number(developing['induction'])},
-        fog_rate = {block(developing['fog_rate'], 3)})
+        fog_rate = {block(developing['fog_rate'], 3)},
+        # Reciprocity failure per layer: dev/film/reciprocity.py.
+        reciprocity = {block(reciprocity(key, data.get('kind', 'negative')), 9)})
 '''
 
 
@@ -520,6 +525,9 @@ pub struct Stock:
     pub var rate_slope: f64[3]
     pub var induction: f64
     pub var fog_rate: f64[3]
+    ## Reciprocity failure per layer (red first): q, p and t0 of the stops lost
+    ## at a metered exposure of t seconds, q·log2(1 + (t / t0)^p) (film_exposure.lucb).
+    pub var reciprocity: f64[9]
 
 ## The stocks, in the Film Stock menu's order (after none).
 pub let stock_count: usize = {len(STOCKS)}

@@ -107,7 +107,8 @@ pixel size only decides how finely the film is sampled.
    125 µm acetate) inside a faint Fresnel disc. Light returns red first, and
    the antihalation type (rem-jet, AHU, grey base, none) sets its strength.
 
-7. **Reciprocity.** Kron–Halm per layer on local irradiance, from the raw's
+7. **Reciprocity** (done: a knee law per layer instead of Kron–Halm's two
+   sides; high-intensity failure is not modelled). Per layer on local irradiance, from the raw's
    shutter time (EXIF), calibrated to Kodak E-31 and Fujifilm tables; Velvia
    goes green past 4 s and Vision3 cyan past 1 s, as their filters say.
 

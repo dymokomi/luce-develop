@@ -71,7 +71,9 @@
 ##          22–34 the exposure's weights, a term per texel, its layers' weights
 ##          in r, g, b (film_exposure.lucb), as half floats; 35–47 what each
 ##          misses, so the two together hold it to about 22 bits (the weights
-##          partly cancel, and grey must land exactly)
+##          partly cancel, and grey must land exactly); 48–50 reciprocity
+##          failure's q, p, t0 for the red, green and blue layers; 51 the
+##          exposure time (s)
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -375,6 +377,11 @@ pub struct Film:
         let fitted = film_exposure.fit(&response, 1.0 / math.max(y, 1.0e-12), &scene, &film, lens, model.sensitivity, &model.light, factor)
         for row in 0..<(usize)3:
             self.put(values_row, row, to_camera[row * 3], to_camera[row * 3 + 1], to_camera[row * 3 + 2], 0.0)
+        let law = model.stock.reciprocity
+        for layer in 0..<(usize)3:
+            self.put(values_row, 48 + layer, law[layer * 3], law[layer * 3 + 1], law[layer * 3 + 2], 0.0)
+        let chosen_seconds = settings.get(.exposure_time)
+        self.put(values_row, 51, chosen_seconds if chosen_seconds > 0.0 else input.shot_seconds, 0.0, 0.0, 0.0)
         for k in 0..<film_exposure.term_count:
             var high: f64[3]
             for layer in 0..<(usize)3:
@@ -772,7 +779,17 @@ pub func expose(film: const Film*, c: f64[3]) -> f64[3]:
         let low = film.value(35 + k)
         for layer in 0..<(usize)3:
             fitted.weights[k * 3 + layer] = high[layer] + low[layer]
-    let e = film_exposure.apply(&fitted, values)
+    var e = film_exposure.apply(&fitted, values)
+    # Reciprocity failure, each layer at its own exposure.
+    var law: f64[9]
+    for layer in 0..<(usize)3:
+        let v = film.value(48 + layer)
+        law[layer * 3] = v[0]
+        law[layer * 3 + 1] = v[1]
+        law[layer * 3 + 2] = v[2]
+    let seconds = film.value(51)[0]
+    for layer in 0..<(usize)3:
+        e[layer] *= math.exp2(-film_exposure.failure(law, layer, seconds, e[layer]))
     # Flashing: an even exposure over the whole negative, a share of grey's
     # (grey exposes each layer 0.18).
     let flash = film.value(21)[0] * 0.18
