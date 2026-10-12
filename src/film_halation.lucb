@@ -1,0 +1,157 @@
+## Halation: light that crossed the emulsion, went into the base, reflected off
+## its back and came back to expose the emulsion again, around every highlight.
+## Its shape is geometry (research: reports/Physical film process simulation.md):
+##
+## Light leaves the turbid emulsion into the base diffusely (as cos θ per solid
+## angle). A ray at θ in a base of thickness d and index n meets the back
+## surface; below the critical angle θc = asin(1/n) the surface reflects its
+## Fresnel share (about 4 %), beyond it reflects all of it (total internal
+## reflection). It comes back to the emulsion a distance r = 2d·tan θ away: a
+## faint disc, then a bright ring from 2d·tan θc (about 230 µm on 125 µm of
+## acetate). On its way back the emulsion absorbs part of it (that part is the
+## halo's exposure); a totally reflected ray left over is reflected again at the
+## emulsion's face and comes round again, farther out.
+##
+## What stops it: a backing. Rem-jet, the carbon black on motion picture
+## negatives, takes the light at the back surface; an antihalation undercoat
+## between emulsion and base absorbs it on the way in and out; a grey base
+## absorbs along the slanted path, the totally reflected rays most. Light
+## reaching the base is mostly red (the layers above take blue and green), and
+## coming back it meets the red-sensitive layer first: red-orange halos.
+##
+## Strengths are estimates: no maker publishes a halation spread or strength.
+from luce_std import math
+
+## Backings, as film_stocks gives them.
+pub let rem_jet: i64 = 0
+pub let undercoat: i64 = 1
+pub let grey_base: i64 = 2
+pub let no_backing: i64 = 3
+
+## The share of light of each layer's band that reaches the base (red, green,
+## blue; the blue-sensitive layer and the yellow filter take the blue), and the
+## share the emulsion absorbs of what comes back (estimates).
+let reaching: f64[3] = [0.5, 0.2, 0.01]
+let absorbed: f64[3] = [0.5, 0.35, 0.3]
+## What a backing lets back: rem-jet's (its absorbing back surface, at any
+## angle), an undercoat's (its transmission both ways), and a grey base's
+## density per pass at normal incidence (estimates).
+let rem_jet_return: f64 = 0.01
+let undercoat_return: f64 = 0.02
+let grey_density: f64 = 0.25
+
+## How many offsets sample the kernel.
+pub let sample_count: usize = 256
+
+## A halation kernel: each layer's strength (the share of its exposure that
+## comes back as halo) and where the halo lands, as `sample_count` offsets (µm)
+## drawn from its distribution, each carrying an equal share: stratified in
+## radius by the distribution's cumulative energy, a golden angle apart in
+## direction. Gathering the exposure at them, as a ray tracer gathers light,
+## convolves with the kernel exactly as the samples become many.
+pub struct Kernel:
+    pub var strength: f64[3]
+    pub var offsets: f64[512]
+
+## How far light that left the emulsion at a point has spread there by the time
+## it comes back out (an estimate, σ µm: the emulsion is turbid).
+let exit_spread: f64 = 15.0
+
+## The radial distribution of returning light, in `bins` rings `step` µm wide
+## (energy per ring), and the total share returned (before the emulsion).
+func rings(thickness: f64, index: f64, backing: i64, bins: usize, step: f64, out: f64[]) -> f64:
+    for at in 0..<bins:
+        out[at] = 0.0
+    let critical = math.asin(1.0 / index)
+    var total = 0.0
+    let samples = 4000
+    for at in 0..<samples:
+        let theta = (0.5 + (f64)at) / (f64)samples * math.pi / 2.0
+        let dtheta = math.pi / 2.0 / (f64)samples
+        # Diffuse: cos θ per solid angle, 2 sin θ cos θ dθ in all.
+        var share = 2.0 * math.sin(theta) * math.cos(theta) * dtheta
+        let totally = theta >= critical
+        var reflected = 1.0 if totally else fresnel(index, theta)
+        if backing == rem_jet:
+            reflected = rem_jet_return
+        elif backing == undercoat:
+            reflected *= undercoat_return
+        elif backing == grey_base:
+            reflected *= math.pow(10.0, -2.0 * grey_density / math.cos(theta))
+        share *= reflected
+        # Round trips: each one 2d·tan θ farther; a totally reflected ray left
+        # after the emulsion goes round again.
+        var trip = 1
+        while trip <= 4 and share > 1.0e-9:
+            let r = (f64)trip * 2.0 * thickness * math.tan(theta)
+            if r < step * (f64)bins:
+                out[(usize)math.floor(r / step)] += share
+                total += share
+            if not totally:
+                break
+            # Of what came back, the part the emulsion did not keep (an average
+            # of the layers) reflects at its face and makes another trip.
+            share *= 0.5 * reflected
+            trip += 1
+    return total
+
+## Unpolarized Fresnel reflectance leaving a medium of `index` into air at `theta`.
+func fresnel(index: f64, theta: f64) -> f64:
+    let sin_t = index * math.sin(theta)
+    if sin_t >= 1.0:
+        return 1.0
+    let cos_i = math.cos(theta)
+    let cos_t = math.sqrt(1.0 - sin_t * sin_t)
+    let rs = (index * cos_i - cos_t) / (index * cos_i + cos_t)
+    let rp = (index * cos_t - cos_i) / (index * cos_t + cos_i)
+    return 0.5 * (rs * rs + rp * rp)
+
+## The kernel for a base `thickness` µm thick of `index` with `backing`.
+pub func kernel(thickness: f64, index: f64, backing: i64) -> Kernel:
+    let bins: usize = 512
+    let step = thickness * 10.0 / (f64)bins
+    var energy: f64[512]
+    let returned = rings(thickness, index, backing, bins, step, energy)
+    var out = Kernel()
+    for layer in 0..<(usize)3:
+        out.strength[layer] = reaching[layer] * returned * absorbed[layer]
+    # The cumulative energy over radius; each sample at its stratum's radius,
+    # nudged by the emulsion's spread (a fixed, even pattern of nudges).
+    var cumulative: f64[513]
+    cumulative[0] = 0.0
+    for at in 0..<bins:
+        cumulative[at + 1] = cumulative[at] + energy[at] / math.max(returned, 1.0e-12)
+    let golden = math.pi * (3.0 - math.sqrt(5.0))
+    var bin: usize = 0
+    for k in 0..<sample_count:
+        let u = ((f64)k + 0.5) / (f64)sample_count
+        while bin + 1 < bins and cumulative[bin + 1] < u:
+            bin += 1
+        let within = (u - cumulative[bin]) / math.max(cumulative[bin + 1] - cumulative[bin], 1.0e-12)
+        let r = ((f64)bin + math.clamp(within, 0.0, 1.0)) * step
+        let angle = golden * (f64)k
+        let fraction = (f64)k * 0.6180339887 - math.floor((f64)k * 0.6180339887)
+        let nudge = exit_spread * math.sqrt(-2.0 * math.log(1.0 - fraction * 0.999))
+        let nudge_angle = golden * (f64)k * 7.0
+        out.offsets[k * 2] = r * math.cos(angle) + nudge * math.cos(nudge_angle)
+        out.offsets[k * 2 + 1] = r * math.sin(angle) + nudge * math.sin(nudge_angle)
+    return out
+
+test "an unbacked base makes a bright ring at 2d·tan θc, red, a backing stops most of it":
+    let bare = kernel(125.0, 1.48, no_backing)
+    let ring = 2.0 * 125.0 * math.tan(math.asin(1.0 / 1.48))
+    assert(math.abs(ring - 229.0) < 3.0)
+    # Most of the returning light lands at or beyond the ring; little inside it.
+    var outside: usize = 0
+    for k in 0..<sample_count:
+        let r = math.sqrt(bare.offsets[k * 2] * bare.offsets[k * 2] + bare.offsets[k * 2 + 1] * bare.offsets[k * 2 + 1])
+        if r > 0.9 * ring:
+            outside += 1
+    assert(outside > sample_count * 3 // 4)
+    assert(bare.strength[0] > bare.strength[1] and bare.strength[1] > bare.strength[2])
+    # About a sixth of the red layer's exposure comes back, unbacked (CineStill).
+    assert(bare.strength[0] > 0.08 and bare.strength[0] < 0.25)
+    let backed = kernel(125.0, 1.48, rem_jet)
+    assert(backed.strength[0] < 0.05 * bare.strength[0])
+    let grey = kernel(125.0, 1.48, grey_base)
+    assert(grey.strength[0] < bare.strength[0])

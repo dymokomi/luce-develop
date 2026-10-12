@@ -14,6 +14,10 @@ pub struct FilmPasses:
     var exposed: gpu.Texture?
     var one: gpu.Texture?
     var two: gpu.Texture?
+    ## The halation's blocks and its gathered halo, and their block size.
+    var low: gpu.Texture?
+    var gathered: gpu.Texture?
+    var block: i32
     var width: u32
     var height: u32
     ## The lens's veiling glare (lens.lucb), added in the expose pass.
@@ -41,13 +45,26 @@ pub struct FilmPasses:
         let one = self.one else return scene
         let two = self.two else return scene
         let plan = film_passes.plan_for(source, (usize)width)
+        if film_passes.has_halation(&plan) and (self.low == none or self.block != plan.halation_block):
+            self.release_low()
+            let low_width = (u32)film_passes.blocks((usize)width, plan.halation_block)
+            let low_height = (u32)film_passes.blocks((usize)height, plan.halation_block)
+            self.low = try gpu.Texture.create(device, low_width, low_height, gpu.Format.rgba16_float)
+            self.gathered = try gpu.Texture.create(device, low_width, low_height, gpu.Format.rgba16_float)
+            self.block = plan.halation_block
         let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false, alpha = 0.0f32)
         try self.pass(exposed, 0, scene, scene, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
         try self.pass(one, 1, exposed, exposed, tables, atlas, 1, 0, plan.scatter, plan, matrix, aspect)
         try self.pass(two, 1, one, one, tables, atlas, 0, 1, plan.scatter, plan, matrix, aspect)
         if film_passes.has_halation(&plan):
-            try self.pass(one, 1, exposed, exposed, tables, atlas, 1, 0, plan.halation, plan, matrix, aspect)
-            try self.pass(exposed, 2, one, two, tables, atlas, 0, 1, plan.halation, plan, matrix, aspect)
+            let low = self.low else return scene
+            let gathered = self.gathered else return scene
+            # Halation: blocks of the exposure, gathered at the kernel's samples,
+            # added back onto the scatter (film_passes.lucb's stages 5–7).
+            let blocked = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = plan.halation_block, exponential = false, alpha = 0.0f32)
+            try self.pass(low, 5, exposed, exposed, tables, atlas, 0, 0, blocked, plan, matrix, aspect)
+            try self.pass(gathered, 6, low, low, tables, atlas, 0, 0, blocked, plan, matrix, aspect)
+            try self.pass(exposed, 7, gathered, two, tables, atlas, 0, 0, blocked, plan, matrix, aspect)
         else:
             # Unblurred, the scattered exposure is the exposure.
             try self.pass(exposed, 1, two, two, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
@@ -69,9 +86,9 @@ pub struct FilmPasses:
         defer frame.release()
         let area = try frame.value().target()
         defer area.release()
-        let w = (f32)self.width
-        let h = (f32)self.height
-        let weights = plan.halation_weights
+        let w = (f32)(try target.width())
+        let h = (f32)(try target.height())
+        let weights = plan.halation_strength
         var uniforms: f32[32] = [
             0.0f32, 0.0f32, w, h,
             (f32)stage, (f32)dx, (f32)dy, (f32)blur.radius,
@@ -85,7 +102,18 @@ pub struct FilmPasses:
         try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
 
+    func release_low():
+        if let held = self.low:
+            var gone = held
+            gone.destroy()
+        if let held = self.gathered:
+            var gone = held
+            gone.destroy()
+        self.low = none
+        self.gathered = none
+
     func release_textures():
+        self.release_low()
         if let held = self.exposed:
             var gone = held
             gone.destroy()

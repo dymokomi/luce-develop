@@ -102,7 +102,8 @@ pixel size only decides how finely the film is sampled.
    stock with a published curve; two-scale noise power spectrum; Print Grain
    Index ordering for Portra 400.
 
-6. **Halation.** A geometric point-spread function: the base's thickness and
+6. **Halation** (done: 256 samples drawn from the computed distribution,
+   gathered at reduced resolution; strengths are estimates). A geometric point-spread function: the base's thickness and
    index give a total-internal-reflection ring at 2d·tan θc (≈ 230 µm for
    125 µm acetate) inside a faint Fresnel disc. Light returns red first, and
    the antihalation type (rem-jet, AHU, grey base, none) sets its strength.

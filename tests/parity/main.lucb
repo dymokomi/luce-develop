@@ -20,6 +20,7 @@ from luce_develop import process
 from luce_develop import renderer
 from luce_develop.settings import parse, compile, Settings
 from luce_develop import recipe
+from luce_develop import film
 
 let cases: str[28] = [
     "",
@@ -104,7 +105,11 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         # The view the recipe renders with (a Project stage makes it the print's).
         let view = compile(&settings).get(.view)
         let tabled = view == 0.0 or view >= 3.0
-        let limit = 40 if tabled else (8 if settings.get(.film_stock) > 0.0 else 3)
+        # A slide's curves are about three times a negative's slope near black,
+        # so the same rounding moves its darkest pixels a few levels more.
+        let stock = settings.get(.film_stock)
+        let slide = stock > 0.0 and film.stock_kind((i64)stock - 1) == 1
+        let limit = 40 if tabled else (12 if slide else (8 if stock > 0.0 else 3))
         # A color paper's curves are the steepest a table follows (Endura's
         # gamma near 2.6): a few more of its values miss by more than 6. The
         # print view's 2383 is next (gamma near 3 in its deep shadows): dark,

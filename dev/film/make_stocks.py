@@ -373,6 +373,28 @@ BORROWED = {'ilford_hp5_plus': 'kodak_tri_x_400'}
 from reciprocity import reciprocity
 
 
+# Each stock's base (thickness µm, refractive index) and backing against
+# halation (film_halation.lucb: 0 rem-jet, 1 antihalation undercoat, 2 grey
+# base, 3 none). Velvia 50's 127 µm (135) is Fujifilm's; Acros II's grey TAC
+# base is Fujifilm's; rem-jet on Kodak's and Eastman's motion picture negatives
+# is Kodak's (Vision3's being replaced by an undercoat from 2025). Acetate's
+# index 1.48; other thicknesses (125 µm for 135 still film, 132 µm for 35 mm
+# motion picture film) are estimates.
+BASES = {
+    'kodak_portra_160': (125.0, 1.48, 1), 'kodak_portra_400': (125.0, 1.48, 1), 'kodak_portra_800': (125.0, 1.48, 1),
+    'kodak_ektar_100': (125.0, 1.48, 1), 'fuji_pro_400h': (125.0, 1.48, 1), 'kodak_ektachrome_e100': (125.0, 1.48, 1),
+    'fuji_velvia_50': (127.0, 1.48, 1), 'fuji_velvia_100': (127.0, 1.48, 1),
+    'fuji_acros_ii': (125.0, 1.48, 2), 'kodak_tri_x_400': (125.0, 1.48, 1), 'kodak_tmax_100': (125.0, 1.48, 1),
+    'ilford_hp5_plus': (125.0, 1.48, 1), 'eastman_double_x_5222': (132.0, 1.48, 2),
+}
+
+
+def base_of(key):
+    """Thickness, index and backing of `key`'s base: motion picture color
+    negatives (rem-jet) unless listed."""
+    return BASES.get(key, (132.0, 1.48, 0))
+
+
 def kinetics(key, data):
     """The development kinetics for stock `key` (dev/film/fit_development.py)."""
     if key in DEVELOPMENT or key in BORROWED:
@@ -428,7 +450,10 @@ pub func {key}() -> Stock:
         induction = {number(developing['induction'])},
         fog_rate = {block(developing['fog_rate'], 3)},
         # Reciprocity failure per layer: dev/film/reciprocity.py.
-        reciprocity = {block(reciprocity(key, data.get('kind', 'negative')), 9)})
+        reciprocity = {block(reciprocity(key, data.get('kind', 'negative')), 9)},
+        base_thickness = {number(base_of(key)[0])},
+        base_index = {number(base_of(key)[1])},
+        backing = {base_of(key)[2]})
 '''
 
 
@@ -528,6 +553,11 @@ pub struct Stock:
     ## Reciprocity failure per layer (red first): q, p and t0 of the stops lost
     ## at a metered exposure of t seconds, q·log2(1 + (t / t0)^p) (film_exposure.lucb).
     pub var reciprocity: f64[9]
+    ## The base under the emulsion: thickness (µm), refractive index, and the
+    ## backing against halation (film_halation.lucb).
+    pub var base_thickness: f64
+    pub var base_index: f64
+    pub var backing: i64
 
 ## The stocks, in the Film Stock menu's order (after none).
 pub let stock_count: usize = {len(STOCKS)}

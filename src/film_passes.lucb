@@ -6,8 +6,9 @@
 ##
 ## The passes: expose (the develop's matrix and lens vignetting, then each
 ## layer's exposure); scatter (each layer's exponential, across then down);
-## halation (the exposure blurred by halation's spread, across, then down while
-## adding it to the scattered exposure); the neutral development, with the
+## halation (film_halation.lucb: the exposure averaged over blocks, gathered at
+## the kernel's samples, and the halo added back at full size to the scattered
+## exposure); the neutral development, with the
 ## developer it uses up in its alpha; the inhibitor's spread and the
 ## developer's (alpha), across then down; develop as dye clouds with their
 ## grain, and scan.
@@ -16,6 +17,7 @@ from luce_std import math
 from luce_std import parallel
 from film import Film
 import film
+import film_halation
 from scene import Scene
 from tables import Tables
 
@@ -37,8 +39,10 @@ pub struct Plan:
     ## µm of negative per scene pixel.
     pub var pitch: f32
     pub var scatter: Blur
-    pub var halation: Blur
-    pub var halation_weights: f32[3]
+    ## Halation: each layer's strength, and the block (texels a side) its
+    ## gather runs at, about an eighth of the ring's radius.
+    pub var halation_strength: f32[3]
+    pub var halation_block: i32
     pub var spread: Blur
     ## The duplicates' blur over the developed image (none: radius 0).
     pub var duplicated: Blur
@@ -63,13 +67,17 @@ pub func plan_for(source: const Film*, width: usize) -> Plan:
     let copies = source.value(21)[1] / pitch
     return Plan(pitch = (f32)pitch, duplicated = blur_of([copies, copies, copies]),
                 scatter = blur_of([sharp[0] / pitch, sharp[1] / pitch, sharp[2] / pitch], true),
-                halation = blur_of([halo[3] / pitch, halo[3] / pitch, halo[3] / pitch]),
-                halation_weights = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
+                halation_strength = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
+                halation_block = (i32)math.clamp(math.round(halo[3] / 8.0 / pitch), 1.0, 32.0),
                 spread = held)
 
 ## Whether halation adds anything.
 pub func has_halation(blurs: const Plan*) -> bool:
-    return blurs.halation_weights[0] > 0.0f32 or blurs.halation_weights[1] > 0.0f32 or blurs.halation_weights[2] > 0.0f32
+    return blurs.halation_strength[0] > 0.0f32 or blurs.halation_strength[1] > 0.0f32 or blurs.halation_strength[2] > 0.0f32
+
+## The size of the halation's blocks over an image `size` texels long.
+pub func blocks(size: usize, block: i32) -> usize:
+    return (size + (usize)block - 1) // (usize)block
 
 # mark: Passes ================================================================
 
@@ -96,6 +104,11 @@ struct Pass:
     var blur: Blur
     var weights: f32[3]
     var pitch: f64
+    ## Halation: the block size, and the size of `first` when it differs from
+    ## the output's (the gather reads blocks; the halo's addition reads them).
+    var block: i64
+    var first_width: usize
+    var first_height: usize
 
 func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
     let at = place(width, height, x, y)
@@ -125,6 +138,24 @@ func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[4]:
             sum[k] += w * (f64)image[at + k]
             weights[k] += w
     return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2], sum[3] / weights[3]]
+
+## `image` (`width` × `height`) at (`x`, `y`) in texels, bilinear between texel
+## centres, held at the edges (film.frag's `bilinear`).
+func bilinear(image: const f16[], width: usize, height: usize, x: f64, y: f64) -> f64[3]:
+    let bx = math.floor(x)
+    let by = math.floor(y)
+    let fx = x - bx
+    let fy = y - by
+    let ix = (i64)bx
+    let iy = (i64)by
+    let a = texel(image, width, height, ix, iy)
+    let c = texel(image, width, height, ix + 1, iy)
+    let d = texel(image, width, height, ix, iy + 1)
+    let e = texel(image, width, height, ix + 1, iy + 1)
+    var out: f64[3]
+    for k in 0..<(usize)3:
+        out[k] = (a[k] * (1.0 - fx) + c[k] * fx) * (1.0 - fy) + (d[k] * (1.0 - fx) + e[k] * fx) * fy
+    return out
 
 ## The developed negative at (`x`, `y`) µm: the pixel there, from the exposure
 ## (`first`) and the inhibitor (`second`).
@@ -163,9 +194,32 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             let blur = blurred(pass, pass.first, x, y)
             out = [blur[0], blur[1], blur[2]]
             spent = blur[3]
-        elif pass.stage == 2:
+        elif pass.stage == 5:
+            # Halation, 1: the exposure averaged over blocks.
+            out = [0.0, 0.0, 0.0]
+            for by in 0..<pass.block:
+                for bx in 0..<pass.block:
+                    let v = texel(pass.first, pass.first_width, pass.first_height, x * pass.block + bx, y * pass.block + by)
+                    for k in 0..<(usize)3:
+                        out[k] += v[k]
+            let count = (f64)(pass.block * pass.block)
+            out = [out[0] / count, out[1] / count, out[2] / count]
+        elif pass.stage == 6:
+            # 2: gathered at the kernel's samples (µm), at this block size.
+            let block = (f64)pass.block * pass.pitch
+            out = [0.0, 0.0, 0.0]
+            for k in 0..<film_halation.sample_count:
+                let offset = pass.film.value(64 + k)
+                let v = bilinear(pass.first, pass.width, pass.height, (f64)x + offset[0] / block, (f64)y + offset[1] / block)
+                for c in 0..<(usize)3:
+                    out[c] += v[c]
+            let n = (f64)film_halation.sample_count
+            out = [out[0] / n, out[1] / n, out[2] / n]
+        elif pass.stage == 7:
+            # 3: the halo at full size, at each layer's strength, onto the scattered exposure.
             let scattered = texel(pass.second, pass.width, pass.height, x, y)
-            let halo = blurred(pass, pass.first, x, y)
+            let block = (f64)pass.block
+            let halo = bilinear(pass.first, pass.first_width, pass.first_height, ((f64)x + 0.5) / block - 0.5, ((f64)y + 0.5) / block - 0.5)
             for k in 0..<(usize)3:
                 out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
         elif pass.stage == 3:
@@ -210,11 +264,24 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
     # Scatter, across then down: exposed → one → two.
     try run_blur(&pass, exposed, exposed, one, 1, 1, 0, plan.scatter)
     try run_blur(&pass, one, one, two, 1, 0, 1, plan.scatter)
-    # Halation, across from the exposure, then down while adding to the scatter.
+    # Halation: blocks of the exposure, gathered, added back onto the scatter.
     if has_halation(&plan):
-        try run_blur(&pass, exposed, exposed, one, 1, 1, 0, plan.halation)
-        pass.weights = plan.halation_weights
-        try run_blur(&pass, one, two, exposed, 2, 0, 1, plan.halation)
+        let block = (i64)plan.halation_block
+        let low_width = blocks(width, plan.halation_block)
+        let low_height = blocks(height, plan.halation_block)
+        let low = try new f16[low_width * low_height * 4] --- in memory.heap
+        defer free(low) in memory.heap
+        let gathered = try new f16[low_width * low_height * 4] --- in memory.heap
+        defer free(gathered) in memory.heap
+        pass.block = block
+        pass.first_width = width
+        pass.first_height = height
+        try run_sized(&pass, exposed, exposed, low, 5, low_width, low_height)
+        try run_sized(&pass, low, low, gathered, 6, low_width, low_height)
+        pass.first_width = low_width
+        pass.first_height = low_height
+        pass.weights = plan.halation_strength
+        try run_sized(&pass, gathered, two, exposed, 7, width, height)
     else:
         memory.copy(exposed, two, size)
     # The neutral development, and the inhibitor's spread: exposed → one → two → one.
@@ -234,6 +301,22 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
         try run_blur(&pass, out, out, one, 1, 1, 0, plan.duplicated)
         try run_blur(&pass, one, one, out, 1, 0, 1, plan.duplicated)
     return Scene.from_pixels(width, height, out)
+
+## Stage `stage` into `out` of `width` × `height` (the halation's sizes), the
+## pass's size put back after.
+func run_sized(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, width: usize, height: usize) -> !:
+    let full_width = pass.width
+    let full_height = pass.height
+    pass.stage = stage
+    pass.first = first
+    pass.second = second
+    pass.out = out
+    pass.width = width
+    pass.height = height
+    defer:
+        pass.width = full_width
+        pass.height = full_height
+    try parallel.for_each(height, (void*)pass, run_row)
 
 func run_blur(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, dx: i64, dy: i64, blur: Blur) -> !:
     pass.stage = stage

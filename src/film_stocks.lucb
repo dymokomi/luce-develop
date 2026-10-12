@@ -63,6 +63,11 @@ pub struct Stock:
     ## Reciprocity failure per layer (red first): q, p and t0 of the stops lost
     ## at a metered exposure of t seconds, q·log2(1 + (t / t0)^p) (film_exposure.lucb).
     pub var reciprocity: f64[9]
+    ## The base under the emulsion: thickness (µm), refractive index, and the
+    ## backing against halation (film_halation.lucb).
+    pub var base_thickness: f64
+    pub var base_index: f64
+    pub var backing: i64
 
 ## The stocks, in the Film Stock menu's order (after none).
 pub let stock_count: usize = 23
@@ -222,7 +227,10 @@ pub func kodak_5298() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak EXR 200T 5293: Kodak H-1-5293t (August 2003), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_5293() -> Stock:
@@ -352,7 +360,10 @@ pub func kodak_5293() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Vision 500T 5279: Kodak H-1-5279 (March 1996), vector graphs read by dev/film/read_drawings.py. D-min: Kodak EXR 500T 5298 (none drawn).
 pub func kodak_5279() -> Stock:
@@ -482,7 +493,10 @@ pub func kodak_5279() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Vision 320T 5277: Kodak H-1-5277t, vector graphs read by dev/film/read_drawings.py.
 pub func kodak_5277() -> Stock:
@@ -612,7 +626,10 @@ pub func kodak_5277() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Fujifilm Velvia 50: Fujifilm Product Information Bulletin, FUJICHROME Velvia 50 Professional [RVP50] (Ref. AF3-0221E2): its 600 dpi graphs traced by dev/film/trace_raster_curves.py. Characteristic curves daylight, E-6, Status A (the dashed green and blue traced through their shoulders and joined to red where the three run as one, from about density 3.0 down); spectral sensitivity at 1.0 over D-min; dyes from separated exposures; one MTF curve; diffuse rms granularity 9 at 1.0 over D-min (48 um)..
 pub func fuji_velvia_50() -> Stock:
@@ -742,7 +759,10 @@ pub func fuji_velvia_50() -> Stock:
         0.30507, 0.27362, 0.37002],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393])
+        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393],
+        base_thickness = 127.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Fujifilm Neopan 100 Acros II: Fujifilm NEOPAN 100 ACROS II data sheet: its graphs traced by dev/film/trace_raster_curves.py. Characteristic curves D-76 at 20 C for 4, 7 and 10 min (7 used); the spectrogram to 5400 K daylight (the film's sensitivity times that light, relative); diffuse rms granularity 7 at 1.0 over D-min (Microfine). No MTF is published..
 pub func fuji_acros_ii() -> Stock:
@@ -872,7 +892,10 @@ pub func fuji_acros_ii() -> Stock:
         0.01459, 0.01459, 0.01459],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.04353, 2.0, 16.1643, 0.04353, 2.0, 16.1643, 0.04353, 2.0, 16.1643])
+        0.04353, 2.0, 16.1643, 0.04353, 2.0, 16.1643, 0.04353, 2.0, 16.1643],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 2)
 
 ## Kodak Vision3 500T 5219: Kodak H-1-5219t (November 2007), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_vision3_500t_5219() -> Stock:
@@ -1002,7 +1025,10 @@ pub func kodak_vision3_500t_5219() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Vision3 200T 5213: Kodak H-1-5213t (May 2010), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_vision3_200t_5213() -> Stock:
@@ -1132,7 +1158,10 @@ pub func kodak_vision3_200t_5213() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Vision3 250D 5207: Kodak H-1-5207t (April 2009), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_vision3_250d_5207() -> Stock:
@@ -1262,7 +1291,10 @@ pub func kodak_vision3_250d_5207() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Vision3 50D 5203: Kodak H-1-5203t (November 2011), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_vision3_50d_5203() -> Stock:
@@ -1392,7 +1424,10 @@ pub func kodak_vision3_50d_5203() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Kodak Portra 160: Kodak E-4051 (revised 1-25), vector graphs read by dev/film/read_drawings.py. Dye shapes: Kodak Vision3 250D 5207's (the sheet draws only the neutral). Granularity: rms 8.0 at density 1.0, grown with density.
 pub func kodak_portra_160() -> Stock:
@@ -1522,7 +1557,10 @@ pub func kodak_portra_160() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak Portra 400: Kodak E-4050 (revised 1-25), vector graphs read by dev/film/read_drawings.py. Dye shapes: Kodak Vision3 250D 5207's (the sheet draws only the neutral). Granularity: rms 9.0 at density 1.0, grown with density.
 pub func kodak_portra_400() -> Stock:
@@ -1652,7 +1690,10 @@ pub func kodak_portra_400() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak Portra 800: Kodak E-4040 (revised 1-25), vector graphs read by dev/film/read_drawings.py. Dye shapes: Kodak Vision3 250D 5207's (the sheet draws only the neutral). Granularity: rms 10.5 at density 1.0, grown with density.
 pub func kodak_portra_800() -> Stock:
@@ -1782,7 +1823,10 @@ pub func kodak_portra_800() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak Ektar 100: Kodak E-4046 (revised 1-25), vector graphs read by dev/film/read_drawings.py. Dye shapes: Kodak Vision3 250D 5207's (the sheet draws only the neutral). Granularity: rms 6.5 at density 1.0, grown with density.
 pub func kodak_ektar_100() -> Stock:
@@ -1912,7 +1956,10 @@ pub func kodak_ektar_100() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Fujifilm Pro 400H: Fujifilm AF3-176E (2005), vector graphs read by dev/film/read_drawings.py. Dye shapes: Kodak Vision3 250D 5207's (the sheet draws only the neutral). Granularity: rms 9.0 at density 1.0, grown with density.
 pub func fuji_pro_400h() -> Stock:
@@ -2042,7 +2089,10 @@ pub func fuji_pro_400h() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak Ektachrome E100: Kodak Alaris E-4000 (revised 8-18), vector graphs read by dev/film/read_drawings.py.
 pub func kodak_ektachrome_e100() -> Stock:
@@ -2172,7 +2222,10 @@ pub func kodak_ektachrome_e100() -> Stock:
         0.30507, 0.27362, 0.37002],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393])
+        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Fujifilm Velvia 100: Fujifilm AF3-202E (2005), vector graphs read by dev/film/read_drawings.py.
 pub func fuji_velvia_100() -> Stock:
@@ -2302,7 +2355,10 @@ pub func fuji_velvia_100() -> Stock:
         0.30507, 0.27362, 0.37002],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393])
+        0.13233, 2.0, 1.78393, 0.08949, 2.0, 2.25892, 0.13233, 2.0, 1.78393],
+        base_thickness = 127.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak Tri-X 400: Kodak F-4017 (revised 12-16), vector graphs read by dev/film/read_drawings.py. Normal: d76_8.
 pub func kodak_tri_x_400() -> Stock:
@@ -2432,7 +2488,10 @@ pub func kodak_tri_x_400() -> Stock:
         0.18935, 0.18935, 0.18935],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833])
+        0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Kodak T-MAX 100: Kodak F-4016 (revised 6-18), vector graphs read by dev/film/read_drawings.py. Normal: d76_7.5.
 pub func kodak_tmax_100() -> Stock:
@@ -2562,7 +2621,10 @@ pub func kodak_tmax_100() -> Stock:
         0.0, 0.0, 0.0],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.07726, 2.0, 0.99128, 0.07726, 2.0, 0.99128, 0.07726, 2.0, 0.99128])
+        0.07726, 2.0, 0.99128, 0.07726, 2.0, 0.99128, 0.07726, 2.0, 0.99128],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Eastman Double-X 5222: Kodak H-1-5222 (2003), vector graphs read by dev/film/read_drawings.py. Normal: d96_5.
 pub func eastman_double_x_5222() -> Stock:
@@ -2692,7 +2754,10 @@ pub func eastman_double_x_5222() -> Stock:
         0.11077, 0.11077, 0.11077],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833])
+        0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833, 0.19736, 2.0, 0.17833],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 2)
 
 ## Ilford HP5 Plus: HARMAN technology, ILFORD HP5 PLUS technical information (Nov 2018): its raster graphs traced by dev/film/trace_raster_curves.py. Characteristic curve ILFOTEC HC (1+31) 6 1/2 min at 20 C, intermittent agitation, on relative log exposure, placed with density 0.1 over fog at log H -2.70 (ISO 6's speed point for EI 400); wedge spectrogram to tungsten light (2850 K), relative, on the sheet's linear 0-1.0 scale. Ilford publishes no MTF and no rms granularity.. Normal: hc_1_31_6.5; rms granularity 16.0, an estimate (none published); MTF an estimate (2.0 um spread; none published).
 pub func ilford_hp5_plus() -> Stock:
@@ -2822,7 +2887,10 @@ pub func ilford_hp5_plus() -> Stock:
         0.18935, 0.18935, 0.18935],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.16181, 2.0, 1.2048, 0.16181, 2.0, 1.2048, 0.16181, 2.0, 1.2048])
+        0.16181, 2.0, 1.2048, 0.16181, 2.0, 1.2048, 0.16181, 2.0, 1.2048],
+        base_thickness = 125.0,
+        base_index = 1.48,
+        backing = 1)
 
 ## Eastman Color Negative 5251: Beeler, Morris and Simonds (Eastman Kodak), "A New, Higher Speed Color Negative Film", J. SMPTE 77 (Sept 1968), 988-990, on Type 5254, which it states is identical to Type 5251 in structure, spectral sensitivity and dyes, one stop faster. Its 300 dpi scanned figures traced by dev/film/trace_raster_curves.py: Fig. 1 spectral sensitivity (relative S, log); Fig. 2 dye absorption (densities as drawn, with the neutral); Fig. 3 printing densities onto Eastman Color Print 5385, process ECN (SD-30, 12 min at 21 C). Fig. 3's log exposure axis is unlabelled: its two ticks are taken as 1.0 log H apart and its origin set so that green is 0.80 over D-min at log H -0.70 (an estimate, see grey_log_h).. D-min and MTF: EXR 200T 5293's; granularity: rms 13, an estimate.
 pub func eastman_color_negative_5251() -> Stock:
@@ -2952,7 +3020,10 @@ pub func eastman_color_negative_5251() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## Eastman Color Negative 5254: Kodak's 1968 SMPTE paper on 5254 (the same sensitivities and dyes as 5251, a stop faster): 5251's readings moved a stop. D-min and MTF: EXR 200T 5293's; granularity: rms 15, an estimate.
 pub func eastman_color_negative_5254() -> Stock:
@@ -3082,7 +3153,10 @@ pub func eastman_color_negative_5254() -> Stock:
         0.18281, 0.21938, 0.04875],
         # Reciprocity failure per layer: dev/film/reciprocity.py.
         reciprocity = [
-        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877])
+        0.18, 2.0, 1.09955, 0.18, 2.0, 1.88877, 0.18, 2.0, 1.88877],
+        base_thickness = 132.0,
+        base_index = 1.48,
+        backing = 0)
 
 ## A color print stock as its datasheet describes it, for printing images held
 ## as printing density (film_print.lucb; film_model.lucb reads a negative's by

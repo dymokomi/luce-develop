@@ -164,6 +164,19 @@ vec3 log_exposure(vec3 e) {
     return log(max(e / 0.18, vec3(1e-8))) / log(10.0) + film_value(6.0).x;
 }
 
+// `image` at (`p.x`, `p.y`) in texels, bilinear between texel centres with
+// exact weights, held at the edges.
+vec3 bilinear(sampler2D image, vec2 p) {
+    vec2 base = floor(p);
+    vec2 f = p - base;
+    ivec2 b = ivec2(base);
+    vec3 a = fetch(image, b);
+    vec3 c = fetch(image, b + ivec2(1, 0));
+    vec3 d = fetch(image, b + ivec2(0, 1));
+    vec3 e = fetch(image, b + ivec2(1, 1));
+    return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
+}
+
 // The developed negative at texel `at`: each layer's dye, and the effective log
 // H it developed at (film.lucb's `developed`).
 void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
@@ -198,8 +211,27 @@ void main() {
         vec4 blur = blurred(first_image, at, step, params.sigma, params.lens.y, radius);
         out_color = blur.rgb;
         spent = blur.a;
-    } else if (stage == 2) {
-        out_color = fetch(second_image, at) + params.halo.rgb * blurred(first_image, at, step, params.sigma, 0.0, radius).rgb;
+    } else if (stage == 5) {
+        // Halation, 1: the exposure averaged over blocks of `radius` texels.
+        vec3 sum = vec3(0.0);
+        for (int y = 0; y < radius; y++)
+            for (int x = 0; x < radius; x++) sum += fetch(first_image, at * radius + ivec2(x, y));
+        out_color = sum / float(radius * radius);
+    } else if (stage == 6) {
+        // 2: gathered at the kernel's samples (film_halation.lucb), each an
+        // offset in µm, at this block size (`radius` texels of `pitch` µm).
+        float block = float(radius) * params.halo.w;
+        vec3 sum = vec3(0.0);
+        for (int k = 0; k < 256; k++) {
+            vec2 offset = film_value(64.0 + float(k)).rg / block;
+            sum += bilinear(first_image, vec2(at) + offset);
+        }
+        out_color = sum / 256.0;
+    } else if (stage == 7) {
+        // 3: the halo, back at full size, each layer at its strength, onto the
+        // scattered exposure.
+        vec2 low = (vec2(at) + 0.5) / float(radius) - 0.5;
+        out_color = fetch(second_image, at) + params.halo.rgb * bilinear(first_image, low);
     } else if (stage == 3) {
         // What holds development back: the dye on a negative, the first
         // developer's negative image on a slide (film.lucb's `inhibitor`).

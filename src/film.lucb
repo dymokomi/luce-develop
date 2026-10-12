@@ -16,9 +16,10 @@
 ##    on the stock's normal exposure (the 18% grey card Kodak marks on the
 ##    curves), moved by Film Exposure.
 ## 2. Light in the emulsion (film_passes.lucb). Each layer's exposure scatters
-##    (a Gaussian fitted to the stock's MTF); halation adds light that passed
-##    through and came back off the base, mostly to the red layer, weak behind
-##    rem-jet backing.
+##    (an exponential fitted to the stock's MTF); halation adds light that
+##    passed through and came back off the base (film_halation.lucb: a ring
+##    from total internal reflection, its strength the backing's), mostly to
+##    the red layer.
 ## 3. Development (`neutral`, `scan`). Each layer's characteristic curve (Status
 ##    M density over log exposure) is unmixed into the amount of its dye.
 ##    Development releases inhibitor (DIR couplers) that diffuses and holds back
@@ -60,7 +61,8 @@
 ##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
 ##          inverse gammas times contrast, Black; 9 the floors; 10 the timing
 ##          gains; 11–13 the scan's matrix to AP1; 14 each layer's scatter
-##          (exponential length, µm); 15 halation per layer, its spread (µm);
+##          (exponential length, µm); 15 halation's strength per layer, its
+##          ring's radius (µm);
 ##          16 each layer's inhibitor spread (µm); 17 each layer's most dye,
 ##          the stock's kind; 18 grain clouds' spacing (µm), 1/(2σ²), and their
 ##          calibration's a and b; 19 the grain's spread per unit of strength;
@@ -73,7 +75,7 @@
 ##          misses, so the two together hold it to about 22 bits (the weights
 ##          partly cancel, and grey must land exactly); 48–50 reciprocity
 ##          failure's q, p, t0 for the red, green and blue layers; 51 the
-##          exposure time (s)
+##          exposure time (s); 64–319 the halation's samples, offsets in µm
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -89,6 +91,7 @@ import film_paper
 from film_develop import Development
 from film_model import Model, build_model, invert3, log_h_at, lut_size, curve_samples, log_low, log_high
 import film_exposure
+import film_halation
 from film_exposure import Input
 from settings import Settings, View, defaults
 import recipe
@@ -113,12 +116,6 @@ pub let frame_widths: f64[6] = [21950.0, 24890.0, 10260.0, 52480.0, 12520.0, 704
 ## estimate of the strength ECN-2 stocks show. The diagonal, a layer holding
 ## itself back, comes from the stock's MTF (film_model.lucb).
 let interimage: f64[9] = [0.0, 0.18, 0.08, 0.15, 0.0, 0.15, 0.06, 0.18, 0.0]
-
-## Halation at 100%: the share of each layer's exposure that comes back off the
-## base, and its spread (σ, µm). Every stock here has rem-jet backing, which
-## absorbs most of it: estimates.
-let halation: f64[3] = [0.025, 0.008, 0.0005]
-let halation_spread: f64 = 70.0
 
 
 ## Filters on the camera, by the Filter node's Balance: Matched (the light
@@ -540,8 +537,15 @@ pub struct Film:
         self.put(values_row, 10, math.exp2(0.5 * warmth) * lights[0], math.exp2(-0.5 * tint) * lights[1], math.exp2(-0.5 * warmth) * lights[2], 0.0)
         self.put(values_row, 14, model.scatter[0], model.scatter[1], model.scatter[2], 0.0)
         self.put(values_row, 16, model.spread[0], model.spread[1], model.spread[2], 0.0)
+        # Halation from the stock's base and backing, or with its backing
+        # removed (as CineStill takes Vision3's rem-jet off).
         let halo = settings.get(.film_halation) / 100.0
-        self.put(values_row, 15, halation[0] * halo, halation[1] * halo, halation[2] * halo, halation_spread)
+        let backing = film_halation.no_backing if settings.get(.film_backing) > 0.5 else model.stock.backing
+        let returned = film_halation.kernel(model.stock.base_thickness, model.stock.base_index, backing)
+        let ring = 2.0 * model.stock.base_thickness * math.tan(math.asin(1.0 / model.stock.base_index))
+        self.put(values_row, 15, returned.strength[0] * halo, returned.strength[1] * halo, returned.strength[2] * halo, ring)
+        for k in 0..<film_halation.sample_count:
+            self.put(values_row, 64 + k, returned.offsets[k * 2], returned.offsets[k * 2 + 1], 0.0, 0.0)
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, 1.0 if row == 0 else 0.0, 1.0 if row == 1 else 0.0, 1.0 if row == 2 else 0.0, 0.0)
         if self.printing:
@@ -549,7 +553,7 @@ pub struct Film:
             # 0.6 per decade about the normal negative's grey (film_print.lucb),
             # where the printer lights put the print's mid-grey: no scanner's
             # gamma, matrix or timing, only the printer lights (values 10).
-            let at_grey = self.scan_of(self.neutral_at(grey))
+            let at_grey = self.scan_of(self.balanced_grey(grey))
             self.put(values_row, 7, at_grey[0], at_grey[1], at_grey[2], 1.0)
             self.put(values_row, 8, print_balance[0] / 0.6, print_balance[1] / 0.6, print_balance[2] / 0.6, 0.0)
             self.put(values_row, 9, 0.0, 0.0, 0.0, 0.0)
@@ -563,7 +567,7 @@ pub struct Film:
             self.put(values_row, 8, contrast, contrast, contrast, 0.0)
             self.put(values_row, 9, 0.0, 0.0, 0.0, 0.0)
             return
-        let at_grey = self.scan_of(self.neutral_at(grey))
+        let at_grey = self.scan_of(self.balanced_grey(grey))
         let below = self.scan_of(self.neutral_at(grey - 0.3))
         let above = self.scan_of(self.neutral_at(grey + 0.3))
         self.put(values_row, 7, at_grey[0], at_grey[1], at_grey[2], 1.0)
@@ -637,6 +641,16 @@ pub struct Film:
     ## The neutral dye amounts at `log_h`, read from the atlas.
     func neutral_at(log_h: f64) -> f64[3]:
         return self.along(neutral_row, log_h)
+
+    ## A large grey patch's dye: each layer exposed at grey plus the halo an even
+    ## field gives it (values 15), which a lab balances out as it times or
+    ## scans; halos stay where light is uneven.
+    func balanced_grey(log_h: f64) -> f64[3]:
+        let halo = self.value(15)
+        var out: f64[3]
+        for layer in 0..<(usize)3:
+            out[layer] = self.neutral_at(log_h + math.log10(1.0 + halo[layer]))[layer]
+        return out
 
     ## The scan of `amounts`, read from the atlas.
     func scan_of(amounts: f64[3]) -> f64[3]:
@@ -984,11 +998,13 @@ pub func scan(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, x: f64
         return finish(film, amounts, unbias)
     return finish(film, here.amounts, [0.0, 0.0, 0.0], matrix)
 
-## Scene light `c` through the film where nothing around it differs (no
-## scatter, halation or edges): what a large even patch gives, grained at pixel
-## (`x`, `y`) of `pitch` µm.
+## Scene light `c` through the film where nothing around it differs: what a
+## large even patch gives (scatter and edges change nothing there; halation
+## adds its even share), grained at pixel (`x`, `y`) of `pitch` µm.
 pub func develop(film: const Film*, c: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
-    let e = expose(film, c)
+    let exposed = expose(film, c)
+    let halo = film.value(15)
+    let e = [exposed[0] * (1.0 + halo[0]), exposed[1] * (1.0 + halo[1]), exposed[2] * (1.0 + halo[2])]
     let held = neutral(film, e)
     return scan(film, e, held, exhaustion(film, held), x, y, pitch, matrix)
 
