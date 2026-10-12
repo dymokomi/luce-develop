@@ -8,7 +8,8 @@
 ## layer's exposure); scatter (each layer's exponential, across then down);
 ## halation (the exposure blurred by halation's spread, across, then down while
 ## adding it to the scattered exposure); the neutral development; the
-## inhibitor's spread (across, down); develop, grain and scan.
+## inhibitor's spread (across, down); develop as dye clouds with their grain,
+## and scan.
 import memory
 from luce_std import math
 from luce_std import parallel
@@ -105,6 +106,14 @@ func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[3]:
             weights[k] += w
     return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2]]
 
+## The developed negative at (`x`, `y`) µm: the pixel there, from the exposure
+## (`first`) and the inhibitor (`second`).
+func developed_at(context: void*, x: f64, y: f64) -> film.Developed:
+    let pass = (Pass*)context
+    let px = (i64)math.floor(x / pass.pitch)
+    let py = (i64)math.floor(y / pass.pitch)
+    return film.developed(pass.film, texel(pass.first, pass.width, pass.height, px, py), texel(pass.second, pass.width, pass.height, px, py))
+
 func run_row(context: void*, row: usize, worker: usize) -> !:
     let pass = (Pass*)context
     let y = (i64)row
@@ -138,9 +147,15 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
         elif pass.stage == 3:
             out = film.neutral(pass.film, texel(pass.first, pass.width, pass.height, x, y))
         else:
-            let e = texel(pass.first, pass.width, pass.height, x, y)
-            let held = texel(pass.second, pass.width, pass.height, x, y)
-            out = film.scan(pass.film, e, held, (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
+            if pass.film.value(6)[3] > 0.0:
+                # Grain: the image made of dye clouds, each the negative at its centre.
+                let (amounts, unbias) = film.clouded(pass.film, ((f64)column + 0.5) * pass.pitch, ((f64)row + 0.5) * pass.pitch, pass.pitch,
+                                                     developed_at, context)
+                out = film.finish(pass.film, amounts, unbias)
+            else:
+                let e = texel(pass.first, pass.width, pass.height, x, y)
+                let held = texel(pass.second, pass.width, pass.height, x, y)
+                out = film.scan(pass.film, e, held, (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
         let at = (row * pass.width + column) * 4
         pass.out[at] = (f16)out[0]
         pass.out[at + 1] = (f16)out[1]

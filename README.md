@@ -117,10 +117,13 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    keep the datasheet's densities. Each layer's scatter and self-inhibition and
    the inhibitor's spread are fitted to the stock's MTF curves, within about
    20% everywhere (`film_model.lucb`).
-4. **Grain**, per layer in dye density at the stock's rms granularity, in dye
-   clouds of 16 µm on the negative, calibrated so a 48 µm aperture over the
-   rendered grain reads Kodak's number; Format sets how much negative a pixel
-   covers.
+4. **Grain.** The developed negative is made of dye clouds about 8 µm apart:
+   each takes the film's density at its own place plus its grain (how many of
+   its silver grains developed, which varies as the stock's rms granularity
+   says it does at that density), and every point is the clouds around it
+   blended. Nothing finer than the clouds survives, and the grain follows the
+   image. Calibrated so a 48 µm aperture over an even patch reads Kodak's
+   number; Format sets how much negative a pixel covers.
 5. **Scan.** The dyes' spectral density over D-min (the orange mask removed),
    inverted per channel at grey, the clear negative's floor taken out by Black,
    a matrix fitted per stock back to AP1, then the telecine's Warmth, Tint and
@@ -129,7 +132,7 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
 The passes on the negative (`film_passes.lucb` on the CPU, `film_gpu.lucb` and
 `shaders/film.frag` on the GPU) are: expose, scatter (across, down),
 halation (across, down), the neutral development, the inhibitor's spread
-(across, down), and develop with grain and scan. The renderer runs them when the
+(across, down), and develop as dye clouds with their grain, and scan. The renderer runs them when the
 photo or the settings change and draws the filmed scene; export runs them at
 full size (about 18 s for a 48-megapixel raw on the CPU, demosaic included).
 

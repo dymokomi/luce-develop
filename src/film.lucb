@@ -92,11 +92,11 @@ let interimage: f64[9] = [0.0, 0.18, 0.08, 0.15, 0.0, 0.15, 0.06, 0.18, 0.0]
 let halation: f64[3] = [0.025, 0.008, 0.0005]
 let halation_spread: f64 = 70.0
 
-## Grain cells are at least this big on the negative (µm): the dye clouds of a
-## fast negative, so finer pixels see clumps of grain, not pixel noise. The
-## grain's strength is calibrated so a 48 µm aperture reads the stock's rms
-## granularity whatever the cell (`grain_gain`; the size is an estimate).
-let grain_cell: f64 = 16.0
+## Dye clouds are this far apart on the negative (µm), or a pixel when pixels are
+## bigger: about the clouds of a fast negative (an estimate). Their grain is
+## calibrated so a 48 µm aperture reads the stock's rms granularity whatever
+## their size (`grain_gain`).
+let grain_cell: f64 = 8.0
 
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
 ## setting is one more), for building a menu.
@@ -369,37 +369,13 @@ func hashed(px: u32, py: u32) -> f64:
     x = x ^ (x >> 16)
     return (f64)(x >> 8) / 16777216.0
 
-## Grain at (`x`, `y`) in cells, for layer `seed`: one dye cloud per cell, at a
-## random place in it with a random strength (−1..1), each a Gaussian half a
-## cell wide, summed over the neighbouring cells. Round clumps, the same from
-## any direction. Its spread at a point is 0.509 of the strength's.
-func noise(at_x: f64, at_y: f64, seed: u32) -> f64:
-    # One cell in, so the neighbours of the first cells are not negative.
-    let x = at_x + 1.0
-    let y = at_y + 1.0
-    let cx = (i64)math.floor(x)
-    let cy = (i64)math.floor(y)
-    var sum = 0.0
-    for dy in -1..=1:
-        for dx in -1..=1:
-            let kx = (u32)(cx + dx) +% seed *% 7919
-            let ky = (u32)(cy + dy) +% seed *% 104729
-            let px = (f64)(cx + dx) + hashed(kx, ky)
-            let py = (f64)(cy + dy) + hashed(kx +% 0x9e3779b9, ky)
-            let strength = hashed(kx, ky +% 0x85ebca6b) * 2.0 - 1.0
-            let r2 = (x - px) * (x - px) + (y - py) * (y - py)
-            sum += strength * math.exp(-2.0 * r2)
-    return sum
-
-## How strong grain cells of `cell` µm must be for a 48 µm aperture (a 42.5 µm
-## square of the same area) over them to read a granularity of 1: measured on
-## `noise`, 0.86·(1 − e^(−s/1.55))/s for an aperture s cells wide, within 7%;
-## cells wider than the aperture are pixels, whose own spread then follows it.
+## How strong grain must be, for clouds `cell` µm apart, for a 48 µm aperture (a
+## 42.5 µm square of the same area) over a patch of them to read a granularity
+## of 1: measured on `clouded`'s blend, 0.56·(1 − e^(−s/1.35))/s for an
+## aperture s clouds wide, within 6%.
 func grain_gain(cell: f64) -> f64:
     let side = 42.5 / cell
-    if side >= 1.0:
-        return side / (0.86 * (1.0 - math.exp(-side / 1.55)))
-    return side / (0.86 * (1.0 - math.exp(-1.0 / 1.55)))
+    return side / (0.56 * (1.0 - math.exp(-side / 1.35)))
 
 ## The three layers' exposure to scene light `c` (AP1): relative, 0.18 for a
 ## grey card at normal exposure (film.frag's `expose`).
@@ -426,37 +402,76 @@ pub func neutral(film: const Film*, e: f64[3]) -> f64[3]:
     let log_h = log_exposure(film, e)
     return [film.curve(neutral_row, 0, log_h[0]), film.curve(neutral_row, 1, log_h[1]), film.curve(neutral_row, 2, log_h[2])]
 
+## A place on the developed negative: each layer's dye, and the effective log
+## H it developed at (which sets its granularity).
+pub struct Developed:
+    pub var amounts: f64[3]
+    pub var effective: f64[3]
+
 ## Exposure `e` developed, held back by the inhibitor from `held` (the neutral
-## dye around, blurred by its spread), grained at pixel (`x`, `y`) (centres, in
-## scene pixels of `pitch` µm), and scanned back to AP1. `matrix` false skips
-## the grain, the scan's matrix and the timing (for fitting the matrix).
-## film.frag's stage 4.
-pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
+## dye around, blurred by its spread).
+pub func developed(film: const Film*, e: f64[3], held: f64[3]) -> Developed:
     let log_h = log_exposure(film, e)
-    var amounts: f64[3]
-    var effective_h: f64[3]
+    var out: Developed
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
-        effective_h[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2])
-        amounts[k] = film.curve(developed_row, k, effective_h[k])
+        out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2])
+        out.amounts[k] = film.curve(developed_row, k, out.effective[k])
+    return out
+
+## The negative as dye clouds, at (`x`, `y`) µm on it: one cloud per cell (`cell`
+## µm, at least 8, at least a pixel of `pitch` µm) at a random place in it, each
+## taking the developed film at its own centre (`field`, from `context`) plus
+## its grain, a random strength (−1..1, per layer) times the stock's granularity
+## there; the point is the clouds around it blended by Gaussians half a cell
+## wide. So the image is made of the clouds: nothing finer than them survives,
+## and the grain follows what is on the negative. The second result is what
+## inverting the grain would add on average, which the scan takes back off (the
+## scan inverts density exponentially, so even grain would brighten each channel
+## by exp((ln 10·γ⁻¹·σ)² / 2); a scanner averaging light over the grain does
+## not; σ is the blend's spread at a point, 0.326 of the strength).
+pub func clouded(film: const Film*, x: f64, y: f64, pitch: f64, field: func(void*, f64, f64) -> Developed, context: void*) -> (f64[3], f64[3]):
     let v6 = film.value(6)
     let v8 = film.value(8)
-    # Grain, and what it would add on average once inverted: the scan inverts
-    # density exponentially, so even noise would brighten each channel by
-    # exp((ln 10·γ⁻¹·σ)² / 2), which a scanner averaging light over the grain
-    # does not do. The density makes up for it (σ the noise's own spread at a
-    # point, 0.509 of its strength).
-    var unbias: f64[3] = [0.0, 0.0, 0.0]
-    if v6[3] > 0.0 and matrix:
-        let cell = math.max(grain_cell, pitch)
-        let scale = v6[3] * grain_gain(cell)
-        for k in 0..<(usize)3:
-            let amplitude = film.curve(grain_row, k, effective_h[k]) * scale
-            amounts[k] += noise(x * pitch / cell, y * pitch / cell, (u32)k) * amplitude
-            let sigma = 0.509 * amplitude
-            unbias[k] = 0.5 * 2.302585092994046 * v8[k] * sigma * sigma
-    let d = film.scanned_lut(amounts, v6[1])
+    let cell = math.max(grain_cell, pitch)
+    let scale = v6[3] * grain_gain(cell)
+    # One cell in, so the first cells' neighbours are not negative.
+    let u = x / cell + 1.0
+    let v = y / cell + 1.0
+    let cx = (i64)math.floor(u)
+    let cy = (i64)math.floor(v)
+    var sum: f64[3] = [0.0, 0.0, 0.0]
+    var spread: f64[3] = [0.0, 0.0, 0.0]
+    var total = 0.0
+    for dy in -1..=1:
+        for dx in -1..=1:
+            let kx = (u32)(cx + dx)
+            let ky = (u32)(cy + dy)
+            # Places in 1/256 of a cell, exact in single floats too.
+            let px = (f64)(cx + dx) + math.floor(hashed(kx, ky) * 256.0) / 256.0
+            let py = (f64)(cy + dy) + math.floor(hashed(kx +% 0x9e3779b9, ky) * 256.0) / 256.0
+            let w = math.exp(-2.0 * ((u - px) * (u - px) + (v - py) * (v - py)))
+            let place = field(context, (px - 1.0) * cell, (py - 1.0) * cell)
+            for k in 0..<(usize)3:
+                let strength = hashed(kx +% (u32)k *% 7919, ky +% 0x85ebca6b +% (u32)k *% 104729) * 2.0 - 1.0
+                let amplitude = film.curve(grain_row, k, place.effective[k]) * scale
+                sum[k] += w * (place.amounts[k] + strength * amplitude)
+                spread[k] += w * amplitude
+            total += w
+    var amounts: f64[3]
+    var unbias: f64[3]
+    for k in 0..<(usize)3:
+        amounts[k] = sum[k] / total
+        let sigma = 0.326 * spread[k] / total
+        unbias[k] = 0.5 * 2.302585092994046 * v8[k] * sigma * sigma
+    return (amounts, unbias)
+
+## Dye `amounts` scanned back to AP1, less `unbias` in density. `matrix` false
+## skips the scan's matrix and the timing (for fitting the matrix).
+pub func finish(film: const Film*, amounts: f64[3], unbias: f64[3], matrix: bool = true) -> f64[3]:
+    let d = film.scanned_lut(amounts, film.value(6)[1])
     let v7 = film.value(7)
+    let v8 = film.value(8)
     let v9 = film.value(9)
     var linear: f64[3]
     for k in 0..<(usize)3:
@@ -471,6 +486,22 @@ pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch:
     return [math.max((m0[0] * linear[0] + m0[1] * linear[1] + m0[2] * linear[2]) * gains[0], 0.0),
             math.max((m1[0] * linear[0] + m1[1] * linear[1] + m1[2] * linear[2]) * gains[1], 0.0),
             math.max((m2[0] * linear[0] + m2[1] * linear[1] + m2[2] * linear[2]) * gains[2], 0.0)]
+
+func same_everywhere(context: void*, x: f64, y: f64) -> Developed:
+    _ = x
+    _ = y
+    return *(Developed*)context
+
+## Exposure `e`, held back by `held`, where the negative is the same all around
+## (a large even patch), grained at pixel (`x`, `y`) (centres, in pixels of
+## `pitch` µm) and scanned back to AP1. `matrix` false skips the grain, the
+## scan's matrix and the timing.
+pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
+    var here = developed(film, e, held)
+    if film.value(6)[3] > 0.0 and matrix:
+        let (amounts, unbias) = clouded(film, x * pitch, y * pitch, pitch, same_everywhere, (void*)&here)
+        return finish(film, amounts, unbias)
+    return finish(film, here.amounts, [0.0, 0.0, 0.0], matrix)
 
 ## Scene light `c` through the film where nothing around it differs (no
 ## scatter, halation or edges): what a large even patch gives, grained at pixel
@@ -590,24 +621,33 @@ test "grain leaves a patch's average color where it was":
         assert(math.abs(means[3 + k] / means[k] - 1.0) < 0.04)
 
 test "grain through a 48 µm aperture reads its granularity":
-    # 16 µm cells sampled every 2 µm, averaged over 21 × 21 samples (42 µm).
+    var settings = defaults_with_film()
+    var film = Film()
+    film.prepare(&settings) catch failure:
+        assert(false)
+        return
+    defer film.release()
+    # An even patch at grey, sampled every 2 µm, through 21 × 21 samples (42 µm):
+    # the green layer's density spread against its granularity there.
+    let e = expose(&film, [0.18, 0.18, 0.18])
+    var here = developed(&film, e, neutral(&film, e))
+    let wanted = film.curve(grain_row, 1, here.effective[1])
     var sum = 0.0
     var squares = 0.0
-    let blocks = 40
+    let blocks = 30
     for by in 0..<blocks:
         for bx in 0..<blocks:
             var mean = 0.0
             for y in 0..<21:
                 for x in 0..<21:
-                    let px = (f64)(bx * 21 + x) * 2.0 / 16.0
-                    let py = (f64)(by * 21 + y) * 2.0 / 16.0
-                    mean += noise(px, py, 1) * grain_gain(16.0) / 441.0
+                    let (amounts, _) = clouded(&film, (f64)(bx * 21 + x) * 2.0, (f64)(by * 21 + y) * 2.0, 2.0, same_everywhere, (void*)&here)
+                    mean += (amounts[1] - here.amounts[1]) / 441.0
             sum += mean
             squares += mean * mean
     let count = (f64)(blocks * blocks)
     let deviation = math.sqrt(squares / count - (sum / count) * (sum / count))
-    print(f"grain through 42 µm: {deviation}")
-    assert(math.abs(deviation - 1.0) < 0.12)
+    print(f"grain through 42 µm: {deviation / wanted} of the granularity")
+    assert(math.abs(deviation / wanted - 1.0) < 0.12)
 
 func defaults_with_film() -> Settings:
     var out = defaults()

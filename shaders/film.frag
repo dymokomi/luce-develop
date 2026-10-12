@@ -71,25 +71,9 @@ float hashed(uvec2 p) {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
     return float(x >> 8) / 16777216.0;
 }
-// Grain: one dye cloud per cell (film.lucb's `noise`).
-float film_noise(vec2 at_p, uint seed) {
-    vec2 p = at_p + 1.0;
-    ivec2 c = ivec2(floor(p));
-    float sum = 0.0;
-    for (int dy = -1; dy <= 1; dy++) {
-        for (int dx = -1; dx <= 1; dx++) {
-            uvec2 k = uvec2(c + ivec2(dx, dy)) + seed * uvec2(7919u, 104729u);
-            vec2 at = vec2(c + ivec2(dx, dy)) + vec2(hashed(k), hashed(k + uvec2(0x9e3779b9u, 0u)));
-            float strength = hashed(k + uvec2(0u, 0x85ebca6bu)) * 2.0 - 1.0;
-            vec2 d = p - at;
-            sum += strength * exp(-2.0 * dot(d, d));
-        }
-    }
-    return sum;
-}
 float grain_gain(float cell) {
     float side = 42.5 / cell;
-    return side / (0.86 * (1.0 - exp(-max(side, 1.0) / 1.55)));
+    return side / (0.56 * (1.0 - exp(-side / 1.35)));
 }
 
 vec3 fetch(sampler2D image, ivec2 at) {
@@ -132,6 +116,15 @@ vec3 log_exposure(vec3 e) {
     return log(max(e / 0.18, vec3(1e-8))) / log(10.0) + film_value(6.0).x;
 }
 
+// The developed negative at texel `at`: each layer's dye, and the effective log
+// H it developed at (film.lucb's `developed`).
+void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
+    vec3 log_h = log_exposure(fetch(first_image, at));
+    vec3 held = fetch(second_image, at);
+    effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held));
+    amounts = film_curve(82.0, effective);
+}
+
 void main() {
     ivec2 at = ivec2(floor(gl_FragCoord.xy - params.rect.xy));
     int stage = int(params.stage.x + 0.5);
@@ -156,22 +149,44 @@ void main() {
     } else if (stage == 3) {
         out_color = film_curve(81.0, log_exposure(fetch(first_image, at)));
     } else {
-        vec3 log_h = log_exposure(fetch(first_image, at));
-        vec3 held = fetch(second_image, at);
-        vec3 effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held));
-        vec3 amounts = film_curve(82.0, effective);
+        vec3 amounts;
+        vec3 effective;
         vec4 v6 = film_value(6.0);
         vec4 v8 = film_value(8.0);
-        // Grain, less what inverting it would add on average (film.lucb's scan).
         vec3 unbias = vec3(0.0);
         if (v6.w > 0.0) {
+            // The image made of dye clouds, each the negative at its centre plus
+            // its grain (film.lucb's `clouded`).
             float pitch = params.halo.w;
-            float cell = max(16.0, pitch);
-            vec2 p = (vec2(at) + 0.5) * pitch / cell;
-            vec3 amplitude = film_curve(83.0, effective) * (v6.w * grain_gain(cell));
-            amounts += vec3(film_noise(p, 0u), film_noise(p, 1u), film_noise(p, 2u)) * amplitude;
-            vec3 sigma = 0.509 * amplitude;
+            float cell = max(8.0, pitch);
+            float scale = v6.w * grain_gain(cell);
+            vec2 p = (vec2(at) + 0.5) * pitch / cell + 1.0;
+            ivec2 c = ivec2(floor(p));
+            vec3 sum = vec3(0.0);
+            vec3 spread = vec3(0.0);
+            float total = 0.0;
+            for (int dy = -1; dy <= 1; dy++) {
+                for (int dx = -1; dx <= 1; dx++) {
+                    uvec2 k = uvec2(c + ivec2(dx, dy));
+                    vec2 centre = vec2(c + ivec2(dx, dy)) + floor(vec2(hashed(k), hashed(k + uvec2(0x9e3779b9u, 0u))) * 256.0) / 256.0;
+                    vec2 d = p - centre;
+                    float w = exp(-2.0 * dot(d, d));
+                    vec3 place_amounts;
+                    vec3 place_effective;
+                    developed(ivec2(floor((centre - 1.0) * cell / pitch)), place_amounts, place_effective);
+                    vec3 strength = vec3(hashed(k + uvec2(0u, 0x85ebca6bu)), hashed(k + uvec2(7919u, 0x85ebca6bu + 104729u)),
+                                         hashed(k + uvec2(15838u, 0x85ebca6bu + 209458u))) * 2.0 - 1.0;
+                    vec3 amplitude = film_curve(83.0, place_effective) * scale;
+                    sum += w * (place_amounts + strength * amplitude);
+                    spread += w * amplitude;
+                    total += w;
+                }
+            }
+            amounts = sum / total;
+            vec3 sigma = 0.326 * spread / total;
             unbias = 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
+        } else {
+            developed(at, amounts, effective);
         }
         vec3 d = film_scan(amounts, v6.y);
         vec4 v7 = film_value(7.0);
