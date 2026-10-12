@@ -253,7 +253,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     var out = Rendering(develop = develop, source = source, width = width, height = height)
-    out.develop.film.prepare(settings, source.shot_temperature, source.shot_tint) catch failure:
+    out.develop.film.prepare(settings, try source.film_input(&camera)) catch failure:
         out.develop.film.release()
         error(failure.code, failure.message)
     return out

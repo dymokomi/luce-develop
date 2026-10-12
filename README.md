@@ -117,9 +117,14 @@ scene's own size and before the develop, so the tone and color tools grade the
 scan and the view stays the only tone scale. Everything comes from the stock's
 datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
 
-1. **Exposure.** A color gets a smooth spectrum (luce-color's `spectral`
-   upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
-   each layer is exposed to it through its spectral sensitivity. Middle grey
+1. **Exposure.** What the camera recorded becomes what each layer would have
+   received (`film_exposure.lucb`): a third-order root-polynomial from the
+   camera's values to the layers' exposures, fitted on 190 real surfaces and
+   blue sky under the light on set, through the camera's spectral
+   sensitivities (luce-color's `camera`: measured, or estimated from the raw's
+   color matrix) and the layers'. Other pictures come as XYZ, the CIE
+   observer their camera. Each layer is relative to the stock's balance light
+   (3200 K for tungsten stocks). Middle grey
    lands on the stock's normal exposure; Exposure over- or underexposes the
    negative, which the scan does not take back. Filter decides the light: Matched (the default)
    balances it to the stock, as a white balance does; with None or 85, the

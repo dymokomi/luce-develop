@@ -412,7 +412,8 @@ pub struct Renderer:
                 which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
             let held = which.tables_texture else return
             try held.upload(u8[]((u8*)texels.data, texels.length * 2))
-            try which.film.prepare(&which.settings, self.shown.shot_temperature, self.shown.shot_tint)
+            let camera = film.camera_settings(&which.settings)
+            try which.film.prepare(&which.settings, try self.shown.film_input(&camera))
             let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
             defer free(atlas) in memory.heap
             for at in 0..<atlas.length:

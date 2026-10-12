@@ -1,6 +1,6 @@
 ## A film stock's model: everything that depends on the stock alone, built
-## once when it is chosen (film.lucb holds it for some settings). Its spectral
-## exposure grid, its characteristic curves unmixed into dye amounts, the scan of
+## once when it is chosen (film.lucb holds it for some settings). Its layers'
+## spectral sensitivities, its characteristic curves unmixed into dye amounts, the scan of
 ## every mix of dyes, and the sharpness its MTF curves show, fitted.
 import memory
 from luce_std import math
@@ -11,10 +11,8 @@ import view
 from film_stocks import Stock
 import film_stocks
 
-## The tables' sizes: the scan's cube, the exposure grid, the curves' samples and
-## their log H range.
+## The tables' sizes: the scan's cube, the curves' samples and their log H range.
 pub let lut_size: usize = 33
-pub let grid_size: usize = 48
 pub let curve_samples: usize = 1024
 pub let log_low: f64 = -4.5
 pub let log_high: f64 = 2.5
@@ -63,14 +61,8 @@ pub struct Model:
     pub var meter: Densitometer
     ## D-min's spectral density as the scan reads it.
     pub var base: f64[3]
-    ## AP1 to XYZ adapted to the stock's balance light.
-    pub var to_film: f64[9]
-    ## Layer exposures over the xy grid, rows of y (48 × 48 × 3).
-    pub var exposure: f64[]
-    ## Each grid cell's spectrum (Y = 1; rows of y, 81 samples each), each
-    ## layer's sensitivity (linear), and the balance light, for exposing the grid
-    ## through a filter (`expose_grid`).
-    pub var spectra: f64[]
+    ## Each layer's spectral sensitivity (linear, its peak 1), and the light the
+    ## stock is balanced for (a black body, or CIE daylight for daylight stocks).
     pub var sensitivity: f64[243]
     pub var light: spectral.Spectrum
     ## Neutral dye amounts over log H (1024 × 3), and rms granularity.
@@ -92,36 +84,9 @@ pub struct Model:
     pub var spread: f64[3]
 
     pub func release():
-        release_table(&self.exposure)
-        release_table(&self.spectra)
         release_table(&self.neutral)
         release_table(&self.grain)
         release_table(&self.scan)
-
-    ## The grid's layer exposures (rows of y, three per cell) through a filter
-    ## that passes `filter` of each sample: each layer relative to its exposure to
-    ## the balance light, the whole raised by the filter factor (the light a grey
-    ## loses through it), as a photographer opens up for a filter.
-    pub func expose_grid(filter: const f64[81], out: f64[]):
-        var unfiltered = 0.0
-        var filtered = 0.0
-        var light_exposure: f64[3]
-        for layer in 0..<(usize)3:
-            var sum = 0.0
-            for at in 0..<spectral.samples:
-                let through = self.light.values[at] * self.sensitivity[layer * 81 + at]
-                sum += through
-                filtered += through * filter[at]
-            light_exposure[layer] = sum
-            unfiltered += sum
-        let factor = unfiltered / math.max(filtered, 1.0e-12)
-        for cell in 0..<grid_size * grid_size:
-            let spectrum = self.spectra[cell * 81..<cell * 81 + 81]
-            for layer in 0..<(usize)3:
-                var sum = 0.0
-                for at in 0..<spectral.samples:
-                    sum += spectrum[at] * filter[at] * self.sensitivity[layer * 81 + at]
-                out[cell * 3 + layer] = sum / light_exposure[layer] * factor
 
     ## A slide of dye `amounts` on a lightbox of `light`, its clear base white,
     ## the eye adapted to it: the scene light (AP1, log2 over grey) the ACES view
@@ -323,33 +288,14 @@ pub func build_model(stock: Stock) -> Model!:
     var out = Model(stock = stock, meter = status_m())
     errdefer out.release()
     out.base = out.meter.read(stock.d_min)
-    # The balance light, and the matrix into XYZ adapted to it.
-    let light = spectral.planck(stock.kelvin)
-    let white = light.xyz()
-    let balance = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
-    out.to_film = xyz.multiply(xyz.adapt(xyz.aces_white, balance), xyz.rgb_to_xyz(xyz.aces_ap1)).m
-    # Each layer's sensitivity, linear; each grid cell's spectrum; the grid
-    # exposed through no filter.
-    out.light = light
+    # The balance light, and each layer's sensitivity, linear.
+    out.light = spectral.illuminant(stock.kelvin)
     for layer in 0..<(usize)3:
         var peak = -1.0e9
         for at in 0..<spectral.samples:
             peak = math.max(peak, stock.sensitivity[layer * 81 + at])
         for at in 0..<spectral.samples:
             out.sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
-    var upsampler = try spectral.upsampler(light, grid_size)
-    defer upsampler.release()
-    out.spectra = try new f64[grid_size * grid_size * 81] --- in memory.heap
-    for j in 0..<grid_size:
-        for i in 0..<grid_size:
-            let spectrum = upsampler.spectrum(i, j)
-            for at in 0..<spectral.samples:
-                out.spectra[(j * grid_size + i) * 81 + at] = spectrum.values[at]
-    out.exposure = try new f64[grid_size * grid_size * 3] --- in memory.heap
-    var clear: f64[81]
-    for at in 0..<spectral.samples:
-        clear[at] = 1.0
-    out.expose_grid(clear, out.exposure)
     # Neutral development: the dye amounts that read each curve's densities.
     out.neutral = try new f64[curve_samples * 3] --- in memory.heap
     out.grain = try new f64[curve_samples * 3] --- in memory.heap

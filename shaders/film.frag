@@ -40,9 +40,8 @@ layout(set = 0, binding = 4) uniform sampler2D film;
 
 const float table_width = 1024.0;
 const float film_width = 1089.0;
-const float film_rows = 85.0;
+const float film_rows = 37.0;
 const float film_lut_size = 33.0;
-const float film_grid = 48.0;
 
 vec4 value(float at) {
     return texture(tables, vec2((at + 0.5) / table_width, 3.5 / 4.0));
@@ -62,8 +61,10 @@ vec3 film_texels(float x, float y) {
     vec3 e = texelFetch(film, min(b + ivec2(1, 1), top), 0).rgb;
     return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
 }
+// The values row's column `at`, read exactly: its neighbours hold unrelated
+// numbers (filtering would blend a little of them in).
 vec4 film_value(float at) {
-    return texture(film, vec2((at + 0.5) / film_width, 84.5 / film_rows));
+    return texelFetch(film, ivec2(int(at + 0.5), int(film_rows) - 1), 0);
 }
 // A curve row at log H, all three channels at that place.
 vec3 film_along(float row, float log_h) {
@@ -131,14 +132,22 @@ float lens_radius(vec2 uv, float aspect) {
     return length(p) / length(vec2(aspect, 1.0));
 }
 
+// The camera's values, then each layer's root-polynomial of them (thirteen
+// terms, two texels of weights each), floored at 2% of the three's mean
+// (film_exposure.lucb's `apply`).
 vec3 expose(vec3 c) {
-    vec3 xyz = vec3(dot(film_value(0.0).rgb, c), dot(film_value(1.0).rgb, c), dot(film_value(2.0).rgb, c));
-    float sum = xyz.x + xyz.y + xyz.z;
+    vec3 v = max(vec3(dot(film_value(0.0).rgb, c), dot(film_value(1.0).rgb, c), dot(film_value(2.0).rgb, c)), vec3(0.0));
+    float t[13] = float[13](v.r, v.g, v.b, sqrt(v.r * v.g), sqrt(v.g * v.b), sqrt(v.r * v.b),
+                           pow(v.r * v.r * v.g, 1.0 / 3.0), pow(v.r * v.r * v.b, 1.0 / 3.0), pow(v.g * v.g * v.r, 1.0 / 3.0),
+                           pow(v.g * v.g * v.b, 1.0 / 3.0), pow(v.b * v.b * v.r, 1.0 / 3.0), pow(v.b * v.b * v.g, 1.0 / 3.0),
+                           pow(v.r * v.g * v.b, 1.0 / 3.0));
+    vec3 e = vec3(0.0);
+    // Each weight in two halves (film.lucb): the half float and what it misses.
+    for (int k = 0; k < 13; k++) e += (film_value(22.0 + float(k)).rgb + film_value(35.0 + float(k)).rgb) * t[k];
+    e = max(e, vec3(0.02 * (e.r + e.g + e.b) / 3.0));
     // Flashing: an even share of grey's exposure (film.lucb's `expose`).
     float flash = film_value(21.0).x * 0.18;
-    if (sum <= 1e-12 || xyz.y <= 1e-12) return vec3(1e-8 + flash);
-    vec2 g = clamp(vec2(xyz.x / sum / 0.8, xyz.y / sum / 0.9), 0.0, 1.0) * (film_grid - 1.0);
-    return film_texels(g.x, 33.0 + g.y) * xyz.y + flash;
+    return max(e, vec3(1e-8)) + flash;
 }
 
 vec3 log_exposure(vec3 e) {
@@ -153,7 +162,7 @@ void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
     vec3 held = around.rgb;
     effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held))
               - film_value(20.0).z * around.a;
-    amounts = film_curve(82.0, effective);
+    amounts = film_curve(34.0, effective);
 }
 
 void main() {
@@ -184,7 +193,7 @@ void main() {
     } else if (stage == 3) {
         // What holds development back: the dye on a negative, the first
         // developer's negative image on a slide (film.lucb's `inhibitor`).
-        vec3 dye = film_curve(81.0, log_exposure(fetch(first_image, at)));
+        vec3 dye = film_curve(33.0, log_exposure(fetch(first_image, at)));
         vec4 v17 = film_value(17.0);
         out_color = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
         spent = dot(out_color / max(v17.rgb, vec3(1e-9)), vec3(1.0 / 3.0));
@@ -220,7 +229,7 @@ void main() {
                                          hashed(k + uvec2(15838u, 0x85ebca6bu + 209458u))) * 2.0 - 1.0;
                     // Black and white: one grain of silver for all three.
                     if (kind > 1.5) strength = vec3(strength.r);
-                    vec3 amplitude = film_curve(83.0, place_effective) * scale;
+                    vec3 amplitude = film_curve(35.0, place_effective) * scale;
                     sum += w * (place_amounts + strength * amplitude);
                     spread += w * amplitude;
                     total += w;

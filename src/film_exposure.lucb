@@ -1,0 +1,245 @@
+## Exposure: how much light each layer of the film receives from a pixel, from
+## what the camera recorded there. The photo's values are a camera's measurement
+## of the scene's light: three numbers, each the light's spectrum weighted by one
+## of the camera's spectral sensitivities. The film weighs the same spectrum by
+## its own three layers' sensitivities, which are not a mix of the camera's, so
+## no exact conversion exists: colors the camera sees alike, the film may not.
+##
+## The conversion here is learned from real surfaces (the 190 reflectances of
+## luce_color's camera module, and blue sky) under the light on set: each lit by it, as the
+## camera saw it and as the film would have, and a root-polynomial (Finlayson,
+## Mackiewicz and Hurlbert, 2015) of the third order fitted from the one to the
+## other, weighted so dark colors count as much as bright ones (errors in stops):
+##
+##     e = Σ wₖ·tₖ,  t = (r, g, b, √rg, √gb, √rb, ∛r²g, ∛r²b, ∛g²r, ∛g²b, ∛b²r, ∛b²g, ∛rgb)
+##
+## Every term doubles when the light does, so e does too and exposure keeps its
+## meaning; the roots let it bend where the camera's and film's curves differ. In a
+## simulation over 15 cameras, 4 stocks and 3 lights (research_notes/Physical
+## film process simulation) it missed the film's exposure by 0.08 stops on
+## average with the camera's measured curves and 0.10 with curves estimated from
+## its color matrix, where a smooth spectrum guessed from the color (the method
+## before it) missed by 0.21; on blue sky, 0.10. Pictures that are not raws come as color: their
+## "camera" is the CIE observer, and the same fit takes XYZ to the film (0.06).
+## A floor keeps each layer at least 2% of the three's mean, as a saturated
+## color seen by a camera unlike the film's could otherwise fit below zero.
+from luce_std import math
+from luce_color import spectral
+from luce_color.spectral import Spectrum, samples
+from luce_color import camera
+from luce_color.camera import Response
+import film_stocks
+
+## What the film needs to know about the photo: for a raw (`raw`), the
+## camera's response in the units of the scene's values (its curves times the
+## as-shot white balance) and the matrix, row major, from the AP1 light the
+## film receives back into those units (the inverse of the scene's own, without
+## the exposure). Other pictures are XYZ to the film, seen by the observer.
+pub struct Input:
+    pub var response: Response
+    pub var to_camera: f64[9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    pub var raw: bool = false
+    ## The light the photo was taken under, as the camera's white balance read
+    ## it, unless the White Balance says otherwise.
+    pub var shot_kelvin: f64 = 6500.0
+    pub var shot_tint: f64 = 0.0
+
+## How many terms the conversion has.
+pub let term_count: usize = 13
+
+## The fitted conversion: per term, its weight for each layer (red, green, blue).
+pub struct Fit:
+    pub var weights: f64[39]
+
+## The terms of camera values `c` (negative values taken as none).
+pub func terms(c: f64[3]) -> f64[13]:
+    let r = math.max(c[0], 0.0)
+    let g = math.max(c[1], 0.0)
+    let b = math.max(c[2], 0.0)
+    return [r, g, b, math.sqrt(r * g), math.sqrt(g * b), math.sqrt(r * b), math.cbrt(r * r * g), math.cbrt(r * r * b),
+            math.cbrt(g * g * r), math.cbrt(g * g * b), math.cbrt(b * b * r), math.cbrt(b * b * g), math.cbrt(r * g * b)]
+
+## The layers' exposures to camera values `c` (relative: white under the light,
+## brought to Y = 1 by the scene's matrix, gives each layer its share of the
+## balance light's).
+pub func apply(fitted: const Fit*, c: f64[3]) -> f64[3]:
+    let t = terms(c)
+    var e: f64[3] = [0.0, 0.0, 0.0]
+    for k in 0..<term_count:
+        for layer in 0..<(usize)3:
+            e[layer] += fitted.weights[k * 3 + layer] * t[k]
+    let floor = 0.02 * (e[0] + e[1] + e[2]) / 3.0
+    return [math.max(e[0], floor), math.max(e[1], floor), math.max(e[2], floor)]
+
+## Sky seen beside sunlit surfaces: daylight of these temperatures over the
+## 5500 K sun's, at these strengths, weighed `sky_weight` surfaces each. The
+## training surfaces are pigments; without the sky's smooth spectra the fit
+## pulled blue skies toward grey on Velvia (0.17 stops off, 0.10 with them).
+let sky_kelvins: f64[7] = [8000.0, 10000.0, 14000.0, 17000.0, 22000.0, 30000.0, 40000.0]
+let sky_levels: f64[2] = [0.15, 0.4]
+let sky_weight: f64 = 6.0
+
+## What a fit is fitted from: per layer, its normal equations (13 × 13) and
+## right-hand side, and how readings become terms and exposures.
+struct Fitting:
+    var normal: f64[507]
+    var right: f64[39]
+    var response: const Response*
+    var scale: f64
+    var scene: const Spectrum*
+    var film: const Spectrum*
+    var filter: const f64[81]*
+    var sensitivity: const f64[243]*
+    var white: f64[3]
+    var factor: f64
+
+    ## Add a surface of reflectance `surface`, weighed `weight`, its error
+    ## measured relative to its exposure (in stops, near enough).
+    func add(surface: const f64[81], weight: f64):
+        var seen: Spectrum
+        for at in 0..<samples:
+            seen.values[at] = surface[at] * self.scene.values[at]
+        let raw = self.response.of(&seen)
+        let t = terms([raw[0] * self.scale, raw[1] * self.scale, raw[2] * self.scale])
+        for layer in 0..<(usize)3:
+            var sum = 0.0
+            for at in 0..<samples:
+                sum += surface[at] * self.film.values[at] * (*self.filter)[at] * (*self.sensitivity)[layer * 81 + at]
+            let e = sum / self.white[layer] * self.factor
+            let w = weight / math.max(e, 1.0e-4)
+            let n = term_count
+            for a in 0..<n:
+                for k in 0..<n:
+                    self.normal[layer * n * n + a * n + k] += t[a] * t[k] * w * w
+                self.right[layer * n + a] += t[a] * e * w * w
+
+## Fit the conversion for camera `response` (scaled by `scale`, so white under
+## `scene` gives Y = 1 in AP1) under the light on set `scene`, onto film of
+## layer sensitivities `sensitivity` (linear, 81 per layer) exposed by `film`
+## (the light through the camera's filters, at the strength they let through),
+## through color filter `filter`, each layer relative to its exposure to
+## `balance` (the light the stock is balanced for) and opened up by `factor`.
+pub func fit(response: const Response*, scale: f64, scene: const Spectrum*, film: const Spectrum*, filter: const f64[81],
+             sensitivity: const f64[243], balance: const Spectrum*, factor: f64) -> Fit:
+    var fitting = Fitting(response = response, scale = scale, scene = scene, film = film, filter = &filter,
+                          sensitivity = &sensitivity, factor = factor)
+    for k in 0..<(usize)507:
+        fitting.normal[k] = 0.0
+    for k in 0..<(usize)39:
+        fitting.right[k] = 0.0
+    for layer in 0..<(usize)3:
+        var sum = 0.0
+        for at in 0..<samples:
+            sum += balance.values[at] * sensitivity[layer * 81 + at]
+        fitting.white[layer] = sum
+    for patch in 0..<camera.training_count():
+        fitting.add(camera.training(patch).values, 1.0)
+    let sun = spectral.daylight(5500.0)
+    for kelvin in sky_kelvins:
+        let sky = spectral.daylight(kelvin)
+        for level in sky_levels:
+            var ratio: f64[81]
+            for at in 0..<samples:
+                ratio[at] = sky.values[at] / sun.values[at] * level
+            fitting.add(ratio, sky_weight)
+    # White (so every grey, the fit being proportional) held exactly where it
+    # belongs: one reading weighed as much as a thousand surfaces.
+    var white: f64[81]
+    for at in 0..<samples:
+        white[at] = 1.0
+    fitting.add(white, 1000.0)
+    var out = Fit()
+    let n = term_count
+    for layer in 0..<(usize)3:
+        let solved = solve(fitting.normal[layer * n * n..<(layer + 1) * n * n], fitting.right[layer * n..<(layer + 1) * n])
+        for k in 0..<n:
+            out.weights[k * 3 + layer] = solved[k]
+    return out
+
+## The solution of the `term_count`-square system `m`·x = `v` (row major), by
+## Gaussian elimination with partial pivoting, a whisker of ridge keeping it
+## solvable (the terms are close to one another on near-neutral colors).
+func solve(m: const f64[], v: const f64[]) -> f64[13]:
+    let n = term_count
+    var a: f64[169]
+    var b: f64[13]
+    var trace = 0.0
+    for k in 0..<n:
+        trace += m[k * (n + 1)]
+    for k in 0..<n * n:
+        a[k] = m[k]
+    for k in 0..<n:
+        b[k] = v[k]
+        a[k * (n + 1)] += 1.0e-12 * trace
+    var out: f64[13]
+    for k in 0..<n:
+        out[k] = 0.0
+    for col in 0..<n:
+        var pivot = col
+        for row in col + 1..<n:
+            if math.abs(a[row * n + col]) > math.abs(a[pivot * n + col]):
+                pivot = row
+        if math.abs(a[pivot * n + col]) < 1.0e-300:
+            return out
+        if pivot != col:
+            for k in 0..<n:
+                let held = a[col * n + k]
+                a[col * n + k] = a[pivot * n + k]
+                a[pivot * n + k] = held
+            let held = b[col]
+            b[col] = b[pivot]
+            b[pivot] = held
+        for row in col + 1..<n:
+            let f = a[row * n + col] / a[col * n + col]
+            for k in col..<n:
+                a[row * n + k] -= f * a[col * n + k]
+            b[row] -= f * b[col]
+    var row = n
+    while row > 0:
+        row -= 1
+        var sum = b[row]
+        for k in row + 1..<n:
+            sum -= a[row * n + k] * out[k]
+        out[row] = sum / a[row * n + row]
+    return out
+
+test "through a measured camera the fit finds the film's exposures, and white exactly":
+    let found = camera.measured("SONY", "ILCE-7M3")
+    assert(found != none)
+    let sony = found else return
+    let stock = film_stocks.stock_at(11)
+    var sensitivity: f64[243]
+    for layer in 0..<(usize)3:
+        var peak = -1.0e9
+        for at in 0..<samples:
+            peak = math.max(peak, stock.sensitivity[layer * 81 + at])
+        for at in 0..<samples:
+            sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
+    let light = spectral.illuminant(3200.0)
+    var clear: f64[81]
+    for at in 0..<samples:
+        clear[at] = 1.0
+    let white = sony.of(&light)
+    let scale = 1.0 / white[1]
+    let fitted = fit(&sony, scale, &light, &light, clear, sensitivity, &light, 1.0)
+    let e = apply(&fitted, [white[0] * scale, white[1] * scale, white[2] * scale])
+    for layer in 0..<(usize)3:
+        assert(math.abs(e[layer] - 1.0) < 1.0e-3)
+    # Over the surfaces, within a fifth of a stop on average.
+    var missed = 0.0
+    for patch in 0..<camera.training_count():
+        let surface = camera.training(patch)
+        var lit: Spectrum
+        for at in 0..<samples:
+            lit.values[at] = surface.values[at] * light.values[at]
+        let c = sony.of(&lit)
+        let got = apply(&fitted, [c[0] * scale, c[1] * scale, c[2] * scale])
+        for layer in 0..<(usize)3:
+            var truth = 0.0
+            var through_light = 0.0
+            for at in 0..<samples:
+                truth += lit.values[at] * sensitivity[layer * 81 + at]
+                through_light += light.values[at] * sensitivity[layer * 81 + at]
+            missed += math.abs(math.log2(got[layer] / (truth / through_light)))
+    print(f"exposure fit through a Sony A7 III onto Portra 400 at 3200 K: {missed / (f64)(camera.training_count() * 3)} stops on average")
+    assert(missed / (f64)(camera.training_count() * 3) < 0.2)

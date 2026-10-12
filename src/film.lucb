@@ -5,14 +5,16 @@
 ## the view stays the only tone scale. Physically based, from each stock's
 ## published curves (film_stocks.lucb, modelled by film_model.lucb):
 ##
-## 1. Exposure (`expose`). The color, in XYZ adapted to the stock's balance light
-##    (3200 K for tungsten stocks), gets a smooth spectrum: spectral.Upsampler's
-##    sigmoid surface for its chromaticity, lit by that light, times its
-##    luminance. Each layer's exposure is that spectrum through the layer's
-##    spectral sensitivity, relative to the light itself, so a neutral exposes
-##    all three layers alike. Middle grey (0.18) lands on the stock's normal
-##    exposure (the 18% grey card Kodak marks on the curves), moved by Film
-##    Exposure.
+## 1. Exposure (`expose`, film_exposure.lucb). The light, back in the camera's
+##    own values (a raw's channels, or XYZ for other pictures), becomes each
+##    layer's exposure through a conversion fitted on real surfaces under the
+##    light on set, from the camera's spectral sensitivities to the layers'
+##    (luce_color's camera module: measured, or estimated from the raw's color
+##    matrices). Each layer's exposure is relative to its exposure to the light
+##    the stock is balanced for (3200 K for tungsten stocks), so with the
+##    filter Matched a neutral exposes all three alike. Middle grey (0.18) lands
+##    on the stock's normal exposure (the 18% grey card Kodak marks on the
+##    curves), moved by Film Exposure.
 ## 2. Light in the emulsion (film_passes.lucb). Each layer's exposure scatters
 ##    (a Gaussian fitted to the stock's MTF); halation adds light that passed
 ##    through and came back off the base, mostly to the red layer, weak behind
@@ -50,12 +52,10 @@
 ##
 ##   0–32   scan: 33³ densities over dye amounts 0..top, slice b (yellow) at
 ##          columns b·33.., red (cyan) along a slice, green (magenta) by row
-##   33–80  exposure: a 48×48 grid over CIE xy (x 0..0.8 across, y 0..0.9 down)
-##          of the three layers' exposure at Y = 1
-##   81     neutral development: dye amounts over log H (−4.5..2.5), 1024 samples
-##   82     development under inhibition: amounts over the effective log H
-##   83     rms granularity (48 µm) over log H
-##   84     values: 0–2 the matrix from AP1 to XYZ at the stock's balance, by
+##   33     neutral development: dye amounts over log H (−4.5..2.5), 1024 samples
+##   34     development under inhibition: amounts over the effective log H
+##   35     rms granularity (48 µm) over log H
+##   36     values: 0–2 the matrix from AP1 back to the camera's values, by
 ##          rows; 3–5 the inhibition matrix; 6 grey's log H, top, the frame
 ##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
 ##          inverse gammas times contrast, Black; 9 the floors; 10 the timing
@@ -67,31 +67,37 @@
 ##          20 the retained silver's density per unit of dye density, the
 ##          scan's mean density at the fog, the edge effects' strength (log H
 ##          per unit of exhaustion) and width (µm); 21 flashing, a share of
-##          grey's exposure added evenly, and the duplicates' blur (σ, µm)
+##          grey's exposure added evenly, and the duplicates' blur (σ, µm);
+##          22–34 the exposure's weights, a term per texel, its layers' weights
+##          in r, g, b (film_exposure.lucb), as half floats; 35–47 what each
+##          misses, so the two together hold it to about 22 bits (the weights
+##          partly cancel, and grey must land exactly)
 import interop
 import memory
 from luce_std.collections import Buffer
 import time
 from luce_std import math
 from luce_color import spectral
+from luce_color import camera
 from luce_color import temperature
 from luce_color import xyz
 import film_stocks
 import film_develop
 import film_paper
 from film_develop import Development
-from film_model import Model, build_model, invert3, log_h_at, lut_size, grid_size, curve_samples, log_low, log_high
+from film_model import Model, build_model, invert3, log_h_at, lut_size, curve_samples, log_low, log_high
+import film_exposure
+from film_exposure import Input
 from settings import Settings, defaults
 
 # mark: Layout ================================================================
 
 pub let atlas_width: usize = 1089
-pub let atlas_rows: usize = 85
-pub let exposure_row: usize = 33
-pub let neutral_row: usize = 81
-pub let developed_row: usize = 82
-pub let grain_row: usize = 83
-pub let values_row: usize = 84
+pub let atlas_rows: usize = 37
+pub let neutral_row: usize = 33
+pub let developed_row: usize = 34
+pub let grain_row: usize = 35
+pub let values_row: usize = 36
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
 ## 4:3 television frame), Super 35, 16 mm, 65 mm (5-perf, Super Panavision 70),
@@ -273,10 +279,11 @@ pub struct Film:
         return self.on
 
     ## Make the atlas match `settings`: the stock's model when the stock changed,
-    ## the development, the grey, the timing and the light every time. The photo
-    ## was taken under `shot_kelvin` and `shot_tint` (its camera's as-shot white
-    ## balance), which is the light on set unless the White Balance's Temperature says otherwise.
-    pub func prepare(settings: const Settings*, shot_kelvin: f64 = 6500.0, shot_tint: f64 = 0.0) -> !:
+    ## the development, the grey, the timing and the exposure every time, for
+    ## the photo `input` describes (its camera, and the light it was taken under
+    ## as the camera's white balance read it, the light on set unless the White
+    ## Balance says otherwise).
+    pub func prepare(settings: const Settings*, input: Input = Input()) -> !:
         let choice = (i64)settings.get(.film_stock)
         if self.texels.length == 0:
             self.texels = try new f32[atlas_width * atlas_rows * 4] --- in memory.heap
@@ -296,27 +303,68 @@ pub struct Film:
             self.fill_model()
         self.on = true
         self.fill_settings(settings)
-        self.fill_light(settings, shot_kelvin, shot_tint)
+        self.fill_exposure(settings, &input)
 
-    ## The light the film sees: by default the light it is balanced for, so the
-    ## develop's white balance, which made the scene neutral, makes it neutral
-    ## on the film too. With a Filter chosen (None or 85), the light on set:
-    ## the White Balance's Temperature and Tint (as shot when not set), through the
-    ## filter, so a daylight scene on tungsten film goes blue unless an 85 warms
-    ## it, and the filter takes the light it absorbs.
-    func fill_light(settings: const Settings*, shot_kelvin: f64, shot_tint: f64):
-        if not sees_the_light(settings):
-            return
-        let chosen = settings.get(.temperature)
-        let kelvin = chosen if chosen > 0.0 else shot_kelvin
-        let tint = settings.get(.tint) if chosen > 0.0 else shot_tint
-        let filter = (usize)math.clamp(settings.get(.film_filter), 0.0, 5.0)
-        let through = 1.0e6 / (1.0e6 / math.max(kelvin, 1000.0) + filter_mireds[filter])
-        let light = temperature.white(through, tint)
-        var to_film = xyz.multiply(xyz.adapt(xyz.aces_white, light), xyz.rgb_to_xyz(xyz.aces_ap1)).m
-        let passed = math.exp2(-filter_stops[filter])
+    ## The exposure (film_exposure.lucb). The light on set is the White
+    ## Balance's Temperature and Tint, or the photo's as shot. What reaches the
+    ## film: with the Filter Matched, the light the stock is balanced for (a
+    ## conversion filter that matches any light exactly); with a Filter chosen
+    ## (None, an 85, ...), the light on set through it, so a daylight scene on
+    ## tungsten film goes blue unless an 85 warms it, and the filter takes the
+    ## light it absorbs. A color filter on the lens passes what its curve says,
+    ## and the exposure opens up by its factor, as a photographer's does.
+    func fill_exposure(settings: const Settings*, input: const Input*):
+        let model = &self.model
+        let chosen_kelvin = settings.get(.temperature)
+        let kelvin = chosen_kelvin if chosen_kelvin > 0.0 else input.shot_kelvin
+        let tint = settings.get(.tint) if chosen_kelvin > 0.0 else input.shot_tint
+        let scene = spectral.illuminant(math.clamp(kelvin, 1667.0, 25000.0), tint)
+        var film = model.light
+        if sees_the_light(settings):
+            let filter = (usize)math.clamp(settings.get(.film_filter), 0.0, 5.0)
+            let through = 1.0e6 / (1.0e6 / math.max(kelvin, 1000.0) + filter_mireds[filter])
+            film = spectral.illuminant(math.clamp(through, 1667.0, 25000.0), tint)
+            let passed = math.exp2(-filter_stops[filter])
+            for at in 0..<spectral.samples:
+                film.values[at] *= passed
+        var lens: f64[81]
+        let color_filter = (usize)math.clamp(settings.get(.film_color_filter), 0.0, 8.0)
+        var unfiltered = 0.0
+        var filtered = 0.0
+        for at in 0..<spectral.samples:
+            lens[at] = transmission(color_filter, spectral.wavelength(at))
+            for layer in 0..<(usize)3:
+                let through = model.light.values[at] * model.sensitivity[layer * 81 + at]
+                unfiltered += through
+                filtered += through * lens[at]
+        let factor = unfiltered / math.max(filtered, 1.0e-12)
+        # Back into the camera's values: for a raw the inverse of the scene's
+        # matrix; otherwise XYZ, its white the light on set's.
+        var to_camera = input.to_camera
+        var response = input.response
+        if not input.raw:
+            response = camera.observer()
+            let white = scene.xyz()
+            let point = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
+            to_camera = xyz.multiply(xyz.adapt(xyz.aces_white, point), xyz.rgb_to_xyz(xyz.aces_ap1)).m
+        # The camera's values scaled so white under the light on set comes to
+        # Y = 1 in AP1, as the scene's matrix brings it.
+        let to_ap1 = xyz.invert(xyz.Matrix3(to_camera)).m
+        let ap1_y = xyz.rgb_to_xyz(xyz.aces_ap1).m
+        let seen = response.of(&scene)
+        var y = 0.0
+        for k in 0..<(usize)3:
+            let ap1 = to_ap1[k * 3] * seen[0] + to_ap1[k * 3 + 1] * seen[1] + to_ap1[k * 3 + 2] * seen[2]
+            y += ap1_y[3 + k] * ap1
+        let fitted = film_exposure.fit(&response, 1.0 / math.max(y, 1.0e-12), &scene, &film, lens, model.sensitivity, &model.light, factor)
         for row in 0..<(usize)3:
-            self.put(values_row, row, to_film[row * 3] * passed, to_film[row * 3 + 1] * passed, to_film[row * 3 + 2] * passed, 0.0)
+            self.put(values_row, row, to_camera[row * 3], to_camera[row * 3 + 1], to_camera[row * 3 + 2], 0.0)
+        for k in 0..<film_exposure.term_count:
+            var high: f64[3]
+            for layer in 0..<(usize)3:
+                high[layer] = (f64)(f16)fitted.weights[k * 3 + layer]
+            self.put(values_row, 22 + k, high[0], high[1], high[2], 0.0)
+            self.put(values_row, 35 + k, fitted.weights[k * 3] - high[0], fitted.weights[k * 3 + 1] - high[1], fitted.weights[k * 3 + 2] - high[2], 0.0)
 
     func put(row: usize, column: usize, r: f64, g: f64, b: f64, a: f64):
         let at = (row * atlas_width + column) * 4
@@ -335,21 +383,9 @@ pub struct Film:
                     self.put(g, b * n + r, model.scan[at], model.scan[at + 1], model.scan[at + 2], 1.0)
         for at in 0..<curve_samples:
             self.put(neutral_row, at, model.neutral[at * 3], model.neutral[at * 3 + 1], model.neutral[at * 3 + 2], 1.0)
-        for column in 0..<(usize)3:
-            self.put(values_row, column, model.to_film[column * 3], model.to_film[column * 3 + 1], model.to_film[column * 3 + 2], 0.0)
 
     func fill_settings(settings: const Settings*):
         let model = &self.model
-        # The exposure grid, through the color filter on the lens.
-        var filter: f64[81]
-        let chosen = (usize)math.clamp(settings.get(.film_color_filter), 0.0, 8.0)
-        for at in 0..<spectral.samples:
-            filter[at] = transmission(chosen, spectral.wavelength(at))
-        model.expose_grid(filter, model.exposure)
-        for j in 0..<grid_size:
-            for i in 0..<grid_size:
-                let at = (j * grid_size + i) * 3
-                self.put(exposure_row + j, i, model.exposure[at], model.exposure[at + 1], model.exposure[at + 2], 1.0)
         # The development (film_develop.lucb): the curve as this time and
         # temperature leave it. The scan keeps reading the normal curve, as a lab's
         # transfer for normal negatives does, so a push shows: more density,
@@ -662,20 +698,21 @@ func grain_shape(width: f64) -> f64[3]:
 ## The three layers' exposure to scene light `c` (AP1): relative, 0.18 for a
 ## grey card at normal exposure (film.frag's `expose`).
 pub func expose(film: const Film*, c: f64[3]) -> f64[3]:
-    let to_film = [film.value(0), film.value(1), film.value(2)]
-    let x = to_film[0][0] * c[0] + to_film[0][1] * c[1] + to_film[0][2] * c[2]
-    let y = to_film[1][0] * c[0] + to_film[1][1] * c[1] + to_film[1][2] * c[2]
-    let z = to_film[2][0] * c[0] + to_film[2][1] * c[1] + to_film[2][2] * c[2]
-    let sum = x + y + z
+    var fitted = film_exposure.Fit()
+    var values: f64[3]
+    for row in 0..<(usize)3:
+        let m = film.value(row)
+        values[row] = m[0] * c[0] + m[1] * c[1] + m[2] * c[2]
+    for k in 0..<film_exposure.term_count:
+        let high = film.value(22 + k)
+        let low = film.value(35 + k)
+        for layer in 0..<(usize)3:
+            fitted.weights[k * 3 + layer] = high[layer] + low[layer]
+    let e = film_exposure.apply(&fitted, values)
     # Flashing: an even exposure over the whole negative, a share of grey's
     # (grey exposes each layer 0.18).
     let flash = film.value(21)[0] * 0.18
-    if sum <= 1.0e-12 or y <= 1.0e-12:
-        return [1.0e-8 + flash, 1.0e-8 + flash, 1.0e-8 + flash]
-    let gx = math.clamp(x / sum / spectral.x_span, 0.0, 1.0) * (f64)(grid_size - 1)
-    let gy = math.clamp(y / sum / spectral.y_span, 0.0, 1.0) * (f64)(grid_size - 1)
-    let per_y = film.bilinear(gx, (f64)exposure_row + gy)
-    return [per_y[0] * y + flash, per_y[1] * y + flash, per_y[2] * y + flash]
+    return [math.max(e[0], 1.0e-8) + flash, math.max(e[1], 1.0e-8) + flash, math.max(e[2], 1.0e-8) + flash]
 
 func log_exposure(film: const Film*, e: f64[3]) -> f64[3]:
     let grey = film.value(6)[0]
@@ -795,9 +832,9 @@ let dye_spread: f64 = 8.5
 ## at the default settings (the test below holds the two together). Through it,
 ## each stock shows the color its dyes, mask and interimage give it, as a
 ## telecine set up once shows each stock it runs.
-let reference_scan: f64[9] = [0.6015033760672441, 0.35929172206533877, 0.039204901867417145,
-                              0.005940357249324697, 1.0390532098782324, -0.04499356712755703,
-                              -0.09594074042886971, 0.3722034596103214, 0.7237372808185483]
+let reference_scan: f64[9] = [0.5966151428927311, 0.3880712781760212, 0.015313578931247709,
+                              -0.0031287639353947717, 1.0387166430979844, -0.035587879162589875,
+                              -0.009707447667084562, 0.26949005401104037, 0.7402173936560442]
 
 ## Edge effects in log H per unit of their strength (film_develop.lucb's share of
 ## a step added as overshoot). For a negative of gamma 0.6 whose dye is about 2
@@ -1046,7 +1083,7 @@ test "tungsten film in daylight goes blue, an 85 brings it back":
     for (index, filter) in [0.0, 1.0, 2.0].indexed():
         settings.set(.film_filter, filter)
         var film = Film()
-        film.prepare(&settings, 5500.0, 0.0) catch failure:
+        film.prepare(&settings, Input(shot_kelvin = 5500.0)) catch failure:
             assert(false)
             return
         defer film.release()
@@ -1095,5 +1132,10 @@ test "the reference scanner is Vision3 250D's fit":
     defer film.release()
     assert(film_stocks.stock_at(8).name == "Kodak Vision3 250D 5207")
     let fitted = film.fit_matrix()
+    var close = true
     for at in 0..<(usize)9:
-        assert(math.abs(fitted[at] - reference_scan[at]) < 0.002)
+        close = close and math.abs(fitted[at] - reference_scan[at]) < 0.002
+    if not close:
+        # What to put in reference_scan when the exposure or the scan changed.
+        print(f"reference_scan: {fitted[0]}, {fitted[1]}, {fitted[2]}, {fitted[3]}, {fitted[4]}, {fitted[5]}, {fitted[6]}, {fitted[7]}, {fitted[8]}")
+    assert(close)

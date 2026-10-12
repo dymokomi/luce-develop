@@ -15,6 +15,10 @@ from luce_std import math
 from luce_raw import raw
 from luce_color import temperature
 from luce_color import xyz
+from luce_color import spectral
+from luce_color import camera
+from luce_color.camera import Response
+import film_exposure
 from settings import Settings
 from settings import parse as settings_text
 import source
@@ -36,6 +40,9 @@ pub struct Scene:
     var as_shot: f64[3]
     pub var shot_temperature: f64
     pub var shot_tint: f64
+    ## A raw camera's spectral sensitivities in the units of `pixels` (its
+    ## curves times the as-shot multipliers).
+    var response: Response
 
     pub func width() -> i64:
         return (i64)self.columns
@@ -124,6 +131,18 @@ pub struct Scene:
             for column in 0..<(usize)3:
                 balanced[row * 3 + column] *= look.balance.multipliers[column] / self.as_shot[column] * look.gain * exposure
         return multiply(to_working, balanced)
+
+    ## What the film needs to expose this scene for `settings` (the settings the
+    ## scene's matrix takes: film.camera_settings): the camera, and the way from
+    ## the AP1 light the film receives back to the scene's values.
+    pub func film_input(settings: const Settings*) -> film_exposure.Input!:
+        var out = film_exposure.Input(response = self.response, raw = self.is_raw(), shot_kelvin = self.shot_temperature, shot_tint = self.shot_tint)
+        if self.is_raw():
+            var plain = *settings
+            plain.set(.exposure, 0.0)
+            let m = try self.matrix(&plain)
+            out.to_camera = xyz.invert(xyz.Matrix3(m)).m
+        return out
 
     ## Turn the pixels upright from EXIF orientation `orientation` (1–8; other
     ## values leave them as they are). 5–8 swap the width and height.
@@ -251,6 +270,7 @@ func raw_scene(data: const u8[], edge: usize) -> Scene!:
     let shot = try raw.rendering(data)
     var scene = Scene(as_shot = shot.balance.multipliers, shot_temperature = shot.balance.temperature, shot_tint = shot.balance.tint)
     errdefer scene.close()
+    scene.response = (try sensitivities(data)).scaled(shot.balance.multipliers)
     scene.data = try new u8[data.length] --- in memory.heap
     memory.copy(scene.data, data, data.length)
     # Average down to the edge in linear light.
@@ -281,6 +301,36 @@ func raw_scene(data: const u8[], edge: usize) -> Scene!:
             scene.pixels[out + 3] = (f16)1.0f32
     try scene.orient((try raw.info(data)).orientation)
     return scene
+
+## The spectral sensitivities of the camera that made raw `data`, in its raw
+## values: measured (luce_color's camera module) when the camera is known,
+## otherwise estimated from its color matrix for daylight (D65). A measured
+## camera's channels are scaled to agree with the matrix, so the raw's own
+## white balance holds.
+func sensitivities(data: const u8[]) -> Response!:
+    # The matrix from XYZ under D65 to raw values: luce-raw's rendering for that
+    # light takes values balanced for it to sRGB.
+    let look = try raw.rendering(data, 6504.0, 0.0)
+    let srgb_to_xyz = xyz.rgb_to_xyz(xyz.srgb)
+    let to_balanced = xyz.invert(xyz.multiply(srgb_to_xyz, xyz.Matrix3(look.to_srgb))).m
+    var to_raw: f64[9]
+    for row in 0..<(usize)3:
+        for column in 0..<(usize)3:
+            to_raw[row * 3 + column] = to_balanced[row * 3 + column] / look.balance.multipliers[row]
+    let info = try raw.info(data)
+    let kelvins: f64[1] = [6504.0]
+    let found = camera.measured(info.make, info.model)
+    if found == none:
+        return camera.estimate(to_raw, kelvins)
+    let measured = found else return camera.estimate(to_raw, kelvins)
+    let d65 = spectral.illuminant(6504.0)
+    let white = d65.xyz()
+    let seen = measured.of(&d65)
+    var gains: f64[3]
+    for row in 0..<(usize)3:
+        let expected = to_raw[row * 3] * white.x + to_raw[row * 3 + 1] * white.y + to_raw[row * 3 + 2] * white.z
+        gains[row] = expected / math.max(seen[row], 1.0e-12)
+    return measured.scaled(gains)
 
 func math_above(low: usize, value: usize) -> usize:
     return value if value > low else low + 1

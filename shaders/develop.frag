@@ -219,7 +219,7 @@ vec3 with_vignette(vec3 c, vec2 uv, float aspect) {
 // Whether film is on: the scene is then the filmed one (film.frag), its lens
 // vignetting already applied, and the matrix the identity.
 bool filmed() {
-    return texture(film, vec2(7.5 / 1089.0, 84.5 / 85.0)).w > 0.5;
+    return texture(film, vec2(7.5 / 1089.0, 36.5 / 37.0)).w > 0.5;
 }
 
 void main() {
