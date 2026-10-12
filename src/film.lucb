@@ -106,6 +106,31 @@ pub func stock_count() -> i64:
 pub func stock_name(at: i64) -> str:
     return film_stocks.stock_at((usize)at).name
 
+# mark: Looks =================================================================
+
+## Film looks that come with the develop: settings (the text form) for a
+## recognisable picture. A Presets pane lists them after the photographer's own.
+##
+## Friends (NBC, 1994–2004) was shot on 35 mm tungsten negative under bright
+## multi-camera set light and graded on a telecine to tape, never printed. No
+## source names its stocks; EXR 500T fits the first seasons and Vision 500T the
+## later ones, which reviewers describe as cleaner and brighter after the early
+## seasons' "burnished 90s orange": warm, slightly flat and grainier. Tuned by
+## eye, not against the broadcast.
+let look_names: str[2] = ["Film · Friends, Seasons 1–5", "Film · Friends, Seasons 6–10"]
+let look_texts: str[2] = ["film_stock=1;film_warmth=28;film_tint=4;film_contrast=-12;film_black=75;film_grain=110",
+                          "film_stock=3;film_warmth=14;film_black=60;film_grain=85"]
+
+pub func look_count() -> i64:
+    return 2
+
+## Look `at`'s name and settings.
+pub func look_name(at: i64) -> str:
+    return look_names[(usize)at]
+
+pub func look_text(at: i64) -> str:
+    return look_texts[(usize)at]
+
 # mark: Film ==================================================================
 
 ## A stock's model and the atlas for some settings: what a renderer or an export
@@ -384,7 +409,8 @@ pub func neutral(film: const Film*, e: f64[3]) -> f64[3]:
 ## Exposure `e` developed, held back by the inhibitor from `held` (the neutral
 ## dye around, blurred by its spread), grained at pixel (`x`, `y`) (centres, in
 ## scene pixels of `pitch` µm), and scanned back to AP1. `matrix` false skips
-## the scan's matrix and the timing (for fitting them). film.frag's stage 4.
+## the grain, the scan's matrix and the timing (for fitting the matrix).
+## film.frag's stage 4.
 pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
     let log_h = log_exposure(film, e)
     var amounts: f64[3]
@@ -394,18 +420,27 @@ pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch:
         effective_h[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2])
         amounts[k] = film.curve(developed_row, k, effective_h[k])
     let v6 = film.value(6)
-    if v6[3] > 0.0:
+    let v8 = film.value(8)
+    # Grain, and what it would add on average once inverted: the scan inverts
+    # density exponentially, so even noise would brighten each channel by
+    # exp((ln 10·γ⁻¹·σ)² / 2), which a scanner averaging light over the grain
+    # does not do. The density makes up for it (σ the noise's own spread: the
+    # value noise's 0.428 of its amplitude).
+    var unbias: f64[3] = [0.0, 0.0, 0.0]
+    if v6[3] > 0.0 and matrix:
         let cell = math.max(grain_cell, pitch)
         let scale = v6[3] * 80.0 / cell
         for k in 0..<(usize)3:
-            amounts[k] += noise(x * pitch / cell, y * pitch / cell, (u32)k) * film.curve(grain_row, k, effective_h[k]) * scale
+            let amplitude = film.curve(grain_row, k, effective_h[k]) * scale
+            amounts[k] += noise(x * pitch / cell, y * pitch / cell, (u32)k) * amplitude
+            let sigma = 0.428 * amplitude
+            unbias[k] = 0.5 * 2.302585092994046 * v8[k] * sigma * sigma
     let d = film.scanned_lut(amounts, v6[1])
     let v7 = film.value(7)
-    let v8 = film.value(8)
     let v9 = film.value(9)
     var linear: f64[3]
     for k in 0..<(usize)3:
-        let shown = 0.18 * math.pow(10.0, (d[k] - v7[k]) * v8[k])
+        let shown = 0.18 * math.pow(10.0, (d[k] - unbias[k] - v7[k]) * v8[k])
         linear[k] = (shown - v8[3] * v9[k]) / (1.0 - v8[3] * v9[k] / 0.18)
     if not matrix:
         return linear
@@ -513,6 +548,26 @@ test "grain averages out and follows the stock's granularity":
     let deviation = math.sqrt(squares / (f64)count - mean * mean)
     assert(math.abs(mean / 0.18 - 1.0) < 0.05)
     assert(deviation > 0.002 and deviation < 0.05)
+
+test "grain leaves a patch's average color where it was":
+    var means: f64[6]
+    for (index, grain) in [0.0, 150.0].indexed():
+        var settings = defaults_with_film()
+        settings.set(.film_grain, grain)
+        var film = Film()
+        film.prepare(&settings) catch failure:
+            assert(false)
+            return
+        defer film.release()
+        var sum: f64[3] = [0.0, 0.0, 0.0]
+        for at in 0..<(usize)4000:
+            let shot = develop(&film, [0.18, 0.144, 0.108], (f64)(at % 200) + 0.5, (f64)(at // 200) + 0.5, 31.0)
+            for k in 0..<(usize)3:
+                sum[k] += shot[k] / 4000.0
+        for k in 0..<(usize)3:
+            means[index * 3 + k] = sum[k]
+    for k in 0..<(usize)3:
+        assert(math.abs(means[3 + k] / means[k] - 1.0) < 0.04)
 
 func defaults_with_film() -> Settings:
     var out = defaults()

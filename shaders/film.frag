@@ -149,17 +149,22 @@ void main() {
         vec3 effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held));
         vec3 amounts = film_curve(82.0, effective);
         vec4 v6 = film_value(6.0);
+        vec4 v8 = film_value(8.0);
+        // Grain, less what inverting it would add on average (film.lucb's scan).
+        vec3 unbias = vec3(0.0);
         if (v6.w > 0.0) {
             float pitch = params.halo.w;
             float cell = max(16.0, pitch);
             vec2 p = (vec2(at) + 0.5) * pitch / cell;
-            amounts += vec3(film_noise(p, 0u), film_noise(p, 1u), film_noise(p, 2u)) * film_curve(83.0, effective) * (v6.w * 80.0 / cell);
+            vec3 amplitude = film_curve(83.0, effective) * (v6.w * 80.0 / cell);
+            amounts += vec3(film_noise(p, 0u), film_noise(p, 1u), film_noise(p, 2u)) * amplitude;
+            vec3 sigma = 0.428 * amplitude;
+            unbias = 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
         }
         vec3 d = film_scan(amounts, v6.y);
         vec4 v7 = film_value(7.0);
-        vec4 v8 = film_value(8.0);
         vec3 floors = film_value(9.0).rgb;
-        vec3 shown = 0.18 * pow(vec3(10.0), (d - v7.rgb) * v8.rgb);
+        vec3 shown = 0.18 * pow(vec3(10.0), (d - unbias - v7.rgb) * v8.rgb);
         vec3 linear_light = (shown - v8.w * floors) / (1.0 - v8.w * floors / 0.18);
         vec3 scene = vec3(dot(film_value(11.0).rgb, linear_light), dot(film_value(12.0).rgb, linear_light), dot(film_value(13.0).rgb, linear_light));
         out_color = max(scene * film_value(10.0).rgb, 0.0);
