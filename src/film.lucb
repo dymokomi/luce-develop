@@ -95,7 +95,7 @@ pub let values_row: usize = 84
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
 ## 4:3 television frame), Super 35, 16 mm, 65 mm (5-perf, Super Panavision 70),
-## Super 16 and IMAX's 15-perf 65 mm (70.41 × 52.63 mm).
+## Super 16 and IMAX's 15-perf 65 mm (camera aperture 70.41 × 51.61 mm, SMPTE 2005).
 pub let frame_widths: f64[6] = [21950.0, 24890.0, 10260.0, 52480.0, 12520.0, 70410.0]
 
 ## Interimage at 100%: how much each layer's development is held back, in log

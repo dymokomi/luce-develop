@@ -31,7 +31,7 @@ layout(push_constant) uniform Params {
     vec4 row0;      // stage 0: the matrix from the scene texture to AP1, by rows
     vec4 row1;
     vec4 row2;
-    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it); alpha's blur σ, px
+    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it); alpha's blur σ, px; the lens's veil
 } params;
 layout(set = 0, binding = 1) uniform sampler2D first_image;
 layout(set = 0, binding = 2) uniform sampler2D second_image;
@@ -134,9 +134,11 @@ float lens_radius(vec2 uv, float aspect) {
 vec3 expose(vec3 c) {
     vec3 xyz = vec3(dot(film_value(0.0).rgb, c), dot(film_value(1.0).rgb, c), dot(film_value(2.0).rgb, c));
     float sum = xyz.x + xyz.y + xyz.z;
-    if (sum <= 1e-12 || xyz.y <= 1e-12) return vec3(1e-8);
+    // Flashing: an even share of grey's exposure (film.lucb's `expose`).
+    float flash = film_value(21.0).x * 0.18;
+    if (sum <= 1e-12 || xyz.y <= 1e-12) return vec3(1e-8 + flash);
     vec2 g = clamp(vec2(xyz.x / sum / 0.8, xyz.y / sum / 0.9), 0.0, 1.0) * (film_grid - 1.0);
-    return film_texels(g.x, 33.0 + g.y) * xyz.y;
+    return film_texels(g.x, 33.0 + g.y) * xyz.y + flash;
 }
 
 vec3 log_exposure(vec3 e) {
@@ -171,7 +173,8 @@ void main() {
             float t = clamp((lens_radius(uv, params.lens.x) - start) / (1.0 - start), 0.0, 1.0);
             c *= 1.0 + v.y * 2.0 * t * t;
         }
-        out_color = expose(c);
+        // The lens's veiling glare, an even light (lens.lucb).
+        out_color = expose(c + vec3(params.lens.z));
     } else if (stage == 1) {
         vec4 blur = blurred(first_image, at, step, params.sigma, params.lens.y, radius);
         out_color = blur.rgb;

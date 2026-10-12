@@ -70,12 +70,16 @@ float radius(vec2 uv, float aspect) {
     return length(p) / length(vec2(aspect, 1.0));
 }
 
+// The lens: vignetting corrected, then its veiling glare, an even light
+// (lens.lucb's `veil`, in row0.w).
 vec3 with_lens(vec3 c, vec2 uv, float aspect) {
     vec4 v = value(5.0);
-    if (v.y <= 0.0) return c;
-    float start = v.z * 0.6;
-    float t = clamp((radius(uv, aspect) - start) / (1.0 - start), 0.0, 1.0);
-    return c * (1.0 + v.y * 2.0 * t * t);
+    if (v.y > 0.0) {
+        float start = v.z * 0.6;
+        float t = clamp((radius(uv, aspect) - start) / (1.0 - start), 0.0, 1.0);
+        c *= 1.0 + v.y * 2.0 * t * t;
+    }
+    return c + vec3(params.row0.w);
 }
 
 vec3 with_tone(vec3 c) {
