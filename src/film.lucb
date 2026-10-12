@@ -62,7 +62,7 @@
 ##          clouds' strength (`fit_grains`)
 ##   39     values: 0–2 the matrix from AP1 back to the camera's values, by
 ##          rows; 3–5 the inhibition matrix; 6 grey's log H, top, the frame
-##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
+##          width in 2 µm units, grain amount; 7 grey's scanned densities, on; 8 the
 ##          inverse gammas times contrast, Black; 9 the floors; 10 the timing
 ##          gains; 11–13 the scan's matrix to AP1; 14 each layer's scatter
 ##          (exponential length, µm); 15 halation's strength per layer, its
@@ -591,7 +591,9 @@ pub struct Film:
         let contrast = 1.0 + settings.get(.film_contrast) / 200.0
         let black = settings.get(.film_black) / 100.0
         let frame = frame_widths[(usize)math.clamp(settings.get(.film_format), 0.0, 5.0)]
-        self.put(values_row, 6, grey, model.top, frame, settings.get(.film_grain) / 100.0)
+        # The frame in 2 µm units: IMAX's 70 410 µm is past what a half float
+        # holds (65 504), and halving rounds every other format as before.
+        self.put(values_row, 6, grey, model.top, frame / 2.0, settings.get(.film_grain) / 100.0)
         self.put(values_row, 17, model.most[0], model.most[1], model.most[2], (f64)kind)
         # The grain's clouds: their spacing, the Gaussian's 1/(2σ²) in cells, and
         # its calibration (grain_shape).
@@ -1594,6 +1596,20 @@ test "a red filter on black and white darkens blue sky and lightens red, grey st
     assert(shots[4] < shots[0] * 0.6)
     assert(shots[5] > shots[1] * 1.5)
     assert(math.abs(math.log2(shots[6] / shots[2])) < 0.2)
+
+test "every format films a grey card (IMAX's frame fits the atlas)":
+    for format in 0..<(usize)6:
+        var settings = defaults()
+        settings.set(.film_stock, 9.0)
+        settings.set(.film_format, (f64)format)
+        var made = Film()
+        made.prepare(&settings) catch failure:
+            assert(false)
+            return
+        defer made.release()
+        let out = develop(&made, [0.18, 0.18, 0.18], 10.0, 10.0, 20.0)
+        for k in 0..<(usize)3:
+            assert(out[k] > 0.05 and out[k] < 1.0)
 
 func defaults_with_film() -> Settings:
     var out = defaults()

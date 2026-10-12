@@ -67,7 +67,7 @@ func blur_of(sigmas: f64[3], exponential: bool = false) -> Blur:
                 exponential = exponential)
 
 pub func plan_for(source: const Film*, width: usize) -> Plan:
-    let pitch = source.value(6)[2] / (f64)width
+    let pitch = source.value(6)[2] * 2.0 / (f64)width
     let sharp = source.value(14)
     let halo = source.value(15)
     let spread = source.value(16)
