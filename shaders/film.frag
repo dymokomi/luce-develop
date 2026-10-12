@@ -217,6 +217,9 @@ void main() {
             developed(at, amounts, effective);
         }
         vec3 d = film_scan(amounts, v6.y);
+        // The bleach bypassed: retained silver, neutral density with the image.
+        vec4 v20 = film_value(20.0);
+        d += v20.x * max(dot(d, vec3(1.0 / 3.0)) - v20.y, 0.0);
         float slide = film_value(17.0).w;
         if (slide > 0.5 && slide < 1.5) {
             // A slide: scene light (asinh-encoded), Contrast a power about grey; the timing.
