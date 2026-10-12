@@ -156,8 +156,9 @@ func check_stochastic(device: gpu.Device, path: str) -> i64!:
         try texture.read(shown)
         var cpu_scene = try scene.open(path, 128)
         defer cpu_scene.close()
-        var expected = try process.render(&cpu_scene, settings, samples = (usize)refined)
+        var expected = try process.render(&cpu_scene, settings, samples = (usize)refined, cpu = true)
         defer expected.close()
+        failed += try against_export(path, settings, wanted, (usize)refined, expected.pixels())
         let want = expected.pixels()
         var total = 0.0
         var largest = 0
@@ -177,6 +178,29 @@ func check_stochastic(device: gpu.Device, path: str) -> i64!:
         if not good:
             failed += 1
     return failed
+
+## The export's film (process.lucb on the GPU, film_gpu.lucb's
+## `filmed_on_gpu`) against the CPU's `want`, as many samples.
+func against_export(path: str, settings: Settings, wanted: str, refined: usize, want: const u8[]) -> i64!:
+    var opened = try scene.open(path, 128)
+    defer opened.close()
+    var exported = try process.render(&opened, settings, samples = refined)
+    defer exported.close()
+    let shown = exported.pixels()
+    var total = 0.0
+    var outliers = 0
+    for at in 0..<shown.length:
+        if at % 4 == 3:
+            continue
+        let difference = (i64)shown[at] - (i64)want[at]
+        let size = difference if difference >= 0 else -difference
+        total += (f64)size
+        outliers += 1 if size > 6 else 0
+    let values = (f64)(shown.length // 4 * 3)
+    let mean = total / values
+    let good = mean < 1.5 and (f64)outliers / values < 0.03
+    print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [export on the GPU {wanted}, {refined} samples]  mean {mean}  over 6: {outliers}")
+    return 0 if good else 1
 
 ## A and B compared, the split at 0.4: each side within the film limit (8) of
 ## its own CPU develop (B: the recipe shown at Develop, scanned as is).

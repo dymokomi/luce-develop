@@ -11,6 +11,10 @@ import film
 import film_passes
 from film_passes import Plan, Blur
 from shaders import film_frag_words, film_frag_msl
+import memory
+from scene import Scene
+from tables import Tables, table_width, table_rows
+import tables as develop_tables
 
 ## The most samples (pixels times samples each) one submission of the
 ## stochastic render takes.
@@ -261,3 +265,51 @@ pub struct FilmPasses:
             var gone = held
             gone.destroy()
         self.shader = none
+
+## The most samples (pixels times samples each) an export's call to `refine`
+## takes: its submissions stay short.
+let export_work: u32 = 4194304
+
+## `scene` (camera values) through the film on the GPU at its own size, for an
+## export: the passes as the renderer runs them (`matrix` into AP1, the lens
+## from `built` and `aspect`, its `veil`), and with the grain on, the stochastic
+## render refined to `samples` a pixel. The filmed scene, which the caller
+## closes. Fails where no GPU opens (the caller films on the CPU then).
+pub func filmed_on_gpu(source: Film*, scene: const Scene*, matrix: f64[9], built: const Tables*, aspect: f64, veil: f64, samples: u32) -> Scene!:
+    var device = try gpu.Device.open()
+    defer device.destroy()
+    let width = (u32)scene.width()
+    let height = (u32)scene.height()
+    var scene_texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+    defer scene_texture.destroy()
+    try scene_texture.upload(scene.bytes())
+    let half_tables = try new f16[table_width * table_rows * 4] --- in memory.heap
+    defer free(half_tables) in memory.heap
+    develop_tables.half(built, half_tables)
+    var tables_texture = try gpu.Texture.create(device, (u32)table_width, (u32)table_rows, gpu.Format.rgba16_float)
+    defer tables_texture.destroy()
+    try tables_texture.upload(u8[]((u8*)half_tables.data, half_tables.length * 2))
+    let grained = samples > 0 and source.value(6)[3] > 0.0
+    if grained:
+        try source.fit_grains()
+    let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
+    defer free(atlas) in memory.heap
+    for at in 0..<atlas.length:
+        atlas[at] = (f16)source.texels[at]
+    var atlas_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
+    defer atlas_texture.destroy()
+    try atlas_texture.upload(u8[]((u8*)atlas.data, atlas.length * 2))
+    var passes = FilmPasses()
+    defer passes.release()
+    var out = try passes.run(device, scene_texture, tables_texture, atlas_texture, source, matrix, aspect, width, height, veil)
+    if grained:
+        let pixels = (f64)width * (f64)height
+        let count = (u32)math.clamp(math.floor((f64)export_work / pixels), 1.0, 16.0)
+        while true:
+            if let resolved = try passes.refine(device, tables_texture, atlas_texture, count, export_work, samples):
+                out = resolved
+                break
+    let pixels = try new f16[(usize)width * (usize)height * 4] --- in memory.heap
+    errdefer free(pixels) in memory.heap
+    try out.read(u8[]((u8*)pixels.data, pixels.length * 2))
+    return Scene.from_pixels((usize)width, (usize)height, pixels)
