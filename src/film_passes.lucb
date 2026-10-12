@@ -8,16 +8,20 @@
 ## layer's exposure); scatter (each layer's exponential, across then down);
 ## halation (film_halation.lucb: the exposure averaged over blocks, gathered at
 ## the kernel's samples, and the halo added back at full size to the scattered
-## exposure); the neutral development, with the
-## developer it uses up in its alpha; the inhibitor's spread and the
-## developer's (alpha), across then down; develop as dye clouds with their
-## grain, and scan.
+## exposure); development in steps (film.lucb's `chemistry_steps`), each
+## releasing inhibitor and using developer (alpha) as the layers develop, spread
+## as far as it will have gone by the end (across, then down while adding it to
+## the earlier steps': diffusion being linear, the same as spreading the field
+## step by step, without rounding it again each step); develop as dye clouds
+## with their grain, and scan.
 import memory
 from luce_std import math
 from luce_std import parallel
 from film import Film
 import film
 import film_halation
+from tables import build as build_tables
+from settings import parse as settings_text
 from scene import Scene
 from tables import Tables
 
@@ -43,7 +47,12 @@ pub struct Plan:
     ## gather runs at, about an eighth of the ring's radius.
     pub var halation_strength: f32[3]
     pub var halation_block: i32
-    pub var spread: Blur
+    ## Development's steps: how far the inhibitor and used developer spread in
+    ## one step (a release at step s goes on spreading through the n − s + 1
+    ## steps left: √(n − s + 1) times this), and how much of the used developer
+    ## each step leaves unrenewed.
+    pub var step_spread: Blur
+    pub var keep: f64
     ## The duplicates' blur over the developed image (none: radius 0).
     pub var duplicated: Blur
 
@@ -59,17 +68,39 @@ pub func plan_for(source: const Film*, width: usize) -> Plan:
     let sharp = source.value(14)
     let halo = source.value(15)
     let spread = source.value(16)
-    # The inhibitor's spread, and in alpha the developer's, as far as the wider.
-    var held = blur_of([spread[0] / pitch, spread[1] / pitch, spread[2] / pitch])
-    let used = source.value(20)[3] / pitch
-    held.alpha = (f32)used
-    held.radius = (i32)math.min(math.max((f64)held.radius, math.ceil(3.0 * used)), widest)
+    # The inhibitor's spread, and in alpha the developer's: what is released at
+    # step s spreads through the steps left, so each step spreads by σ/√W, W
+    # the steps left weighed by how much grey releases at each.
+    let n = film.chemistry_steps
+    let grey = source.value(53)[3]
+    var weighed = 0.0
+    var before = 0.0
+    for step in 1..=n:
+        let now = film.progress(source, [grey, grey, grey], (f64)step / (f64)n)
+        let mean = (now[0] + now[1] + now[2]) / 3.0
+        weighed += (mean - before) * (f64)(n - step + 1)
+        before = mean
+    let per_step = 1.0 / math.sqrt(math.max(weighed, 1.0e-6))
+    var held = blur_of([spread[0] / pitch * per_step, spread[1] / pitch * per_step, spread[2] / pitch * per_step])
+    held.alpha = (f32)(source.value(20)[3] / pitch * per_step)
+    let v54 = source.value(54)
+    let keep = math.exp(-v54[1] / (f64)n / math.max(v54[2], 1.0e-6))
     let copies = source.value(21)[1] / pitch
     return Plan(pitch = (f32)pitch, duplicated = blur_of([copies, copies, copies]),
                 scatter = blur_of([sharp[0] / pitch, sharp[1] / pitch, sharp[2] / pitch], true),
                 halation_strength = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
                 halation_block = (i32)math.clamp(math.round(halo[3] / 8.0 / pitch), 1.0, 32.0),
-                spread = held)
+                step_spread = held, keep = keep)
+
+## The spread of a release made at step `step` of `n`: the step's, √(n − step + 1) times.
+pub func spread_at(plan: const Plan*, step: usize, n: usize) -> Blur:
+    let scale = math.sqrt((f64)(n - step + 1))
+    let base = plan.step_spread
+    var out = blur_of([(f64)base.sigma[0] * scale, (f64)base.sigma[1] * scale, (f64)base.sigma[2] * scale])
+    let developer = (f64)base.alpha * scale
+    out.alpha = (f32)developer
+    out.radius = (i32)math.min(math.max((f64)out.radius, math.ceil(3.0 * developer)), widest)
+    return out
 
 ## Whether halation adds anything.
 pub func has_halation(blurs: const Plan*) -> bool:
@@ -109,6 +140,14 @@ struct Pass:
     var block: i64
     var first_width: usize
     var first_height: usize
+    ## Development's step (stage 8): from and to which share of the way, how
+    ## much used developer it leaves unrenewed, and whether it is the first.
+    var begun: f64
+    var reached: f64
+    var keep: f64
+    var first_step: bool
+    ## How far through the development to show (stage 4; 1 the end).
+    var share: f64 = 1.0
 
 func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
     let at = place(width, height, x, y)
@@ -164,7 +203,7 @@ func developed_at(context: void*, x: f64, y: f64) -> film.Developed:
     let px = (i64)math.floor(x / pass.pitch)
     let py = (i64)math.floor(y / pass.pitch)
     return film.developed(pass.film, texel(pass.first, pass.width, pass.height, px, py), texel(pass.second, pass.width, pass.height, px, py),
-                          alpha(pass.second, pass.width, pass.height, px, py))
+                          alpha(pass.second, pass.width, pass.height, px, py), pass.share)
 
 func run_row(context: void*, row: usize, worker: usize) -> !:
     let pass = (Pass*)context
@@ -222,9 +261,16 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             let halo = bilinear(pass.first, pass.first_width, pass.first_height, ((f64)x + 0.5) / block - 0.5, ((f64)y + 0.5) / block - 0.5)
             for k in 0..<(usize)3:
                 out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
-        elif pass.stage == 3:
-            out = film.neutral(pass.film, texel(pass.first, pass.width, pass.height, x, y))
-            spent = film.exhaustion(pass.film, out)
+        elif pass.stage == 8:
+            let stepped = film.release(pass.film, texel(pass.first, pass.width, pass.height, x, y), pass.begun, pass.reached, pass.keep)
+            out = [stepped[0], stepped[1], stepped[2]]
+            spent = stepped[3]
+        elif pass.stage == 9:
+            let blur = blurred(pass, pass.first, x, y)
+            let at = place(pass.width, pass.height, x, y)
+            let before: f64[4] = [0.0, 0.0, 0.0, 0.0] if pass.first_step else [(f64)pass.second[at], (f64)pass.second[at + 1], (f64)pass.second[at + 2], (f64)pass.second[at + 3]]
+            out = [before[0] + blur[0], before[1] + blur[1], before[2] + blur[2]]
+            spent = before[3] + blur[3]
         else:
             if pass.film.value(6)[3] > 0.0:
                 # Grain: the image made of dye clouds, each the negative at its centre.
@@ -234,7 +280,8 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             else:
                 let e = texel(pass.first, pass.width, pass.height, x, y)
                 let held = texel(pass.second, pass.width, pass.height, x, y)
-                out = film.scan(pass.film, e, held, alpha(pass.second, pass.width, pass.height, x, y), (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
+                out = film.scan(pass.film, e, held, alpha(pass.second, pass.width, pass.height, x, y), (f64)column + 0.5, (f64)row + 0.5, pass.pitch,
+                                share = pass.share)
         let at = (row * pass.width + column) * 4
         pass.out[at] = (f16)out[0]
         pass.out[at + 1] = (f16)out[1]
@@ -284,13 +331,9 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
         try run_sized(&pass, gathered, two, exposed, 7, width, height)
     else:
         memory.copy(exposed, two, size)
-    # The neutral development, and the inhibitor's spread: exposed → one → two → one.
-    pass.stage = 3
-    pass.first = exposed
-    pass.out = one
-    try parallel.for_each(height, (void*)&pass, run_row)
-    try run_blur(&pass, one, one, two, 1, 1, 0, plan.spread)
-    try run_blur(&pass, two, two, one, 1, 0, 1, plan.spread)
+    # Development, step by step: each step's release into `two`, spread across
+    # into `one` and down into `two` again... the inhibitor ends in `one`.
+    try develop_steps(&pass, exposed, one, two, out, &plan)
     pass.stage = 4
     pass.first = exposed
     pass.second = one
@@ -301,6 +344,27 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
         try run_blur(&pass, out, out, one, 1, 1, 0, plan.duplicated)
         try run_blur(&pass, one, one, out, 1, 0, 1, plan.duplicated)
     return Scene.from_pixels(width, height, out)
+
+## Development's steps on the exposure `exposed`: each step's release, spread
+## across into `spare` and down while adding into `field`, which ends holding
+## the inhibitor and used developer (`scratch` for the release).
+func develop_steps(pass: Pass*, exposed: const f16[], field: f16[], spare: f16[], scratch: f16[], plan: const Plan*) -> !:
+    let n = film.chemistry_steps
+    for step in 1..=n:
+        pass.stage = 8
+        pass.first = exposed
+        pass.second = exposed
+        pass.out = scratch
+        pass.begun = (f64)(step - 1) / (f64)n
+        pass.reached = (f64)step / (f64)n
+        pass.keep = math.pow(plan.keep, (f64)(n - step))
+        try parallel.for_each(pass.height, (void*)pass, run_row)
+        let spread = spread_at(plan, step, n)
+        try run_blur(pass, scratch, scratch, spare, 1, 1, 0, spread)
+        pass.first_step = step == 1
+        # Down, added to `field`: into `scratch`, then back.
+        try run_blur(pass, spare, field, scratch, 9, 0, 1, spread)
+        memory.copy(field, scratch, field.length)
 
 ## Stage `stage` into `out` of `width` × `height` (the halation's sizes), the
 ## pass's size put back after.
@@ -327,3 +391,92 @@ func run_blur(pass: Pass*, first: const f16[], second: const f16[], out: f16[], 
     pass.dy = dy
     pass.blur = blur
     try parallel.for_each(pass.height, (void*)pass, run_row)
+
+# mark: Tests =================================================================
+
+## A scene `width` × `height` of `left` light left of `split` columns and
+## `right` light after (AP1, as film's input); the caller closes it.
+func two_halves(width: usize, height: usize, split: usize, left: f64, right: f64) -> Scene!:
+    let pixels = try new f16[width * height * 4] --- in memory.heap
+    for y in 0..<height:
+        for x in 0..<width:
+            let v = left if x < split else right
+            let at = (y * width + x) * 4
+            pixels[at] = (f16)v
+            pixels[at + 1] = (f16)v
+            pixels[at + 2] = (f16)v
+            pixels[at + 3] = (f16)1.0
+    return Scene.from_pixels(width, height, pixels)
+
+func film_for(text: str) -> Film!:
+    var made = Film()
+    var settings = settings_text(text)
+    try made.prepare(&settings)
+    return made
+
+## Develop `scene` through `source` with no matrix (the scene is AP1 already).
+func developed_scene(source: const Film*, scene: const Scene*) -> Scene!:
+    let identity: f64[9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+    var settings = settings_text("")
+    let built = build_tables(&settings)
+    return try filmed(source, scene, identity, &built, 1.0)
+
+test "a large even patch developed in steps is the published curve's":
+    var negative = film_for("film_stock=3;film_grain=0") catch failure:
+        assert(false)
+        return
+    defer negative.release()
+    var scene = two_halves(96, 64, 96, 0.18, 0.18) catch failure:
+        assert(false)
+        return
+    defer scene.close()
+    var out = developed_scene(&negative, &scene) catch failure:
+        assert(false)
+        return
+    defer out.close()
+    let middle = out.value_at(32 * 96 + 48)
+    let even = film.develop(&negative, [0.18, 0.18, 0.18], 0.5, 0.5, 20.0)
+    for k in 0..<(usize)3:
+        assert(math.abs(middle[k] / even[k] - 1.0) < 0.01)
+
+test "stand development draws stronger edges than continuous agitation":
+    # Tri-X in D-76, a dense half beside a thin one: the dense side's border
+    # lacks developer the thin side does not use, the thin side's border has
+    # its neighbor's to spare (Eberhard, Kostinsky). Measured as the step's
+    # overshoot on the scanned positive.
+    var overshoot: f64[2]
+    let texts: str[2] = ["film_stock=18;film_grain=0;develop_process=5;develop_agitation=1",
+                         "film_stock=18;film_grain=0;develop_process=5;develop_agitation=3"]
+    for (index, text) in texts.indexed():
+        var tri_x = film_for(text) catch failure:
+            assert(false)
+            return
+        defer tri_x.release()
+        # 4096 pixels across the 35 mm frame: about 5 µm each, finer than the
+        # developer's spread.
+        var scene = two_halves(4096, 4, 2048, 0.03, 0.6) catch failure:
+            assert(false)
+            return
+        defer scene.close()
+        var out = developed_scene(&tri_x, &scene) catch failure:
+            assert(false)
+            return
+        defer out.close()
+        let far = out.value_at(2 * 4096 + 3800)[1]
+        let near = out.value_at(2 * 4096 + 2052)[1]
+        overshoot[index] = near / far
+        print(f"agitation {index}: border over far {overshoot[index]} edge {tri_x.value(20)[2]} width {tri_x.value(20)[3]} kept {tri_x.value(54)[3]} renewal {tri_x.value(54)[2]}")
+    assert(overshoot[1] > overshoot[0])
+
+test "part of the way through, a negative is thinner":
+    var negative = film_for("film_stock=3;film_grain=0") catch failure:
+        assert(false)
+        return
+    defer negative.release()
+    let e = film.expose(&negative, [0.36, 0.36, 0.36])
+    let held = film.neutral(&negative, e)
+    let spent = film.exhaustion(&negative, held)
+    let half = film.developed(&negative, e, held, spent, 0.5)
+    let whole = film.developed(&negative, e, held, spent, 1.0)
+    for k in 0..<(usize)3:
+        assert(half.amounts[k] < whole.amounts[k])

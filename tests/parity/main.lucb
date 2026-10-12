@@ -106,10 +106,14 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         let view = compile(&settings).get(.view)
         let tabled = view == 0.0 or view >= 3.0
         # A slide's curves are about three times a negative's slope near black,
-        # so the same rounding moves its darkest pixels a few levels more.
+        # and its development table (interimage-corrected, film.lucb) is
+        # steepest in deep blues: the GPU's half-float chemistry fields (eight
+        # steps' releases rounded and summed) move a few of those pixels by up
+        # to about 20 levels. To come back down to a negative's when the
+        # chemistry moves to single-float compute (docs/PHYSICAL-FILM.md, 5).
         let stock = settings.get(.film_stock)
         let slide = stock > 0.0 and film.stock_kind((i64)stock - 1) == 1
-        let limit = 40 if tabled else (12 if slide else (8 if stock > 0.0 else 3))
+        let limit = 40 if tabled else (20 if slide else (8 if stock > 0.0 else 3))
         # A color paper's curves are the steepest a table follows (Endura's
         # gamma near 2.6): a few more of its values miss by more than 6. The
         # print view's 2383 is next (gamma near 3 in its deep shadows): dark,

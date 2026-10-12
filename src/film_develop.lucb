@@ -56,6 +56,9 @@ pub struct Process:
     pub var edge: f64 = 0.035
     pub var edge_width: f64 = 20.0
     pub var fixed: bool = false
+    ## How it is agitated (`agitations`): 1 continuous (a processing machine),
+    ## 2 intermittent (a tank inverted every 30 s), 3 stand.
+    pub var agitation: i64 = 2
 
 ## The processes. Sources (research_notes/Film stocks and chemistry/
 ## processes_and_developers.md): Kodak H-24 (ECN-2), Z-131 (C-41), Z-119 (E-6),
@@ -72,15 +75,15 @@ pub let process_count: usize = 19
 pub let processes: Process[19] = [
     # Kodak's motion picture negative process (SD-49, CD-3); the reference for
     # color negatives. 8.5 % per degree (C-41's charts).
-    Process(name = "ECN-2", family = 0, minutes = 3.0, celsius = 41.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
+    Process(name = "ECN-2", family = 0, minutes = 3.0, celsius = 41.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0, agitation = 1),
     # The still color negative process (CD-4). Motion picture film in it comes
     # out contrastier and grainier, about a third of a stop faster.
-    Process(name = "C-41", family = 0, minutes = 3.25, celsius = 37.8, rate = 0.085, speed = 0.33, contrast = 1.17, grain = 1.15, edge = 0.035, edge_width = 20.0),
+    Process(name = "C-41", family = 0, minutes = 3.25, celsius = 37.8, rate = 0.085, speed = 0.33, contrast = 1.17, grain = 1.15, edge = 0.035, edge_width = 20.0, agitation = 1),
     # The 1960s motion picture process (SD-30): 12 minutes at 21 °C, as Kodak's
     # 1968 paper gives it; for the Eastman Color Negative of that decade.
-    Process(name = "ECN-1", family = 0, minutes = 12.0, celsius = 21.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
+    Process(name = "ECN-1", family = 0, minutes = 12.0, celsius = 21.1, rate = 0.085, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0, agitation = 1),
     # The reversal process; times are its first developer's.
-    Process(name = "E-6", family = 1, minutes = 6.0, celsius = 37.8, rate = 0.08, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0),
+    Process(name = "E-6", family = 1, minutes = 6.0, celsius = 37.8, rate = 0.08, speed = 0.0, contrast = 1.0, grain = 1.0, edge = 0.035, edge_width = 20.0, agitation = 1),
     # Kodak D-76 stock; the reference for black and white. Acros II: 7 min, the
     # time of its sheet's middle curve, which the model is built on (its table
     # says 7¼).
@@ -101,7 +104,7 @@ pub let processes: Process[19] = [
     Process(name = "Rodinal 1+25", family = 2, minutes = 7.5, celsius = 20.0, rate = 0.087, speed = -0.33, contrast = 1.0, grain = 1.32, compensation = 0.05, edge = 0.1, edge_width = 40.0),
     Process(name = "Rodinal 1+50", family = 2, minutes = 12.9, celsius = 20.0, rate = 0.07, speed = -0.5, contrast = 1.0, grain = 1.25, compensation = 0.12, edge = 0.125, edge_width = 60.0),
     # An hour's stand in Rodinal 1+100, agitated only at the start.
-    Process(name = "Rodinal 1+100 stand", family = 2, minutes = 60.0, celsius = 20.0, rate = 0.05, speed = -0.67, contrast = 0.85, grain = 1.2, compensation = 0.3, edge = 0.22, edge_width = 100.0),
+    Process(name = "Rodinal 1+100 stand", family = 2, minutes = 60.0, celsius = 20.0, rate = 0.05, speed = -0.67, contrast = 0.85, grain = 1.2, compensation = 0.3, edge = 0.22, edge_width = 100.0, agitation = 3),
     # Ilford Microphen (PQ, borax): up to half a stop more speed.
     Process(name = "Microphen", family = 2, minutes = 6.4, celsius = 20.0, rate = 0.1, speed = 0.5, contrast = 1.0, grain = 1.0, edge = 0.045, edge_width = 30.0),
     # Ilford Perceptol (high sulfite, near neutral): much finer grain, slower.
@@ -117,6 +120,15 @@ pub let processes: Process[19] = [
     # out in the highlights, so time and temperature do not matter; Acros II
     # rated at 200.
     Process(name = "Diafine", family = 2, minutes = 6.0, celsius = 21.0, rate = 0.0, speed = 1.0, contrast = 1.0, grain = 1.15, compensation = 0.35, edge = 0.12, edge_width = 60.0, fixed = true)]
+
+## Agitation: how fast the bath replaces the developer the film used up, as a
+## time constant (minutes) by agitation (0 none: the process's own; 1
+## continuous, a machine's flow or a rotary drum; 2 intermittent, a tank
+## inverted for 5 s every 30 s, Kodak's and Ilford's practice; 3 stand, left
+## alone after the first minute: diffusion alone). Estimates: no maker
+## publishes the exchange rate; they set the edge effects' strength against
+## each process's own (whose effects are in the stock's published MTF).
+pub let agitations: f64[4] = [1.0, 0.25, 1.0, 30.0]
 
 ## The standard process of each stock kind (an index into `processes`).
 let standards: i64[3] = [0, 3, 4]
@@ -228,14 +240,37 @@ pub struct Development:
     pub var compensation: f64 = 0.0
     pub var edge: f64 = 0.0
     pub var edge_width: f64 = 0.0
+    ## How fast the bath replaces used developer (a time constant, minutes:
+    ## `agitations`), the process's own and the one chosen, and how long it
+    ## develops (minutes).
+    pub var renewal: f64 = 1.0
+    pub var own_renewal: f64 = 1.0
+    pub var minutes: f64 = 1.0
+    ## The edge effects of the process used and of the stock's standard one
+    ## (whose, at its own agitation, the published MTF holds), and the
+    ## standard one's renewal.
+    pub var used_edge: f64 = 0.0
+    pub var standard_edge: f64 = 0.0
+    pub var standard_renewal: f64 = 1.0
 
     ## How much of its normal silver layer `layer` develops at log H `log_h`:
     ## S(time) / S(normal) of the kinetics above (1 at normal development).
     pub func factor(layer: usize, log_h: f64) -> f64:
+        return self.factor_at(layer, log_h, self.time)
+
+    ## The same at development `time` (a ratio to normal).
+    func factor_at(layer: usize, log_h: f64, time: f64) -> f64:
         let u = self.saturation[layer] * math.pow(10.0, self.rate_slope[layer] * (log_h - self.grey_log_h))
         let start = self.induction
-        let running = math.max(self.time - start, 0.0) / math.max(1.0 - start, 1.0e-9)
+        let running = math.max(time - start, 0.0) / math.max(1.0 - start, 1.0e-9)
         return (1.0 - math.exp(-u * running)) / math.max(1.0 - math.exp(-u), 1.0e-12)
+
+    ## How far layer `layer` at log H `log_h` has developed `share` of the way
+    ## through the development's time (0..1): its silver then over its silver
+    ## at the end.
+    pub func progress(layer: usize, log_h: f64, share: f64) -> f64:
+        let whole = self.factor_at(layer, log_h, self.time)
+        return self.factor_at(layer, log_h, self.time * math.clamp(share, 0.0, 1.0)) / math.max(whole, 1.0e-12)
 
     ## The fog layer `layer` gains over its normal (density; a slide's first
     ## developer: the share of its unexposed halide).
@@ -246,7 +281,7 @@ pub struct Development:
 ## `celsius`: the development against the stock's standard, normal development.
 ## Cross-processed, the stock is already the negative its process makes
 ## (`cross_processed`): only time and temperature apply.
-pub func developing(stock: const Stock*, process: i64, minutes: f64, celsius: f64) -> Development:
+pub func developing(stock: const Stock*, process: i64, minutes: f64, celsius: f64, agitation: i64 = 0) -> Development:
     let kind = stock.kind
     let cross = crossed(kind, process)
     let normal_time = normal_minutes(stock, process)
@@ -268,6 +303,12 @@ pub func developing(stock: const Stock*, process: i64, minutes: f64, celsius: f6
     out.compensation = math.clamp(used.compensation - normal.compensation, 0.0, 0.9)
     out.edge = used.edge - normal.edge
     out.edge_width = used.edge_width
+    out.own_renewal = agitations[(usize)used.agitation]
+    out.used_edge = used.edge
+    out.standard_edge = normal.edge
+    out.standard_renewal = agitations[(usize)normal.agitation]
+    out.renewal = agitations[(usize)math.clamp((f64)agitation, 0.0, 3.0)] if agitation > 0 else out.own_renewal
+    out.minutes = (minutes if minutes > 0.0 else normal_time) if not used.fixed else used.minutes
     return out
 
 test "normal development in the standard process changes nothing":

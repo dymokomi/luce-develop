@@ -60,7 +60,8 @@ pixel size only decides how finely the film is sampled.
    replaces the Cineon-encoded scene. Exit tests: 2383 LAD aim of Status A
    1.09/1.06/1.03; 0.07 D per point.
 
-4. **Reaction–diffusion development (progressive).** Development runs as a
+4. **Reaction–diffusion development (progressive)** (done in a first form,
+   see "As built" below). Development runs as a
    time integration on a film-plane grid: developer at the bath boundary
    (an exchange rate h(agitation)), consumption by developing grains, bromide
    and DIR inhibitor release, diffusion in gelatin (per layer, with interlayer
@@ -87,6 +88,19 @@ pixel size only decides how finely the film is sampled.
    export runs it to the end on the same kernels. A large even patch must
    reproduce the closed form of part 2 (its constants are fitted so), so
    edges, interimage and agitation come out as differences from it.
+
+   *As built.* Eight steps. Each step releases inhibitor and uses developer in
+   proportion to how far each layer develops in it (part 2's kinetics, which
+   depend on exposure). The release spreads by the distance it will have
+   travelled by the end and is added to the earlier steps' (diffusion being
+   linear, this equals stepping the field, with less rounding). The bath
+   renews used developer at the agitation's rate. Edge effects act on the
+   developer missing beyond what an even field of the same exposure misses,
+   so even areas keep the published curve exactly. Watching development
+   shows the image part-way (the kinetics' progress) over 2.5 s. Still open:
+   halide (bromide) as its own field, the inhibitor's release proportional to
+   dye actually formed (not the uninhibited curve), and single-float compute
+   for the fields (half floats limit the GPU to eight steps).
 
 5. **Grain populations.** Each colour record holds two or three emulsion
    populations (fast, mid, slow) as a persistent marked point process in

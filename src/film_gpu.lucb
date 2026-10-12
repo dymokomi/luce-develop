@@ -4,6 +4,8 @@
 ## then draws the filmed scene in place of the camera's.
 from luce_gpu import gpu
 from film import Film
+from luce_std import math
+import film
 import film_passes
 from film_passes import Plan, Blur
 from shaders import film_frag_words, film_frag_msl
@@ -14,6 +16,7 @@ pub struct FilmPasses:
     var exposed: gpu.Texture?
     var one: gpu.Texture?
     var two: gpu.Texture?
+    var three: gpu.Texture?
     ## The halation's blocks and its gathered halo, and their block size.
     var low: gpu.Texture?
     var gathered: gpu.Texture?
@@ -22,6 +25,9 @@ pub struct FilmPasses:
     var height: u32
     ## The lens's veiling glare (lens.lucb), added in the expose pass.
     var veil: f64
+    ## How much of the development is still to come in what is shown (0: none,
+    ## the developed film; 1: none of it yet), for watching it develop.
+    pub var remaining: f64
 
     ## Film `scene` (the camera's values, `width` × `height`): `matrix` into AP1,
     ## `tables` and `aspect` for the lens vignetting, `atlas` the film's. The
@@ -39,11 +45,13 @@ pub struct FilmPasses:
             self.exposed = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.one = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.two = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.three = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.width = width
             self.height = height
         let exposed = self.exposed else return scene
         let one = self.one else return scene
         let two = self.two else return scene
+        let three = self.three else return scene
         let plan = film_passes.plan_for(source, (usize)width)
         if film_passes.has_halation(&plan) and (self.low == none or self.block != plan.halation_block):
             self.release_low()
@@ -68,19 +76,35 @@ pub struct FilmPasses:
         else:
             # Unblurred, the scattered exposure is the exposure.
             try self.pass(exposed, 1, two, two, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
-        try self.pass(one, 3, exposed, exposed, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
-        try self.pass(two, 1, one, one, tables, atlas, 1, 0, plan.spread, plan, matrix, aspect)
-        try self.pass(one, 1, two, two, tables, atlas, 0, 1, plan.spread, plan, matrix, aspect)
-        try self.pass(two, 4, exposed, one, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        # Development, step by step (film_passes.lucb's `develop_steps`): each
+        # step's release, spread across, then down while added to `field`.
+        var field = one
+        var spare = two
+        var scratch = three
+        let n = film.chemistry_steps
+        for step in 1..=n:
+            let shares: f32[4] = [(f32)(step - 1) / (f32)n, (f32)step / (f32)n, (f32)math.pow(plan.keep, (f64)(n - step)), 0.0f32]
+            try self.pass(scratch, 8, exposed, exposed, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shares)
+            let spread = film_passes.spread_at(&plan, step, n)
+            try self.pass(spare, 1, scratch, scratch, tables, atlas, 1, 0, spread, plan, matrix, aspect)
+            let first: f32[4] = [0.0f32, 0.0f32, 0.0f32, 1.0f32 if step == 1 else 0.0f32]
+            try self.pass(scratch, 9, spare, field, tables, atlas, 0, 1, spread, plan, matrix, aspect, first)
+            let held = field
+            field = scratch
+            scratch = held
+        let shown: f32[4] = [(f32)(1.0 - self.remaining), 0.0f32, 0.0f32, 0.0f32]
+        try self.pass(spare, 4, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
         # The duplicates between negative and print soften the developed image.
         if plan.duplicated.radius > 0:
-            try self.pass(one, 1, two, two, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
-            try self.pass(two, 1, one, one, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
-        return two
+            try self.pass(field, 1, spare, spare, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
+            try self.pass(spare, 1, field, field, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
+        return spare
 
     ## One stage into `target`.
+    ## `row0` replaces the matrix's first row for development's stages (8: the
+    ## step's shares; 4: the share shown).
     func pass(target: gpu.Texture, stage: i64, first: gpu.Texture, second: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture,
-              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64) -> !:
+              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64, row0: f32[4]? = none) -> !:
         let pipeline = self.pipeline else return
         let frame = try target.frame()
         defer frame.release()
@@ -98,6 +122,9 @@ pub struct FilmPasses:
             (f32)matrix[3], (f32)matrix[4], (f32)matrix[5], 0.0f32,
             (f32)matrix[6], (f32)matrix[7], (f32)matrix[8], 0.0f32,
             (f32)aspect, blur.alpha, (f32)self.veil, 0.0f32]
+        if let row = row0:
+            for k in 0..<(usize)4:
+                uniforms[16 + k] = row[k]
         let images: gpu.Texture[4] = [first, second, tables, atlas]
         try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
@@ -123,9 +150,13 @@ pub struct FilmPasses:
         if let held = self.two:
             var gone = held
             gone.destroy()
+        if let held = self.three:
+            var gone = held
+            gone.destroy()
         self.exposed = none
         self.one = none
         self.two = none
+        self.three = none
 
     pub func release():
         self.release_textures()

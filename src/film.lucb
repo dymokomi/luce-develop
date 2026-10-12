@@ -421,7 +421,14 @@ pub struct Film:
         # The stock as published (a cross-processed slide's model is a negative).
         let published = film_stocks.stock_at((usize)(self.stock - 1))
         let process = film_develop.chosen_for(&published, settings.get(.develop_process))
-        let grown = film_develop.developing(&published, process, settings.get(.develop_time), settings.get(.develop_temperature))
+        let grown = film_develop.developing(&published, process, settings.get(.develop_time), settings.get(.develop_temperature),
+                                            (i64)settings.get(.develop_agitation))
+        # The development's kinetics, for its steps on the GPU (film.frag's
+        # `progress`): saturation and induction, rate slope and grey, the
+        # time against normal, the minutes and the bath's renewal.
+        self.put(values_row, 52, grown.saturation[0], grown.saturation[1], grown.saturation[2], grown.induction)
+        self.put(values_row, 53, grown.rate_slope[0], grown.rate_slope[1], grown.rate_slope[2], grown.grey_log_h)
+        self.put(values_row, 54, grown.time, grown.minutes, grown.renewal, kept_share(&grown, grown.renewal))
         # The bleach bypassed (develop_silver): silver stays where the dye
         # formed, adding its own grain. Only a color negative's silver is extra.
         let retained = settings.get(.develop_silver) / 100.0 if kind == 0 else 0.0
@@ -475,19 +482,20 @@ pub struct Film:
         # by how much developed nearby, all layers alike, over the developer's
         # own spread. In log H per unit of exhaustion (the mean share of each
         # layer's most), within the same monotonic bound.
-        var edge = edge_gain * grown.edge
-        var steepest_spent = 0.0
-        var held_most = 0.0
-        for layer in 0..<(usize)3:
-            steepest_spent += steepest[layer] / (3.0 * math.max(model.most[layer], 1.0e-9))
-            held_most = math.max(held_most, dir[layer * 3] * steepest[0] + dir[layer * 3 + 1] * steepest[1] + dir[layer * 3 + 2] * steepest[2])
-        if edge > 0.0 and steepest_spent > 0.0:
-            edge = math.min(edge, math.max(0.0, 0.7 - held_most) / steepest_spent)
-        # A large even patch is held back by both alike: correct for both.
-        var held_back = dir
-        for row in 0..<(usize)3:
-            for column in 0..<(usize)3:
-                held_back[row * 3 + column] += edge / (3.0 * math.max(model.most[column], 1.0e-9))
+        # Edge effects per unit of developer the bath has not yet renewed: a
+        # property of the developer (its strength at its own agitation, over
+        # what an even patch keeps unrenewed then). The stock's published MTF
+        # already holds its standard process's at that process's agitation;
+        # the film adds the difference.
+        let kept = kept_share(&grown, grown.renewal)
+        let used_per_unit = grown.used_edge / kept_share(&grown, grown.own_renewal)
+        # The standard process's, kept unrenewed as this agitation keeps it.
+        let standard_per_unit = grown.standard_edge / kept
+        # Per unit of developer missing beyond what an even field of the same
+        # exposure misses (film.frag's `developed`): nothing in an even area.
+        let edge = edge_gain * (used_per_unit - standard_per_unit)
+        # A large even patch is held back by its own inhibitor: correct for it.
+        let held_back = dir
         for layer in 0..<(usize)3:
             var source: usize = 0
             for at in 0..<curve_samples:
@@ -706,6 +714,27 @@ pub struct Film:
         return [near_slice[0] + (far_slice[0] - near_slice[0]) * t, near_slice[1] + (far_slice[1] - near_slice[1]) * t, near_slice[2] + (far_slice[2] - near_slice[2]) * t]
 
 ## Layer `layer`'s effective log H for neutral sample `at` under interimage `dir`.
+## How many steps development runs in (film_passes.lucb, film.frag): enough
+## for the release's smooth course over time; more would let the GPU's half
+## floats drift from the CPU (each step rounds the fields three times).
+pub let chemistry_steps: usize = 8
+
+## The share of the developer a large even grey patch used that is still
+## missing at the end, with the bath renewing it with time constant `renewal`
+## (minutes): each step's use, as grey develops, decays until the end.
+func kept_share(grown: const Development*, renewal: f64) -> f64:
+    let n = chemistry_steps
+    let decay = math.exp(-grown.minutes / (f64)n / math.max(renewal, 1.0e-6))
+    var sum = 0.0
+    var before = 0.0
+    for step in 1..=n:
+        var now = 0.0
+        for layer in 0..<(usize)3:
+            now += grown.progress(layer, grown.grey_log_h, (f64)step / (f64)n) / 3.0
+        sum += (now - before) * math.pow(decay, (f64)(n - step))
+        before = now
+    return math.max(sum, 1.0e-6)
+
 ## Layer `layer`'s dye at curve sample `at` once developed as `grown`
 ## (film_develop.lucb): on a negative, its normal amount over fog times the
 ## kinetics' factor, the fog grown, flattened above grey by the compensation; on
@@ -834,17 +863,68 @@ pub func exhaustion(film: const Film*, held: f64[3]) -> f64:
     let most = film.value(17)
     return (held[0] / math.max(most[0], 1.0e-9) + held[1] / math.max(most[1], 1.0e-9) + held[2] / math.max(most[2], 1.0e-9)) / 3.0
 
-## Exposure `e` developed, held back by the inhibitor from `held` (the neutral
-## dye around, blurred by its spread) and by the developer used up around it
-## (`exhausted`, blurred by the developer's spread).
-pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64) -> Developed:
+## Exposure `e` developed, held back by the inhibitor around it (`held`, as the
+## development's steps released and spread it) and by the developer used up
+## around it (`exhausted`); `share` of the way through the development
+## (film.frag's `developed`).
+pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, share: f64 = 1.0) -> Developed:
     let log_h = log_exposure(film, e)
     let edge = film.value(20)[2]
+    # The edge effects: developer missing beyond what an even field of this
+    # exposure would miss (Eberhard: a dense border beside a thin one gets the
+    # thin one's to spare).
+    let even = exhaustion(film, neutral(film, e)) * film.value(54)[3]
     var out: Developed
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
-        out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2]) - edge * exhausted
+        out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2]) - edge * (exhausted - even)
         out.amounts[k] = film.curve(developed_row, k, out.effective[k])
+    if share < 1.0:
+        # Part of the way: from the unexposed film's (a negative's fog, a
+        # slide's most dye), grown as far as the kinetics say.
+        let grown = progress(film, out.effective, share)
+        for k in 0..<(usize)3:
+            let base = film.curve(developed_row, k, log_low)
+            out.amounts[k] = base + (out.amounts[k] - base) * grown[k]
+    return out
+
+## How far each layer at log H `log_h` has developed `share` of the way through
+## the development (film_develop.lucb's `progress`, from the atlas's values as
+## the GPU reads them).
+pub func progress(film: const Film*, log_h: f64[3], share: f64) -> f64[3]:
+    let v52 = film.value(52)
+    let v53 = film.value(53)
+    let length = film.value(54)[0]
+    var out: f64[3]
+    for k in 0..<(usize)3:
+        let whole = factor_at(v52[k], v53[k], log_h[k], v53[3], v52[3], length)
+        out[k] = factor_at(v52[k], v53[k], log_h[k], v53[3], v52[3], length * math.clamp(share, 0.0, 1.0)) / math.max(whole, 1.0e-12)
+    return out
+
+func factor_at(saturation: f64, slope: f64, log_h: f64, grey: f64, start: f64, length: f64) -> f64:
+    let u = saturation * math.pow(10.0, slope * (log_h - grey))
+    let running = math.max(length - start, 0.0) / math.max(1.0 - start, 1.0e-9)
+    return (1.0 - math.exp(-u * running)) / math.max(1.0 - math.exp(-u), 1.0e-12)
+
+## A step of development at exposure `e` (film.frag's stage 8): from share
+## `begun` to `reached` of the way through, what each layer releases as it
+## develops (inhibitor in proportion: the dye on a negative, the first
+## developer's image on a slide), and fourth the developer it uses, `keep` of it
+## still missing at the end (the bath renews the rest).
+pub func release(film: const Film*, e: f64[3], begun: f64, reached: f64, keep: f64) -> f64[4]:
+    let log_h = log_exposure(film, e)
+    let v17 = film.value(17)
+    let held = inhibitor((i64)v17[3], [v17[0], v17[1], v17[2]],
+                         [film.curve(neutral_row, 0, log_h[0]), film.curve(neutral_row, 1, log_h[1]), film.curve(neutral_row, 2, log_h[2])])
+    let after = progress(film, log_h, reached)
+    let before = progress(film, log_h, begun)
+    var out: f64[4]
+    var used = 0.0
+    for k in 0..<(usize)3:
+        let grown = after[k] - before[k]
+        out[k] = held[k] * grown
+        used += held[k] / math.max(v17[k], 1.0e-9) * grown / 3.0
+    out[3] = keep * used
     return out
 
 ## The negative as dye clouds, at (`x`, `y`) µm on it: one cloud per cell (the
@@ -991,8 +1071,9 @@ func same_everywhere(context: void*, x: f64, y: f64) -> Developed:
 ## (a large even patch), grained at pixel (`x`, `y`) (centres, in pixels of
 ## `pitch` µm) and scanned back to AP1. `matrix` false skips the grain, the
 ## scan's matrix and the timing.
-pub func scan(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
-    var here = developed(film, e, held, exhausted)
+pub func scan(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, x: f64, y: f64, pitch: f64, matrix: bool = true,
+              share: f64 = 1.0) -> f64[3]:
+    var here = developed(film, e, held, exhausted, share)
     if film.value(6)[3] > 0.0 and matrix:
         let (amounts, unbias) = clouded(film, x * pitch, y * pitch, pitch, same_everywhere, (void*)&here)
         return finish(film, amounts, unbias)
@@ -1006,7 +1087,9 @@ pub func develop(film: const Film*, c: f64[3], x: f64, y: f64, pitch: f64, matri
     let halo = film.value(15)
     let e = [exposed[0] * (1.0 + halo[0]), exposed[1] * (1.0 + halo[1]), exposed[2] * (1.0 + halo[2])]
     let held = neutral(film, e)
-    return scan(film, e, held, exhaustion(film, held), x, y, pitch, matrix)
+    # The bath renewed the developer it used as it went (values 54: the share
+    # still missing at the end).
+    return scan(film, e, held, exhaustion(film, held) * film.value(54)[3], x, y, pitch, matrix)
 
 # mark: Tests =================================================================
 

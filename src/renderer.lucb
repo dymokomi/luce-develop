@@ -10,6 +10,7 @@
 ## right of it.
 import interop
 import memory
+import time
 import ownership
 import strings
 import sync
@@ -122,6 +123,9 @@ func view_key(settings: const Settings*) -> i64:
         key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 100.0)
     return key
 
+## How long watching development takes, seconds of real time.
+let watch_seconds: f64 = 2.5
+
 func developing() -> Developing:
     return Developing(settings = defaults(), view_baked = -1)
 
@@ -138,6 +142,12 @@ pub struct Renderer:
     var b: Developing
     var comparing: bool
     var split: f64
+    ## Watching development: each change of the settings develops the film
+    ## again over `watch_seconds`, frame by frame, from nothing (when it began,
+    ## ns, and whether it is still going).
+    var watching: bool
+    var watch_began: u64
+    var watch_running: bool
     ## Made on the first draw, on the window's device.
     var device: gpu.Device?
     var shader: gpu.Shader?
@@ -254,10 +264,26 @@ pub struct Renderer:
 
     ## Develop with `settings` from the next draw on.
     pub func set_settings(settings: Settings):
+        if self.watching:
+            self.watch_began = time.now()
+            self.watch_running = true
         self.a.take(compile(&settings))
         self.comparing = settings.recipe.comparing()
         if self.comparing:
             self.b.take(compile_to(&settings, settings.recipe.compare))
+
+    ## Watch the film develop: after each change, over a couple of seconds, the
+    ## negative (or what is made from it) as development runs its course.
+    pub func watch_development(on: bool):
+        self.watching = on
+        self.watch_running = on
+        self.watch_began = time.now()
+        self.a.film_stale = true
+        self.b.film_stale = true
+
+    ## Whether development is being shown running (draw again soon).
+    pub func animating() -> bool:
+        return self.watch_running
 
     ## Whether outputs A and B are both shown, and where B begins across the
     ## photo (0..1 of its width).
@@ -399,6 +425,16 @@ pub struct Renderer:
             self.upload = false
             self.a.film_stale = true
             self.b.film_stale = true
+        # While development is being watched, how much of it is still to come
+        # (both outputs alike, the last frame the developed film).
+        if self.watch_running:
+            let elapsed = (f64)(time.now() - self.watch_began) / 1.0e9
+            let remaining = math.max(0.0, 1.0 - elapsed / watch_seconds)
+            for which in [&self.a, &self.b]:
+                which.film_passes.remaining = remaining
+                which.film_stale = true
+            if remaining <= 0.0:
+                self.watch_running = false
         try self.prepare_develop(device, &self.a)
         if self.comparing:
             try self.prepare_develop(device, &self.b)

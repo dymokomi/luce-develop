@@ -177,15 +177,48 @@ vec3 bilinear(sampler2D image, vec2 p) {
     return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
 }
 
+// How far each layer at log H `log_h` has developed `share` of the way through
+// the development (film_develop.lucb's `progress`): the kinetics' silver then
+// over its silver at the end.
+float factor_at(float saturation, float slope, float log_h, float grey, float start, float time) {
+    float u = saturation * pow(10.0, slope * (log_h - grey));
+    float running = max(time - start, 0.0) / max(1.0 - start, 1e-9);
+    return (1.0 - exp(-u * running)) / max(1.0 - exp(-u), 1e-12);
+}
+vec3 progress(vec3 log_h, float share) {
+    vec4 v52 = film_value(52.0);
+    vec4 v53 = film_value(53.0);
+    float time = film_value(54.0).x;
+    vec3 out_share;
+    for (int k = 0; k < 3; k++) {
+        float whole = factor_at(v52[k], v53[k], log_h[k], v53.w, v52.w, time);
+        out_share[k] = factor_at(v52[k], v53[k], log_h[k], v53.w, v52.w, time * clamp(share, 0.0, 1.0)) / max(whole, 1e-12);
+    }
+    return out_share;
+}
+
 // The developed negative at texel `at`: each layer's dye, and the effective log
-// H it developed at (film.lucb's `developed`).
+// H it developed at (film.lucb's `developed`), `share` of the way through.
 void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
     vec3 log_h = log_exposure(fetch(first_image, at));
     vec4 around = fetch4(second_image, at);
     vec3 held = around.rgb;
+    // The edge effects: developer missing beyond what an even field of this
+    // exposure would miss (film.lucb's `developed`).
+    vec3 dye = film_curve(33.0, log_h);
+    vec4 v17 = film_value(17.0);
+    vec3 neutral_held = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
+    float even = dot(neutral_held / max(v17.rgb, vec3(1e-9)), vec3(1.0 / 3.0)) * film_value(54.0).w;
     effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held))
-              - film_value(20.0).z * around.a;
+              - film_value(20.0).z * (around.a - even);
     amounts = film_curve(34.0, effective);
+    float share = params.row0.x;
+    if (share < 1.0) {
+        // Part of the way: from the unexposed film's (a negative's fog, a
+        // slide's most dye), grown as far as the kinetics say.
+        vec3 base = film_curve(34.0, vec3(-4.5));
+        amounts = base + (amounts - base) * progress(effective, share);
+    }
 }
 
 void main() {
@@ -232,6 +265,25 @@ void main() {
         // scattered exposure.
         vec2 low = (vec2(at) + 0.5) / float(radius) - 0.5;
         out_color = fetch(second_image, at) + params.halo.rgb * bilinear(first_image, low);
+    } else if (stage == 8) {
+        // A step of development (film.lucb's `release`): what each layer
+        // releases as it develops from share row0.x to row0.y of the way (the
+        // dye on a negative, the first developer's image on a slide), and in
+        // alpha the developer it uses, row0.z of it still missing at the end.
+        vec3 log_h = log_exposure(fetch(first_image, at));
+        vec3 dye = film_curve(33.0, log_h);
+        vec4 v17 = film_value(17.0);
+        vec3 held = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
+        vec3 grown = progress(log_h, params.row0.y) - progress(log_h, params.row0.x);
+        out_color = held * grown;
+        spent = params.row0.z * dot(held / max(v17.rgb, vec3(1e-9)), grown) / 3.0;
+    } else if (stage == 9) {
+        // The step's release spread down and added to what earlier steps left
+        // (row0.w: none yet).
+        vec4 blur = blurred(first_image, at, step, params.sigma, params.lens.y, radius);
+        vec4 before = params.row0.w > 0.5 ? vec4(0.0) : fetch4(second_image, at);
+        out_color = before.rgb + blur.rgb;
+        spent = before.a + blur.a;
     } else if (stage == 3) {
         // What holds development back: the dye on a negative, the first
         // developer's negative image on a slide (film.lucb's `inhibitor`).
