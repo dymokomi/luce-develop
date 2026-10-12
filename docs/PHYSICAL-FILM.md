@@ -173,6 +173,43 @@ average. Only the sampling of light paths and apertures averages away.
 Interactive views may start from the statistical tables (the current engine)
 and refine toward the stochastic answer.
 
+*As built* (film_grains.lucb, film_passes.lucb, film.frag stages 10–15,
+film_gpu.lucb). Each layer's three populations are Poisson grains on the film
+plane, made per cell from a hash (fixed across passes and settings), each with
+a place, a size (0.6–1.4 of its population's) and a rank; a grain develops
+where its rank is under its population's share at the effective log H at its
+own centre, and forms a dye (silver) cloud, density q·(1 − r²/ρ²)². The grains
+are fitted with Campbell's theorem, exact for a Poisson field read by
+averaging light: at every exposure the field's density is the developed curve
+and its rms through 48 µm the granularity (in each layer's dye: the
+granularity over the scan's own-channel slope). The populations develop along
+their own logistics at a solved exposure; the clouds' strength is solved for
+the variance; where a slide's D-max needs it, the populations get more grains
+(a cloud is at most 2.5 dense).
+
+A pixel's light is the mean over its area of the light the grains pass. Where
+few clouds develop in it (fewer than 16 a layer: toes, a slide's highlights,
+views finer than the grain) its grains are traced: those reaching the pixel
+gathered once (only the rank bins that can develop are made, each in cells
+sized to hold a few grains), then 256 samples among them, read through the
+scan's slopes about the pixel's own reading, less the traced grains'
+cross-channel average (Campbell). Elsewhere the pixel is the sum of hundreds of
+independent grains, Gaussian to a few percent: it is drawn from that
+distribution, with the fitted grains' own Campbell granularity scaled to its
+area, and a deviate tied to its neighbours' as clouds across its border tie
+them (variance, side and diagonal covariances from the clouds'
+autocorrelation over two pixels). Tested: drawn pixels match traced grains at
+45-megapixel pixels in variance (0.1 %) and neighbour correlation; grey reads
+the curve within 0.01 in every channel for a negative, a slide and black and
+white; the GPU matches the CPU. A 45-megapixel export with its grain takes
+about 17 s on an M-series GPU.
+
+Still estimates: a dye cloud's peak density (0.5; silver 2.0), which with the
+granularity sets its size (about 0.4–3 µm here). Real colour-negative grain at
+high magnification shows clumps several pixels wide; measured dye cloud sizes
+or noise power spectra per stock would set the size properly (and with it the
+grain's texture). Population radii ratios (1, 0.75, 0.55) are estimates too.
+
 ## Rules
 
 - Every constant names its source or says it is an estimate.

@@ -154,6 +154,8 @@ struct Pass:
     ## The stochastic render (stage 11): samples per pixel, and the grains.
     var samples: usize
     var geometry: film_grains.Geometry[9]
+    ## Fewer developed clouds a pixel than this: traced (tests trace all).
+    var traced_below: f64 = film_grains.gaussian_from
 
 func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
     let at = place(width, height, x, y)
@@ -332,10 +334,13 @@ func stochastic(pass: const Pass*, column: usize, row: usize) -> f64[3]:
                                [0.0, 0.0, 0.0])
 
 ## What the scanner reads at pixel (`column`, `row`), as density (a slide's
-## light too): the developed film without grain, and with its grains: each
-## sample's dye read through the scan's slopes about the developed film's
-## reading, to light, averaged, back to density, less the grains' average
-## (`Film.grain_bias`).
+## light too): the developed film without grain, and with its grains. Each
+## layer either traced grain by grain (few develop in the pixel, or the pixel
+## is not much wider than a grain): its samples' dye read through the scan's
+## slopes about the developed film's reading, to light, averaged, back to
+## density, less the traced grains' average (`Film.grain_bias`); or taken from
+## its distribution over the pixel (film_grains.lucb): the granularity scaled
+## to the pixel's area, by the pixel's own deviate, the mean light kept.
 func stochastic_reading(pass: const Pass*, column: usize, row: usize) -> (f64[3], f64[3]):
     let source = pass.film
     let effective = texel(pass.first, pass.width, pass.height, (i64)column, (i64)row)
@@ -344,25 +349,117 @@ func stochastic_reading(pass: const Pass*, column: usize, row: usize) -> (f64[3]
     let slopes = source.scan_slopes(developed)
     let base = source.value(338)
     let layers = (usize)base[3]
-    var light: f64[3] = [0.0, 0.0, 0.0]
-    for k in 0..<pass.samples:
-        let (ox, oy) = film_grains.sample_place((u32)column, (u32)row, (u32)k)
-        let x = ((f64)column + ox) * pass.pitch
-        let y = ((f64)row + oy) * pass.pitch
-        let clouds = film_grains.clouds(pass.geometry, layers, x, y, grain_place, (void*)pass)
-        # Light over the developed film's (film.frag keeps it near 1, in half floats).
-        for c in 0..<(usize)3:
-            var d = 0.0
-            for layer in 0..<(usize)3:
-                d += slopes[layer * 3 + c] * (base[layer] + clouds[0 if layers == 1 else layer] - developed[layer])
-            # Within four decades of it (the scan's slopes are a line; far
-            # from the film's reading they would run away).
-            light[c] += math.pow(10.0, -math.clamp(d, -4.0, 4.0)) / (f64)pass.samples
-    let bias = source.grain_bias(effective, slopes)
+    var (traced, bounds) = regimes(pass, column, row, effective, layers)
+    var light: f64[3] = [1.0, 1.0, 1.0]
+    var gathered: film_grains.Cloud[128]
+    var count: usize = 0
+    if traced[0] or traced[1] or traced[2]:
+        # The grains reaching the pixel, once; then its samples among them.
+        let left = (f64)column * pass.pitch
+        let top = (f64)row * pass.pitch
+        count = film_grains.gather(pass.geometry, layers, left, top, left + pass.pitch, top + pass.pitch, traced, bounds, grain_place,
+                                   (void*)pass, gathered)
+        if count > film_grains.cloud_most:
+            # Too many to trace: drawn from their distribution after all.
+            traced = [false, false, false]
+    if traced[0] or traced[1] or traced[2]:
+        light = [0.0, 0.0, 0.0]
+        for k in 0..<pass.samples:
+            let (ox, oy) = film_grains.sample_place((u32)column, (u32)row, (u32)k)
+            let x = ((f64)column + ox) * pass.pitch
+            let y = ((f64)row + oy) * pass.pitch
+            let clouds = film_grains.dye_at(gathered, count, x, y)
+            # Light over the developed film's (film.frag keeps it near 1, in half floats).
+            for c in 0..<(usize)3:
+                var d = 0.0
+                for layer in 0..<(usize)3:
+                    let source_layer = 0 if layers == 1 else layer
+                    if traced[source_layer]:
+                        d += slopes[layer * 3 + c] * (base[layer] + clouds[source_layer] - developed[layer])
+                # Within four decades of it (the scan's slopes are a line; far
+                # from the film's reading they would run away).
+                light[c] += math.pow(10.0, -math.clamp(d, -4.0, 4.0)) / (f64)pass.samples
+    let bias = source.grain_bias(effective, slopes, traced)
+    let spread = drawn_grain(pass, column, row, effective, slopes, traced, layers)
     var read: f64[3]
     for c in 0..<(usize)3:
-        read[c] = mean[c] - math.log10(math.max(light[c], 1.0e-30)) - bias[c]
+        read[c] = mean[c] - math.log10(math.max(light[c], 1.0e-30)) - bias[c] + spread[c]
     return (mean, read)
+
+## Which of pixel (`column`, `row`)'s layers are traced grain by grain (few
+## develop in it), and for
+## them each population's most share developed within reach of the pixel (the
+## rank bins made: film_grains.lucb's `clouds`).
+func regimes(pass: const Pass*, column: usize, row: usize, effective: f64[3], layers: usize) -> (bool[3], f64[9]):
+    let source = pass.film
+    var traced: bool[3] = [false, false, false]
+    var bounds: f64[9]
+    for k in 0..<(usize)9:
+        bounds[k] = 0.0
+    let area = pass.pitch * pass.pitch
+    for layer in 0..<layers:
+        var largest = 0.0
+        var developed = 0.0
+        let table = source.grain_table(layer, effective[layer])
+        for p in 0..<film_grains.populations:
+            let g = pass.geometry[layer * 3 + p]
+            largest = math.max(largest, g.radius)
+            developed += g.density * table[p] * area
+        let reach = film_grains.cell_radii * film_grains.size_high * largest
+        traced[layer] = developed < pass.traced_below
+        if not traced[layer]:
+            continue
+        # The effective log H over the pixels a grain reaching this one sits in.
+        let around = (i64)math.min(math.ceil(reach / pass.pitch) + 1.0, 4.0)
+        var low = effective[layer]
+        var high = effective[layer]
+        for dy in -around..=around:
+            for dx in -around..=around:
+                let h = texel(pass.first, pass.width, pass.height, (i64)column + dx, (i64)row + dy)[layer]
+                low = math.min(low, h)
+                high = math.max(high, h)
+        let most = source.share_bound(layer, low, high)
+        for p in 0..<film_grains.populations:
+            bounds[layer * 3 + p] = most[p]
+    return (traced, bounds)
+
+## The grain of the layers not traced, as density per channel: each layer's
+## rms over the pixel (the granularity through 48 µm scaled to the pixel's
+## area, Selwyn, times how much of the clouds' spread a pixel this wide
+## averages: film_grains.lucb's `pixel_covariance`), by the pixel's deviate
+## for the layer (tied to its neighbours' as clouds across its border tie
+## them), through the scan's slopes; plus what keeps the mean light (a
+## Gaussian density spread adds ln 10 · σ² / 2 to the mean density of the
+## light it passes).
+func drawn_grain(pass: const Pass*, column: usize, row: usize, effective: f64[3], slopes: f64[9], traced: bool[3], layers: usize) -> f64[3]:
+    let scale = math.sqrt(film_grains.aperture_area / (pass.pitch * pass.pitch))
+    var out: f64[3] = [0.0, 0.0, 0.0]
+    var variance: f64[3] = [0.0, 0.0, 0.0]
+    for layer in 0..<layers:
+        if traced[layer]:
+            continue
+        # The clouds' radius as the variance weighs them.
+        let table = pass.film.grain_table(layer, effective[layer])
+        var second = 0.0
+        var fourth = 0.0
+        for p in 0..<film_grains.populations:
+            let g = pass.geometry[layer * 3 + p]
+            let lambda = g.density * table[p]
+            second += lambda * g.radius * g.radius
+            fourth += lambda * g.radius * g.radius * g.radius * g.radius
+        let radius = math.sqrt(fourth / math.max(second, 1.0e-12))
+        let shares = film_grains.pixel_covariance(pass.pitch / math.max(radius, 1.0e-6))
+        var sigma = pass.film.grain_granularity(layer, effective[layer]) * scale * math.sqrt(shares[0])
+        if pass.share < 1.0:
+            sigma *= math.sqrt(film.progress(pass.film, effective, pass.share)[layer])
+        let z = film_grains.pixel_deviate((u32)column, (u32)row, (u32)layer, shares)
+        for c in 0..<(usize)3:
+            let factor = slopes[c] + slopes[3 + c] + slopes[6 + c] if layers == 1 else slopes[layer * 3 + c]
+            out[c] += factor * sigma * z
+            variance[c] += factor * factor * sigma * sigma
+    for c in 0..<(usize)3:
+        out[c] += 0.5 * 2.302585092994046 * variance[c]
+    return out
 
 ## `source` (camera values) through the film: the filmed scene, scene light in
 ## AP1 at the same size, which the caller closes. `matrix` takes the scene into
@@ -647,3 +744,59 @@ test "the stochastic render reads grey as the curve and the stock's granularity"
             assert(math.abs(read[c] - flat[c]) < 0.015)
 
 
+
+## A grey patch at full-resolution pixels (`pitch` µm), its green readings
+## (Tri-X: one silver layer), traced or drawn: their variance and the
+## correlation of each pixel with the one beside it.
+func patch_statistics(source: Film*, size: usize, pitch: f64, samples: usize, traced_below: f64, level: f64) -> (f64, f64)!:
+    try source.fit_grains()
+    let field = try new f16[size * size * 4] --- in memory.heap
+    defer free(field) in memory.heap
+    let grey = even_effective(source, level)
+    for at in 0..<size * size:
+        for k in 0..<(usize)3:
+            field[at * 4 + k] = (f16)grey[k]
+        field[at * 4 + 3] = (f16)1.0
+    var nothing = Scene()
+    var settings = settings_text("")
+    let built = build_tables(&settings)
+    var pass = Pass(stage = 11, film = source, width = size, height = size, first = field, second = field, out = field, source = &nothing,
+                    tables = &built, pitch = pitch, samples = samples, geometry = source.grain_geometry(), traced_below = traced_below)
+    let reads = try new f64[size * size] --- in memory.heap
+    defer free(reads) in memory.heap
+    var sum = 0.0
+    for row in 0..<size:
+        for column in 0..<size:
+            let (_, read) = stochastic_reading(&pass, column, row)
+            reads[row * size + column] = read[1]
+            sum += read[1]
+    let mean = sum / (f64)(size * size)
+    var variance = 0.0
+    var beside = 0.0
+    for row in 0..<size:
+        for column in 0..<size:
+            let d = reads[row * size + column] - mean
+            variance += d * d
+            if column + 1 < size:
+                beside += d * (reads[row * size + column + 1] - mean)
+    variance /= (f64)(size * size)
+    beside /= (f64)(size * (size - 1))
+    return (variance, beside / variance)
+
+test "drawn pixels have the traced grains' variance and neighbours' correlation":
+    # Tri-X at 4.4 µm pixels (a 45-megapixel scan of 35 mm), in its toe where a
+    # pixel holds tens of developed grains: every grain traced (512 samples a
+    # pixel) against the pixels drawn from their distribution.
+    var tri_x = film_for("film_stock=18") catch failure:
+        assert(false)
+        return
+    defer tri_x.release()
+    let (traced_variance, traced_beside) = patch_statistics(&tri_x, 48, 4.4, 512, 1.0e9, 0.012) catch failure:
+        assert(false)
+        return
+    let (drawn_variance, drawn_beside) = patch_statistics(&tri_x, 48, 4.4, 1, 0.0, 0.012) catch failure:
+        assert(false)
+        return
+    print(f"traced rms {math.sqrt(traced_variance)} beside {traced_beside}; drawn rms {math.sqrt(drawn_variance)} beside {drawn_beside}")
+    assert(math.abs(math.sqrt(drawn_variance / traced_variance) - 1.0) < 0.12)
+    assert(math.abs(drawn_beside - traced_beside) < 0.08)

@@ -17,15 +17,16 @@
 //   4  develop: held back by the blurred inhibitor and exhaustion (image 2),
 //      grain, the scan, back to AP1 (film.lucb's `scan`)
 //  10  the effective log H the film developed at (for the stochastic render)
-//  11  the stochastic render's samples (film_grains.lucb, film_passes.lucb's
-//      `stochastic_reading`): row0.z more samples from number row0.y, each the
-//      light through the grains at a point of the pixel over the light
-//      through the developed film there (near 1, so half floats hold it to
-//      about three digits), into image 2's running mean of the row0.y before;
-//      image 1 the effective log H
-//  12  the stochastic render read back: image 2's mean light as density over
-//      the developed film's reading, less the grains' average, the grain's
+//  11  the stochastic render's traced pixels (film_grains.lucb, film_passes.lucb's
+//      `stochastic_reading`): the grains reaching the pixel gathered, row0.z
+//      samples among them, each the light through the grains at a point of
+//      the pixel over the light through the developed film there; their mean
+//      (alpha 1: traced). Image 1 the effective log H
+//  12  the stochastic render read back: traced pixels' mean light (image 2) as
+//      density over the developed film's reading, less the traced grains'
+//      average, the others drawn from their distribution; the grain's
 //      strength about the developed film's reading, then the scan as stage 4
+//  15  no grains traced yet (alpha 0)
 //
 //   image 1, 2  the stage's inputs, RGBA half floats at the scene's size
 //   image 3     the develop's tables (tables.lucb), for the lens vignetting
@@ -50,7 +51,7 @@ layout(set = 0, binding = 4) uniform sampler2D film;
 
 const float table_width = 1024.0;
 const float film_width = 1089.0;
-const float film_rows = 40.0;
+const float film_rows = 41.0;
 const float film_lut_size = 33.0;
 
 vec4 value(float at) {
@@ -315,11 +316,12 @@ mat3 scan_slopes(vec3 a) {
     return out_slopes;
 }
 // The grains' average over the developed film's reading (film.lucb's `grain_bias`).
-vec3 grain_bias(vec3 log_h, mat3 slopes) {
+vec3 grain_bias(vec3 log_h, mat3 slopes, bvec3 traced) {
     int layers = int(film_value(338.0).w + 0.5);
     vec3 out_bias = vec3(0.0);
     for (int channel = 0; channel < 3; channel++) {
         for (int layer = 0; layer < layers; layer++) {
+            if (!traced[layer]) continue;
             float factor = layers == 1 ? slopes[0][channel] + slopes[1][channel] + slopes[2][channel] : slopes[layer][channel];
             vec4 table = grain_table(layer, log_h[layer]);
             for (int p = 0; p < 3; p++) {
@@ -345,42 +347,160 @@ vec4 grain_at(vec2 centre, int layer, float share, bool reversal) {
     }
     return place;
 }
-// The grains' dye at `point` (µm) per layer (film_grains.lucb's `clouds`).
-vec3 clouds(vec2 point, int layers, float share, bool reversal) {
-    vec3 out_clouds = vec3(0.0);
+// The developed grains whose clouds reach the pixel rectangle `low`..`high`
+// (µm), of the traced layers (film_grains.lucb's `gather`): centres, radius²
+// and peak in `clouds`, layers in `cloud_layers`; how many (more than 128: too
+// many to trace).
+vec4 clouds[128];
+int cloud_layers[128];
+int gather(vec2 low, vec2 high, int layers, bvec3 traced, vec3 bounds[3], float share, bool reversal) {
+    int count = 0;
     for (int layer = 0; layer < layers; layer++) {
+        if (!traced[layer]) continue;
         for (int p = 0; p < 3; p++) {
             vec4 g = film_value(329.0 + float(layer * 3 + p));
             if (g.x <= 0.0) continue;
-            float cell = 1.4 * g.z;
             float largest = g.z * 1.4;
-            float mean = g.x * cell * cell;
-            vec2 u = point / cell + 2.0;
-            ivec2 c = ivec2(floor(u));
-            uint stream = uint(layer * 3 + p + 1);
-            for (int dy = -1; dy <= 1; dy++) {
-                for (int dx = -1; dx <= 1; dx++) {
-                    ivec2 k = c + ivec2(dx, dy);
-                    uint seed = cell_seed(uint(k.x), uint(k.y), stream);
-                    uint count = grain_count(seed, mean);
-                    for (uint j = 0u; j < count; j++) {
-                        vec2 centre = (vec2(k) + grain_place(seed, j) - 2.0) * cell;
-                        vec2 offset = point - centre;
-                        float near = dot(offset, offset);
-                        if (near >= largest * largest) continue;
-                        vec2 size_rank = grain_size_rank(seed, j);
-                        float radius = g.z * size_rank.x;
-                        float far = near / (radius * radius);
-                        if (far >= 1.0) continue;
-                        vec4 place = grain_at(centre, layer, share, reversal);
-                        if (size_rank.y >= place[p]) continue;
-                        out_clouds[layer] += g.y * place.w * (1.0 - far) * (1.0 - far);
+            for (uint b = 0u; b < 8u; b++) {
+                float bottom_rank = b == 0u ? 0.0 : exp2(float(b) - 8.0);
+                if (bottom_rank >= bounds[layer][p]) break;
+                float width = exp2(float(b) - 7.0) - bottom_rank;
+                float cell = max(1.4 * g.z, sqrt(8.0 / max(g.x * width, 1e-9)));
+                float mean = g.x * width * cell * cell;
+                uint stream = uint(layer * 3 + p + 1) * 8u + b;
+                ivec2 first = ivec2(floor((low - largest) / cell)) + 4;
+                ivec2 last = ivec2(floor((high + largest) / cell)) + 4;
+                for (int ky = first.y; ky <= last.y; ky++) {
+                    for (int kx = first.x; kx <= last.x; kx++) {
+                        uint seed = cell_seed(uint(kx), uint(ky), stream);
+                        uint grains = grain_count(seed, mean);
+                        for (uint j = 0u; j < grains; j++) {
+                            vec2 centre = (vec2(kx, ky) + grain_place(seed, j) - 4.0) * cell;
+                            vec2 outside = max(max(low - centre, centre - high), vec2(0.0));
+                            float near = dot(outside, outside);
+                            if (near >= largest * largest) continue;
+                            vec2 size_rank = grain_size_rank(seed, j);
+                            float radius = g.z * size_rank.x;
+                            if (near >= radius * radius) continue;
+                            vec4 place = grain_at(centre, layer, share, reversal);
+                            if (bottom_rank + width * size_rank.y >= place[p]) continue;
+                            if (count < 128) {
+                                clouds[count] = vec4(centre, radius * radius, g.y * place.w);
+                                cloud_layers[count] = layer;
+                            }
+                            count++;
+                        }
                     }
                 }
             }
         }
     }
-    return out_clouds;
+    return count;
+}
+// The gathered clouds' dye at `point` (µm), per layer.
+vec3 dye_at(int count, vec2 point) {
+    vec3 out_dye = vec3(0.0);
+    for (int at = 0; at < count; at++) {
+        vec2 d = point - clouds[at].xy;
+        float far = dot(d, d) / clouds[at].z;
+        if (far < 1.0) out_dye[cloud_layers[at]] += clouds[at].w * (1.0 - far) * (1.0 - far);
+    }
+    return out_dye;
+}
+// The most share of layer `layer`'s populations developed from log H `low` to
+// `high` (film.lucb's `share_bound`).
+vec3 share_bound(int layer, float low, float high) {
+    vec3 out_bound = max(grain_table(layer, low).xyz, grain_table(layer, high).xyz);
+    int first = int(ceil(clamp((low + 4.5) / 7.0, 0.0, 1.0) * 1023.0));
+    int last = int(floor(clamp((high + 4.5) / 7.0, 0.0, 1.0) * 1023.0));
+    for (int at = first; at <= last && at < 1024; at++) out_bound = max(out_bound, texelFetch(film, ivec2(at, 36 + layer), 0).xyz);
+    return out_bound;
+}
+// Which layers of the pixel at `at` are traced, and their bounds
+// (film_passes.lucb's `regimes`).
+bvec3 regimes(ivec2 at, vec3 effective, int layers, out vec3 bounds[3]) {
+    bvec3 traced = bvec3(false);
+    float pitch = params.halo.w;
+    bounds[0] = vec3(0.0); bounds[1] = vec3(0.0); bounds[2] = vec3(0.0);
+    for (int layer = 0; layer < layers; layer++) {
+        float largest = 0.0;
+        float developed_count = 0.0;
+        vec4 table = grain_table(layer, effective[layer]);
+        for (int p = 0; p < 3; p++) {
+            vec4 g = film_value(329.0 + float(layer * 3 + p));
+            largest = max(largest, g.z);
+            developed_count += g.x * table[p] * pitch * pitch;
+        }
+        float reach = 1.4 * 1.4 * largest;
+        traced[layer] = developed_count < 16.0;
+        if (!traced[layer]) continue;
+        int around = int(min(ceil(reach / pitch) + 1.0, 4.0));
+        float low = effective[layer];
+        float high = effective[layer];
+        for (int dy = -around; dy <= around; dy++) {
+            for (int dx = -around; dx <= around; dx++) {
+                float h = fetch(first_image, at + ivec2(dx, dy))[layer];
+                low = min(low, h);
+                high = max(high, h);
+            }
+        }
+        bounds[layer] = share_bound(layer, low, high);
+    }
+    return traced;
+}
+// A standard normal deviate from a hash (film_grains.lucb's `normal_at`).
+float normal_at(uint x, uint y, uint tag) {
+    float first = max(fraction(mixed(x * 0x27d4eb2du + tag, y ^ 0x165667b1u)), 1e-7);
+    float second = fraction(mixed(y * 0x9e3779b1u + tag, x ^ 0x85ebca77u));
+    return sqrt(-2.0 * log(first)) * cos(6.283185307179586 * second);
+}
+// How a pixel `u` cloud radii wide averages the clouds (values 390–421).
+vec3 pixel_covariance(float u) {
+    float place = clamp(log(max(u, 0.25) / 0.25) / log(80.0), 0.0, 1.0) * 31.0;
+    float below = min(floor(place), 30.0);
+    return mix(film_value(390.0 + below).xyz, film_value(391.0 + below).xyz, place - below);
+}
+// The pixel's deviate, tied to its neighbours' (film_grains.lucb's `pixel_deviate`).
+float pixel_deviate(uint px, uint py, uint layer, vec3 shares) {
+    float side = max(shares.y / max(shares.x, 1e-12), 0.0);
+    float diagonal = max(shares.z / max(shares.x, 1e-12), 0.0);
+    float corner = sqrt(min(diagonal, 0.0625));
+    float edge = sqrt(clamp(side - 2.0 * corner * corner, 0.0, 0.25));
+    float own = sqrt(max(1.0 - 4.0 * edge * edge - 4.0 * corner * corner, 0.0));
+    uint tag = layer * 8u;
+    uint x = px + 1u;
+    uint y = py + 1u;
+    float out_deviate = own * normal_at(x, y, tag);
+    out_deviate += edge * (normal_at(x, y, tag + 1u) + normal_at(x - 1u, y, tag + 1u) + normal_at(x, y, tag + 2u) + normal_at(x, y - 1u, tag + 2u));
+    out_deviate += corner * (normal_at(x, y, tag + 3u) + normal_at(x - 1u, y, tag + 3u) + normal_at(x, y - 1u, tag + 3u) + normal_at(x - 1u, y - 1u, tag + 3u));
+    return out_deviate;
+}
+// The grain of the layers not traced (film_passes.lucb's `drawn_grain`).
+vec3 drawn_grain(ivec2 at, vec3 effective, mat3 slopes, bvec3 traced, int layers, float share) {
+    float scale = sqrt(1809.5573684677208) / params.halo.w;
+    vec3 out_grain = vec3(0.0);
+    vec3 variance = vec3(0.0);
+    for (int layer = 0; layer < layers; layer++) {
+        if (traced[layer]) continue;
+        vec4 table = grain_table(layer, effective[layer]);
+        float second = 0.0;
+        float fourth = 0.0;
+        for (int p = 0; p < 3; p++) {
+            vec4 g = film_value(329.0 + float(layer * 3 + p));
+            float lambda = g.x * table[p];
+            second += lambda * g.z * g.z;
+            fourth += lambda * g.z * g.z * g.z * g.z;
+        }
+        float radius = sqrt(fourth / max(second, 1e-12));
+        vec3 shares = pixel_covariance(params.halo.w / max(radius, 1e-6));
+        float sigma = film_along(39.0, effective[layer])[layer] * scale * sqrt(shares.x);
+        if (share < 1.0) sigma *= sqrt(progress(effective, share)[layer]);
+        float z = pixel_deviate(uint(at.x), uint(at.y), uint(layer), shares);
+        vec3 factor = layers == 1 ? slopes[0] + slopes[1] + slopes[2] : slopes[layer];
+        out_grain += factor * sigma * z;
+        variance += factor * factor * sigma * sigma;
+    }
+    return out_grain + 0.5 * 2.302585092994046 * variance;
 }
 // The developed film at effective log H `effective`, `share` of the way (film.lucb's `developed_amounts`).
 vec3 developed_amounts(vec3 effective, float share) {
@@ -476,7 +596,27 @@ void main() {
         vec3 effective;
         developed(at, amounts, effective);
         out_color = effective;
-    } else if (stage == 11 || stage == 12) {
+    } else if (stage == 14) {
+        // Whether any pixel of this 16-pixel tile traces grains (film_gpu's runs).
+        int layers = int(film_value(338.0).w + 0.5);
+        float pitch = params.halo.w;
+        ivec2 size = textureSize(first_image, 0);
+        float traced_count = 0.0;
+        for (int y = 0; y < 16; y++) {
+            for (int x = 0; x < 16; x++) {
+                ivec2 pixel = at * 16 + ivec2(x, y);
+                if (pixel.x >= size.x || pixel.y >= size.y) continue;
+                vec3 effective = texelFetch(first_image, pixel, 0).rgb;
+                for (int layer = 0; layer < layers; layer++) {
+                    vec4 table = grain_table(layer, effective[layer]);
+                    float developed_count = 0.0;
+                    for (int p = 0; p < 3; p++) developed_count += film_value(329.0 + float(layer * 3 + p)).x * table[p] * pitch * pitch;
+                    if (developed_count < 16.0) traced_count += 1.0;
+                }
+            }
+        }
+        out_color = vec3(traced_count);
+    } else if (stage == 11 || stage == 12 || stage == 15) {
         vec3 effective = fetch(first_image, at);
         float share = params.row0.x;
         vec3 developed_now = developed_amounts(effective, share);
@@ -484,24 +624,42 @@ void main() {
         mat3 slopes = scan_slopes(developed_now);
         vec4 sums = fetch4(second_image, at);
         float before = params.row0.y;
+        vec4 base = film_value(338.0);
+        int layers = int(base.w + 0.5);
+        vec3 bounds[3];
+        bvec3 traced = regimes(at, effective, layers, bounds);
         if (stage == 11) {
-            bool reversal = film_value(17.0).w > 0.5 && film_value(17.0).w < 1.5;
-            vec4 base = film_value(338.0);
-            int layers = int(base.w + 0.5);
-            uint first_sample = uint(params.row0.y + 0.5);
-            uint count = uint(params.row0.z + 0.5);
+            // Traced: the grains reaching the pixel gathered once, row0.z
+            // samples among them; the mean light over the developed film's.
+            float pitch = params.halo.w;
+            int count = any(traced) ? gather(vec2(at) * pitch, vec2(at + 1) * pitch, layers, traced, bounds, share,
+                                             film_value(17.0).w > 0.5 && film_value(17.0).w < 1.5) : 0;
+            if (!any(traced) || count > 128) {
+                fragment_color = vec4(1.0, 1.0, 1.0, 0.0);
+                return;
+            }
+            uint samples = uint(params.row0.z + 0.5);
+            vec3 mask = layers == 1 ? vec3(traced.x ? 1.0 : 0.0) : vec3(traced);
             vec3 light = vec3(0.0);
-            for (uint k = first_sample; k < first_sample + count; k++) {
-                vec2 place = (vec2(at) + sample_place(uint(at.x), uint(at.y), k)) * params.halo.w;
-                vec3 dye = clouds(place, layers, share, reversal);
-                vec3 amounts = base.rgb + (layers == 1 ? vec3(dye.r) : dye) - developed_now;
+            for (uint k = 0u; k < samples; k++) {
+                vec2 place = (vec2(at) + sample_place(uint(at.x), uint(at.y), k)) * pitch;
+                vec3 dye = dye_at(count, place);
+                vec3 amounts = mask * (base.rgb + (layers == 1 ? vec3(dye.r) : dye) - developed_now);
                 light += pow(vec3(10.0), -clamp(slopes * amounts, -4.0, 4.0));
             }
-            vec3 kept = before > 0.5 ? sums.rgb * before : vec3(0.0);
-            fragment_color = vec4((kept + light) / (before + float(count)), 1.0);
+            fragment_color = vec4(light / float(samples), 1.0);
             return;
         }
-        vec3 read = mean - log(max(sums.rgb, vec3(1e-30))) / log(10.0) - grain_bias(effective, slopes);
+        if (stage == 15) {
+            // No grains traced yet: the developed film's light.
+            fragment_color = vec4(1.0, 1.0, 1.0, 0.0);
+            return;
+        }
+        // Alpha 0: not traced after all (too many grains), or not yet.
+        if (sums.a < 0.5) traced = bvec3(false);
+        vec3 relative = any(traced) ? sums.rgb : vec3(1.0);
+        vec3 read = mean - log(max(relative, vec3(1e-30))) / log(10.0) - grain_bias(effective, slopes, traced)
+                  + drawn_grain(at, effective, slopes, traced, layers, share);
         vec3 d = mean + film_value(6.0).w * (read - mean);
         float slide = film_value(17.0).w;
         if (slide > 0.5 && slide < 1.5) {

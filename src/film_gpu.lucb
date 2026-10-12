@@ -16,10 +16,6 @@ from scene import Scene
 from tables import Tables, table_width, table_rows
 import tables as develop_tables
 
-## The most samples (pixels times samples each) one submission of the
-## stochastic render takes.
-let band_work: u32 = 262144
-
 pub struct FilmPasses:
     var shader: gpu.Shader?
     var pipeline: gpu.Pipeline?
@@ -39,20 +35,25 @@ pub struct FilmPasses:
     ## the developed film; 1: none of it yet), for watching it develop.
     pub var remaining: f64
     ## The stochastic render: the effective log H (`run` leaves it), the
-    ## samples' mean light (two, one read while the other is written), what it
-    ## reads back to, and how many samples are in. What the last run used, for
-    ## the passes after it.
+    ## traced pixels' mean light, what it reads back to, and the samples its
+    ## traced pixels have once all are traced (0 before). What the last run
+    ## used, for the passes after it.
     var effective: gpu.Texture?
     var sums: gpu.Texture?
-    var sums_next: gpu.Texture?
     var resolved: gpu.Texture?
     pub var samples: u32
     ## The last submission of the last batch: the next batch waits for it, so
     ## batches never pile up on the GPU's queue.
     var submitted: gpu.Submission?
-    ## How far down the image the pass in progress is (rows), and its samples a pixel.
-    var band_top: f64
-    var pass_count: u32
+    ## Where the stochastic render traces grains: runs of 16-pixel tiles with
+    ## any pixel traced, one tile row tall (x, y, width, height in pixels,
+    ## four a run), how many, and how many pixels they cover; the pass in
+    ## progress: its next run, and its samples a pixel.
+    var runs: f64[]
+    var run_count: usize
+    pub var traced_pixels: f64
+    var run_at: usize
+    var tiles: gpu.Texture?
     var last_plan: Plan
     var last_matrix: f64[9]
     var last_aspect: f64
@@ -77,7 +78,6 @@ pub struct FilmPasses:
             self.effective = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.resolved = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.sums = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
-            self.sums_next = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.width = width
             self.height = height
         let exposed = self.exposed else return scene
@@ -129,7 +129,11 @@ pub struct FilmPasses:
         if let effective = self.effective:
             try self.pass(effective, 10, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
         self.samples = 0
-        self.band_top = 0.0
+        self.run_at = 0
+        try self.find_runs(device, tables, atlas, plan, matrix, aspect)
+        if let sums = self.sums:
+            if let effective = self.effective:
+                try self.pass(sums, 15, effective, effective, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
         self.last_plan = plan
         self.last_matrix = matrix
         self.last_aspect = aspect
@@ -141,19 +145,19 @@ pub struct FilmPasses:
         return spare
 
     ## Go on with the stochastic render of the film last `run` (its grains
-    ## fitted in `atlas`: Film.fit_grains): about `budget` samples (pixels
-    ## times samples each) more this call, so a frame stays short; each pass
-    ## over the image adds `count` samples a pixel, in bands of rows. When a
-    ## pass completes with at least `shown_after` samples in, the render read
-    ## back (and duplicated as `run` does), a texture these passes own until
-    ## the next run; else none (what was shown stays).
-    pub func refine(device: gpu.Device, tables: gpu.Texture, atlas: gpu.Texture, count: u32, budget: u32, shown_after: u32) -> gpu.Texture?!:
+    ## fitted in `atlas`: Film.fit_grains): trace about `budget` more pixels
+    ## this call (the runs of tiles with traced pixels, in order), each with
+    ## `samples` samples among the grains gathered for it, so a frame stays
+    ## short; then, unless only `at_end` and there is more to trace, read the
+    ## render back (and duplicate it as `run` does): the pixels drawn from
+    ## their distribution are final at once, the traced ones as they are
+    ## traced. A texture these passes own until the next run, or none.
+    pub func refine(device: gpu.Device, tables: gpu.Texture, atlas: gpu.Texture, samples: u32, budget: f64, at_end: bool = false) -> gpu.Texture?!:
         # The last call's work done first: calls never pile up on the queue.
         if let before = self.submitted:
             try device.wait(before)
         let effective = self.effective else return none
         let sums = self.sums else return none
-        let next = self.sums_next else return none
         let resolved = self.resolved else return none
         let one = self.one else return none
         let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false, alpha = 0.0f32)
@@ -161,39 +165,78 @@ pub struct FilmPasses:
         let matrix = self.last_matrix
         let aspect = self.last_aspect
         let share = (f32)(1.0 - self.remaining)
-        # `sums` holds the latest; this pass reads it and writes the other, in
-        # bands of rows, each its own submission.
-        if self.band_top == 0.0:
-            self.pass_count = count
-        let batch: f32[4] = [share, (f32)self.samples, (f32)self.pass_count, 0.0f32]
-        let per_row = (f64)self.width * (f64)self.pass_count
-        let rows = math.max(1.0, math.floor((f64)band_work / per_row))
+        let trace: f32[4] = [share, 0.0f32, (f32)samples, 0.0f32]
         var done = 0.0
-        while self.band_top < (f64)self.height and done < (f64)budget:
-            let band = math.min(rows, (f64)self.height - self.band_top)
-            try self.pass(next, 11, effective, sums, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, batch, self.band_top, band)
-            self.band_top += band
-            done += band * per_row
-        if self.band_top < (f64)self.height:
+        while self.run_at < self.run_count and done < budget:
+            let r = self.run_at * 4
+            try self.pass(sums, 11, effective, effective, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, trace,
+                          self.runs[r + 1], self.runs[r + 3], self.runs[r], self.runs[r + 2])
+            done += self.runs[r + 2] * self.runs[r + 3]
+            self.run_at += 1
+        if self.run_at >= self.run_count:
+            self.samples = samples
+        elif at_end:
             return none
-        self.band_top = 0.0
-        self.sums = next
-        self.sums_next = sums
-        self.samples += self.pass_count
-        if self.samples < shown_after:
-            return none
-        let read: f32[4] = [share, (f32)self.samples, 0.0f32, 0.0f32]
-        try self.pass(resolved, 12, effective, next, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, read)
+        let read: f32[4] = [share, 0.0f32, 0.0f32, 0.0f32]
+        try self.pass(resolved, 12, effective, sums, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, read)
         if plan.duplicated.radius > 0:
             try self.pass(one, 1, resolved, resolved, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
             try self.pass(resolved, 1, one, one, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
         return resolved
 
+    ## How much of the tracing is done (0..1).
+    pub func traced_share() -> f64:
+        return (f64)self.run_at / (f64)self.run_count if self.run_count > 0 else 1.0
+
+    ## Which 16-pixel tiles trace grains (film.frag's stage 14, read back), as
+    ## runs along each row of tiles.
+    func find_runs(device: gpu.Device, tables: gpu.Texture, atlas: gpu.Texture, plan: Plan, matrix: f64[9], aspect: f64) -> !:
+        let effective = self.effective else return
+        let across = (self.width + 15) // 16
+        let down = (self.height + 15) // 16
+        if let held = self.tiles:
+            var gone = held
+            gone.destroy()
+        self.tiles = try gpu.Texture.create(device, across, down, gpu.Format.rgba16_float)
+        let tiles = self.tiles else return
+        let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false, alpha = 0.0f32)
+        let shown: f32[4] = [(f32)(1.0 - self.remaining), 0.0f32, 0.0f32, 0.0f32]
+        try self.pass(tiles, 14, effective, effective, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
+        let flags = try new f16[(usize)(across * down) * 4] --- in memory.heap
+        defer free(flags) in memory.heap
+        try tiles.read(u8[]((u8*)flags.data, flags.length * 2))
+        if self.runs.length > 0:
+            free(self.runs) in memory.heap
+        self.runs = try new f64[(usize)(across * down) * 4] --- in memory.heap
+        self.run_count = 0
+        self.traced_pixels = 0.0
+        for ty in 0..<(usize)down:
+            var tx: usize = 0
+            while tx < (usize)across:
+                if (f64)flags[(ty * (usize)across + tx) * 4] <= 0.0:
+                    tx += 1
+                    continue
+                let first = tx
+                while tx < (usize)across and (f64)flags[(ty * (usize)across + tx) * 4] > 0.0:
+                    tx += 1
+                let x = (f64)(first * 16)
+                let y = (f64)(ty * 16)
+                let w = math.min((f64)(tx * 16), (f64)self.width) - x
+                let h = math.min(y + 16.0, (f64)self.height) - y
+                let at = self.run_count * 4
+                self.runs[at] = x
+                self.runs[at + 1] = y
+                self.runs[at + 2] = w
+                self.runs[at + 3] = h
+                self.run_count += 1
+                self.traced_pixels += w * h
+
     ## One stage into `target` (rows `top` on, `rows` of them; all when 0).
     ## `row0` replaces the matrix's first row for development's stages (8: the
     ## step's shares; 4: the share shown).
     func pass(target: gpu.Texture, stage: i64, first: gpu.Texture, second: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture,
-              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64, row0: f32[4]? = none, top: f64 = 0.0, rows: f64 = 0.0) -> !:
+              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64, row0: f32[4]? = none, top: f64 = 0.0, rows: f64 = 0.0,
+              left: f64 = 0.0, across: f64 = 0.0) -> !:
         let pipeline = self.pipeline else return
         # A band keeps the rest of the texture as the other bands left it.
         let frame = try target.frame(keep = rows > 0.0)
@@ -216,7 +259,7 @@ pub struct FilmPasses:
             for k in 0..<(usize)4:
                 uniforms[16 + k] = row[k]
         let images: gpu.Texture[4] = [first, second, tables, atlas]
-        let band = gpu.Rect(0.0, top, (f64)w, rows) if rows > 0.0 else gpu.Rect(0.0, 0.0, (f64)w, (f64)h)
+        let band = gpu.Rect(left, top, across if across > 0.0 else (f64)w, rows) if rows > 0.0 else gpu.Rect(0.0, 0.0, (f64)w, (f64)h)
         try gpu.shade(try area.get(), pipeline, band, u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
         self.submitted = frame.value().submission()
@@ -233,7 +276,12 @@ pub struct FilmPasses:
 
     func release_textures():
         self.release_low()
-        for slot in [&self.effective, &self.sums, &self.sums_next, &self.resolved]:
+        if self.runs.length > 0:
+            free(self.runs) in memory.heap
+        var no_runs: f64[]
+        self.runs = no_runs
+        self.run_count = 0
+        for slot in [&self.effective, &self.sums, &self.resolved, &self.tiles]:
             if let held = *slot:
                 var gone = held
                 gone.destroy()
@@ -266,9 +314,8 @@ pub struct FilmPasses:
             gone.destroy()
         self.shader = none
 
-## The most samples (pixels times samples each) an export's call to `refine`
-## takes: its submissions stay short.
-let export_work: u32 = 4194304
+## The most pixels an export's call to `refine` traces: its submissions stay short.
+let export_work: u32 = 262144
 
 ## `scene` (camera values) through the film on the GPU at its own size, for an
 ## export: the passes as the renderer runs them (`matrix` into AP1, the lens
@@ -303,11 +350,10 @@ pub func filmed_on_gpu(source: Film*, scene: const Scene*, matrix: f64[9], built
     defer passes.release()
     var out = try passes.run(device, scene_texture, tables_texture, atlas_texture, source, matrix, aspect, width, height, veil)
     if grained:
-        let pixels = (f64)width * (f64)height
-        let count = (u32)math.clamp(math.floor((f64)export_work / pixels), 1.0, 16.0)
         while true:
-            if let resolved = try passes.refine(device, tables_texture, atlas_texture, count, export_work, samples):
+            if let resolved = try passes.refine(device, tables_texture, atlas_texture, samples, (f64)export_work, at_end = true):
                 out = resolved
+            if passes.samples >= samples:
                 break
     let pixels = try new f16[(usize)width * (usize)height * 4] --- in memory.heap
     errdefer free(pixels) in memory.heap

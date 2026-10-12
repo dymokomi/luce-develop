@@ -129,15 +129,11 @@ func view_key(settings: const Settings*) -> i64:
 ## How long watching development takes, seconds of real time.
 let watch_seconds: f64 = 2.5
 
-## The stochastic render (film_grains.lucb): samples a pixel it refines to, and
-## how many it needs before it is shown in place of the statistical film (fewer
-## leave the sampling's own noise on top of the grain: silver, nearly opaque,
-## needs the most).
+## The stochastic render (film_grains.lucb): samples a traced pixel takes among
+## its grains, and how many pixels a frame traces (frames stay a few tens of
+## milliseconds while it refines, however large the photo).
 pub let refine_target: u32 = 256
-pub let shown_after: u32 = 4
-## About how much of it a frame does (pixels times samples), so frames stay a
-## few tens of milliseconds while it refines, however large the photo.
-let frame_work: u32 = 524288
+let frame_work: f64 = 4096.0
 
 func developing() -> Developing:
     return Developing(settings = defaults(), view_baked = -1)
@@ -317,6 +313,10 @@ pub struct Renderer:
     ## statistical film shows).
     pub func refined_samples() -> i64:
         return (i64)self.a.film_passes.samples
+
+    ## How much of output A's stochastic render is done (0..1).
+    pub func refined_share() -> f64:
+        return self.a.film_passes.traced_share()
 
     func still_refining(which: const Developing*) -> bool:
         let wanted = self.refining and not self.watch_running and which.film.active() and which.settings.get(.film_grain) > 0.0
@@ -541,10 +541,7 @@ pub struct Renderer:
             try which.film.fit_grains()
             try upload_atlas(device, which)
         let film_texture = which.film_texture else return
-        # A small photo takes several samples a pass; a large one one.
-        let pixels = (u32)(self.shown.width() * self.shown.height())
-        let count = math.clamp((f64)frame_work / (f64)(pixels if pixels > 0 else 1), 1.0, 16.0)
-        if let resolved = try which.film_passes.refine(device, tables_texture, film_texture, (u32)count, frame_work, shown_after):
+        if let resolved = try which.film_passes.refine(device, tables_texture, film_texture, refine_target, frame_work):
             which.filmed = resolved
 
     ## Stop the loading thread and let every texture go.

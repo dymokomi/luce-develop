@@ -22,6 +22,21 @@
 ## factor of two or more at real densities: where clouds overlap, light comes
 ## through the gaps between them.
 ##
+## Where a pixel holds many developed clouds (`gaussian_from` and more), the
+## light it passes is the sum of many independent grains: Gaussian to a few
+## percent, with Campbell's mean and covariances. The pixel's variance is the
+## granularity scaled to its area (Selwyn's law) times how much of a cloud's
+## spread a pixel of its size averages (`pixel_covariance`), and clouds across
+## a pixel's border tie it to its neighbours: its deviate is its own plus
+## those of its four edges and four corners, shared with the pixels there,
+## weighted so the variance and the neighbours' and diagonals' covariances are
+## Campbell's. There the stochastic render takes the pixel from that
+## distribution; grains are traced one by one where few develop (a toe, a
+## slide's highlights, a view finer than the grain), where their shape and
+## sparseness show. Grains are made in bins of
+## rank (each its own Poisson stream), and only the bins that can develop are
+## made, so tracing costs what develops, not what is coated.
+##
 ## The clouds' peak density is an estimate: 0.5 for a color dye cloud, 2.0 for
 ## a developed silver grain (nearly opaque). Their sizes follow from it and
 ## the granularity, as Selwyn's law ties the two: grains of a given density
@@ -46,6 +61,15 @@ pub let color_peak: f64 = 0.5
 pub let silver_peak: f64 = 2.0
 let radius_ratio: f64[3] = [1.0, 0.75, 0.55]
 let ln10: f64 = 2.302585092994046
+## A pixel's layer is taken from its distribution from this many developed
+## clouds in it.
+pub let gaussian_from: f64 = 16.0
+## The rank bins: the first [0, 1/128), then each twice as wide.
+pub let rank_bins: u32 = 8
+pub func bin_low(b: u32) -> f64:
+    return 0.0 if b == 0 else math.pow(2.0, (f64)b - 8.0)
+pub func bin_high(b: u32) -> f64:
+    return math.pow(2.0, (f64)b - 7.0)
 ## Poisson counts beyond this mean come from the normal approximation.
 let normal_beyond: f64 = 24.0
 pub let count_most: u32 = 96
@@ -67,12 +91,20 @@ pub struct Geometry:
 pub struct Fit:
     pub var geometry: Geometry[9]
     pub var table: f64[]
+    ## The fitted grains' own granularity (rms through 48 µm, Campbell) over
+    ## the same log H, per layer: what pixels drawn from their distribution
+    ## take, so they stand in for these grains exactly.
+    pub var granularity: f64[]
 
     pub func release():
         if self.table.length > 0:
             free(self.table) in memory.heap
+        if self.granularity.length > 0:
+            free(self.granularity) in memory.heap
         var empty: f64[]
         self.table = empty
+        var none_left: f64[]
+        self.granularity = none_left
 
 # mark: Hashing ===============================================================
 
@@ -269,6 +301,9 @@ pub func fit(layers: usize, curves: const f64[], granularity: const f64[], rever
     out.table = try new f64[table_samples * 3 * 4] --- in memory.heap
     for at in 0..<out.table.length:
         out.table[at] = 0.0
+    out.granularity = try new f64[table_samples * 3] --- in memory.heap
+    for at in 0..<out.granularity.length:
+        out.granularity[at] = 0.0
     for layer in 0..<layers:
         let populations_at = placed(curves, layer, reversal)
         try fit_layer(&out, layer, curves, granularity, populations_at, reversal, peak)
@@ -429,6 +464,23 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
         for p in 0..<populations:
             out.table[base + p] = share(populations_at, layer, p, warp, reversal)
         out.table[base + 3] = strength
+    # The grains' own granularity, every few samples, between them interpolated.
+    var index: usize = 0
+    while index < count:
+        let sample = index * solved_every if index * solved_every < table_samples else table_samples - 1
+        let base = (sample * 3 + layer) * 4
+        var lambda: f64[3]
+        for p in 0..<populations:
+            lambda[p] = geometry[p].density * out.table[base + p]
+        out.granularity[sample * 3 + layer] = math.sqrt(field_variance(geometry, lambda, out.table[base + 3]))
+        index += 1
+    for sample in 0..<table_samples:
+        if sample % solved_every == 0 or sample == table_samples - 1:
+            continue
+        let below = sample - sample % solved_every
+        let above = below + solved_every if below + solved_every < table_samples else table_samples - 1
+        let t = (f64)(sample - below) / (f64)(above - below)
+        out.granularity[sample * 3 + layer] = out.granularity[below * 3 + layer] * (1.0 - t) + out.granularity[above * 3 + layer] * t
 
 ## The developed grains per µm² of each population with all developed as at
 ## log H `warp`.
@@ -488,50 +540,166 @@ pub func nonnegative3(normal: f64[9], right: f64[3]) -> f64[3]:
 
 # mark: Sampling ==============================================================
 
-## The clouds' density at (`x`, `y`) µm, per layer (`layers` of them, three or
-## one), from grains of `geometry`. Each grain within reach asks `lookup` (with
-## `context`) what the film says at its own centre for its layer: each
-## population's share developed there (as far as the development has come)
-## and the clouds' strength; it develops where its rank is under its share.
-pub func clouds(geometry: const Geometry[], layers: usize, x: f64, y: f64, lookup: func(void*, usize, f64, f64) -> f64[4],
-                context: void*) -> f64[3]:
-    var out: f64[3] = [0.0, 0.0, 0.0]
+## A developed grain's dye cloud near a traced pixel: its centre (µm), its
+## radius squared, its peak density (its population's times the strength
+## there), its layer.
+pub struct Cloud:
+    pub var x: f64
+    pub var y: f64
+    pub var radius2: f64
+    pub var peak: f64
+    pub var layer: usize
+
+## The most clouds a traced pixel gathers: beyond, it is drawn instead.
+pub let cloud_most: usize = 128
+
+## The cells a bin's grains are made in: no smaller than the grains' reach
+## (`cell_radii` radii), and wide enough to hold about `cell_grains` of them,
+## so finding a sparse bin's grains costs what is there.
+let cell_grains: f64 = 8.0
+pub func bin_cell(g: Geometry, b: u32) -> f64:
+    let width = bin_high(b) - bin_low(b)
+    return math.max(cell_radii * g.radius, math.sqrt(cell_grains / math.max(g.density * width, 1.0e-9)))
+
+## The developed grains whose clouds reach the rectangle `left`..`right`,
+## `top`..`bottom` (µm), of the `traced` layers (of `layers`), from grains of
+## `geometry`: only the rank bins under `bounds` (each population's most share
+## developed around it) are made, each in cells of its own size, each bin its
+## own Poisson stream. Each grain asks `lookup` (with `context`) what the film
+## says at its own centre for its layer: each population's share developed
+## there (as far as the development has come) and the clouds' strength; it
+## develops where its rank is under its share. Into `out`; how many, or more
+## than `cloud_most` when there are too many.
+pub func gather(geometry: const Geometry[], layers: usize, left: f64, top: f64, right: f64, bottom: f64, traced: bool[3], bounds: f64[9],
+                lookup: func(void*, usize, f64, f64) -> f64[4], context: void*, out: Cloud[]) -> usize:
+    var count: usize = 0
     for layer in 0..<layers:
+        if not traced[layer]:
+            continue
         for p in 0..<populations:
             let g = geometry[layer * 3 + p]
             if g.density <= 0.0:
                 continue
-            let cell = cell_radii * g.radius
             let largest = g.radius * size_high
-            let mean = g.density * cell * cell
-            # Two cells in, so no cell index is negative.
-            let u = x / cell + 2.0
-            let v = y / cell + 2.0
-            let cx = (i64)math.floor(u)
-            let cy = (i64)math.floor(v)
-            let stream = (u32)(layer * 3 + p + 1)
-            for dy in -1..=1:
-                for dx in -1..=1:
-                    let kx = cx + dx
-                    let ky = cy + dy
-                    let seed = cell_seed((u32)kx, (u32)ky, stream)
-                    let count = grain_count(seed, mean)
-                    for j in 0..<count:
-                        let (px, py) = grain_place(seed, j)
-                        let gx = ((f64)kx + px - 2.0) * cell
-                        let gy = ((f64)ky + py - 2.0) * cell
-                        let near = (x - gx) * (x - gx) + (y - gy) * (y - gy)
-                        if near >= largest * largest:
-                            continue
-                        let (size, rank) = grain_size_rank(seed, j)
-                        let radius = g.radius * size
-                        let far = near / (radius * radius)
-                        if far >= 1.0:
-                            continue
-                        let place = lookup(context, layer, gx, gy)
-                        if rank >= place[p]:
-                            continue
-                        out[layer] += g.peak * place[3] * (1.0 - far) * (1.0 - far)
+            for b in 0..<rank_bins:
+                let low = bin_low(b)
+                if low >= bounds[layer * 3 + p]:
+                    break
+                let width = bin_high(b) - low
+                let cell = bin_cell(g, b)
+                let mean = g.density * width * cell * cell
+                let stream = (u32)(layer * 3 + p + 1) *% rank_bins +% b
+                # Four cells in, so no cell index is negative.
+                let first_x = (i64)math.floor((left - largest) / cell) + 4
+                let last_x = (i64)math.floor((right + largest) / cell) + 4
+                let first_y = (i64)math.floor((top - largest) / cell) + 4
+                let last_y = (i64)math.floor((bottom + largest) / cell) + 4
+                for ky in first_y..=last_y:
+                    for kx in first_x..=last_x:
+                        let seed = cell_seed((u32)kx, (u32)ky, stream)
+                        let grains = grain_count(seed, mean)
+                        for j in 0..<grains:
+                            let (px, py) = grain_place(seed, j)
+                            let gx = ((f64)kx + px - 4.0) * cell
+                            let gy = ((f64)ky + py - 4.0) * cell
+                            # Out of reach of the rectangle?
+                            let dx = math.max(math.max(left - gx, gx - right), 0.0)
+                            let dy = math.max(math.max(top - gy, gy - bottom), 0.0)
+                            if dx * dx + dy * dy >= largest * largest:
+                                continue
+                            let (size, fraction_of) = grain_size_rank(seed, j)
+                            let radius = g.radius * size
+                            if dx * dx + dy * dy >= radius * radius:
+                                continue
+                            let place = lookup(context, layer, gx, gy)
+                            if low + width * fraction_of >= place[p]:
+                                continue
+                            if count < cloud_most:
+                                out[count] = Cloud(x = gx, y = gy, radius2 = radius * radius, peak = g.peak * place[3], layer = layer)
+                            count += 1
+    return count
+
+## The dye of `count` gathered `clouds` at (`x`, `y`) µm, per layer.
+pub func dye_at(clouds: const Cloud[], count: usize, x: f64, y: f64) -> f64[3]:
+    var out: f64[3] = [0.0, 0.0, 0.0]
+    for at in 0..<count:
+        let c = clouds[at]
+        let far = ((x - c.x) * (x - c.x) + (y - c.y) * (y - c.y)) / c.radius2
+        if far < 1.0:
+            out[c.layer] += c.peak * (1.0 - far) * (1.0 - far)
+    return out
+
+## How a pixel `u` cloud radii wide averages a field of clouds, against
+## Selwyn's large-aperture law (variance · area constant): its variance, and
+## its covariance with the pixel beside it and the one diagonal to it, each
+## as a share of Selwyn's variance for its area. From the clouds' own
+## autocorrelation over two pixels' areas; tabulated over u (0.25–20, log).
+pub let covariance_count: usize = 32
+var covariance_table: f64[96]
+var covariance_once: sync.Once
+
+pub func covariance_width(index: usize) -> f64:
+    return 0.25 * math.pow(80.0, (f64)index / (f64)(covariance_count - 1))
+
+func build_covariance():
+    # The clouds' autocorrelation (the thinnest clouds' overlap: linear) on a grid.
+    let grid = 64
+    let step = 4.0 / (f64)grid
+    var whole = 0.0
+    for yi in 0..<grid:
+        for xi in 0..<grid:
+            let x = -2.0 + ((f64)xi + 0.5) * step
+            let y = -2.0 + ((f64)yi + 0.5) * step
+            whole += overlap(peak_low, math.sqrt(x * x + y * y)) * step * step
+    for index in 0..<covariance_count:
+        let u = covariance_width(index)
+        let offsets: f64[6] = [0.0, 0.0, 1.0, 0.0, 1.0, 1.0]
+        for which in 0..<(usize)3:
+            var sum = 0.0
+            for yi in 0..<grid:
+                for xi in 0..<grid:
+                    let x = -2.0 + ((f64)xi + 0.5) * step
+                    let y = -2.0 + ((f64)yi + 0.5) * step
+                    # Two pixels' overlap at this lag: the box autocorrelation.
+                    let wx = math.max(u - math.abs(x + offsets[which * 2] * u), 0.0)
+                    let wy = math.max(u - math.abs(y + offsets[which * 2 + 1] * u), 0.0)
+                    sum += overlap(peak_low, math.sqrt(x * x + y * y)) * wx * wy * step * step
+            covariance_table[index * 3 + which] = sum / (u * u * whole)
+
+## `pixel_covariance` at a pixel `u` cloud radii wide: variance, side, diagonal.
+pub func pixel_covariance(u: f64) -> f64[3]:
+    covariance_once.run(build_covariance)
+    let place = math.clamp(math.log(math.max(u, 0.25) / 0.25) / math.log(80.0), 0.0, 1.0) * (f64)(covariance_count - 1)
+    let below = (usize)math.min(math.floor(place), (f64)(covariance_count - 2))
+    let t = place - (f64)below
+    var out: f64[3]
+    for k in 0..<(usize)3:
+        out[k] = covariance_table[below * 3 + k] * (1.0 - t) + covariance_table[(below + 1) * 3 + k] * t
+    return out
+
+## A standard normal deviate from a hash of (`x`, `y`, `tag`).
+func normal_at(x: u32, y: u32, tag: u32) -> f64:
+    let first = math.max(fraction(mixed(x *% 0x27d4eb2d +% tag, y ^ 0x165667b1)), 1.0e-7)
+    let second = fraction(mixed(y *% 0x9e3779b1 +% tag, x ^ 0x85ebca77))
+    return math.sqrt(-2.0 * math.log(first)) * math.cos(2.0 * math.pi * second)
+
+## Pixel (`px`, `py`)'s deviate for layer `layer` with variance 1 and, with its
+## neighbours', the correlations `shares` (variance, side, diagonal, as
+## `pixel_covariance` gives them, normalized by the variance): its own, its
+## edges' and its corners'.
+pub func pixel_deviate(px: u32, py: u32, layer: u32, shares: f64[3]) -> f64:
+    let side = math.max(shares[1] / math.max(shares[0], 1.0e-12), 0.0)
+    let diagonal = math.max(shares[2] / math.max(shares[0], 1.0e-12), 0.0)
+    let corner = math.sqrt(math.min(diagonal, 0.0625))
+    let edge = math.sqrt(math.clamp(side - 2.0 * corner * corner, 0.0, 0.25))
+    let own = math.sqrt(math.max(1.0 - 4.0 * edge * edge - 4.0 * corner * corner, 0.0))
+    let tag = layer *% 8
+    # Coordinates one in, so the pixels at the image's edge have edges too.
+    let x = px +% 1
+    let y = py +% 1
+    var out = own * normal_at(x, y, tag)
+    out += edge * (normal_at(x, y, tag +% 1) + normal_at(x -% 1, y, tag +% 1) + normal_at(x, y, tag +% 2) + normal_at(x, y -% 1, tag +% 2))
+    out += corner * (normal_at(x, y, tag +% 3) + normal_at(x -% 1, y, tag +% 3) + normal_at(x, y -% 1, tag +% 3) + normal_at(x -% 1, y -% 1, tag +% 3))
     return out
 
 ## Where pixel (`px`, `py`)'s sample `k` falls in it (0..1 each way): a
@@ -560,13 +728,16 @@ test "an even field's sampled transmittance is Campbell's density":
     geometry[0] = Geometry(density = 1.2, peak = 0.5, radius = 1.5)
     geometry[1] = Geometry(density = 3.0, peak = 0.5, radius = 0.9)
     var place: f64[4] = [0.7, 0.4, 0.0, 1.3]
+    var gathered: Cloud[128]
     var sum = 0.0
-    let n = 400
+    let n = 300
     for yi in 0..<n:
         for xi in 0..<n:
             let x = ((f64)xi + fraction(mixed((u32)xi, (u32)yi))) * 0.37
             let y = ((f64)yi + fraction(mixed((u32)yi +% 77, (u32)xi))) * 0.37
-            let d = clouds(geometry, 1, x, y, even_place, (void*)&place)
+            let count = gather(geometry, 1, x, y, x, y, [true, false, false], [1.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], even_place,
+                               (void*)&place, gathered)
+            let d = dye_at(gathered, count, x, y)
             sum += math.pow(10.0, -d[0])
     let measured = -math.log10(sum / (f64)(n * n))
     let lambda: f64[3] = [1.2 * 0.7, 3.0 * 0.4, 0.0]
