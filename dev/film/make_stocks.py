@@ -84,6 +84,13 @@ def from_ti2082():
 
 KINDS = {'negative': 0, 'reversal': 1, 'monochrome': 2}
 
+# Grain's geometry per stock (estimates; the granularity itself is Kodak's or
+# Fujifilm's): dye clouds this far apart (um), each a Gaussian this wide (in
+# cells). A fast color negative's clouds are soft and about 8 um; Velvia's,
+# finer (rms 9 for a slide); Acros II's, small and crisp-edged (Fujifilm's
+# Super Fine-Sigma grains: tight, high acutance).
+GRAIN = {'fuji_velvia_50': (6.0, 0.5), 'fuji_acros_ii': (5.0, 0.35)}
+
 
 def planck(kelvin):
     """Black-body power at NM, relative."""
@@ -198,6 +205,8 @@ pub func {key}() -> Stock:
     return Stock(
         name = "{data['name']}",
         kind = {KINDS[data.get('kind', 'negative')]},
+        grain_cell = {number(GRAIN.get(key, (8.0, 0.5))[0])},
+        grain_width = {number(GRAIN.get(key, (8.0, 0.5))[1])},
         speed = {number(data['ei'])},
         kelvin = {number(data['kelvin'])},
         grey_log_h = {number(data['grey_log_h'])},
@@ -244,6 +253,10 @@ pub struct Stock:
     ## 0 a color negative, 1 a color reversal (slide) film, 2 a black-and-white
     ## negative (its three layers identical, its "dyes" neutral silver).
     pub var kind: i64
+    ## Its grain's dye clouds: how far apart (µm) and how wide each (a Gaussian's
+    ## σ in cells: smaller is crisper).
+    pub var grain_cell: f64
+    pub var grain_width: f64
     ## Its exposure index under the light it is balanced for, in kelvin.
     pub var speed: f64
     pub var kelvin: f64

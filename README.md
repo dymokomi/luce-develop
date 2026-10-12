@@ -126,7 +126,9 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    keep the datasheet's densities. Each layer's scatter and self-inhibition and
    the inhibitor's spread are fitted to the stock's MTF curves, within about
    20% everywhere (`film_model.lucb`).
-4. **Grain.** The developed negative is made of dye clouds about 8 µm apart:
+4. **Grain.** The developed negative is made of dye clouds (each stock's own:
+   soft and about 8 µm apart on Kodak's negatives, finer on Velvia, small and
+   crisp-edged on Acros II, whose Super Fine-Σ grains are known for it):
    each takes the film's density at its own place plus its grain (how many of
    its silver grains developed, which varies as the stock's rms granularity
    says it does at that density), and every point is the clouds around it

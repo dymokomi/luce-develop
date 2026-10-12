@@ -91,9 +91,9 @@ float hashed(uvec2 p) {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
     return float(x >> 8) / 16777216.0;
 }
-float grain_gain(float cell) {
+float grain_gain(float cell, float a, float b) {
     float side = 42.5 / cell;
-    return side / (0.56 * (1.0 - exp(-side / 1.35)));
+    return side / (a * (1.0 - exp(-side / b)));
 }
 
 vec3 fetch(sampler2D image, ivec2 at) {
@@ -182,8 +182,9 @@ void main() {
             // The image made of dye clouds, each the negative at its centre plus
             // its grain (film.lucb's `clouded`).
             float pitch = params.halo.w;
-            float cell = max(8.0, pitch);
-            float scale = v6.w * grain_gain(cell);
+            vec4 v18 = film_value(18.0);
+            float cell = max(v18.x, pitch);
+            float scale = v6.w * grain_gain(cell, v18.z, v18.w);
             float kind = film_value(17.0).w;
             vec2 p = (vec2(at) + 0.5) * pitch / cell + 1.0;
             ivec2 c = ivec2(floor(p));
@@ -195,7 +196,7 @@ void main() {
                     uvec2 k = uvec2(c + ivec2(dx, dy));
                     vec2 centre = vec2(c + ivec2(dx, dy)) + floor(vec2(hashed(k), hashed(k + uvec2(0x9e3779b9u, 0u))) * 256.0) / 256.0;
                     vec2 d = p - centre;
-                    float w = exp(-2.0 * dot(d, d));
+                    float w = exp(-v18.y * dot(d, d));
                     vec3 place_amounts;
                     vec3 place_effective;
                     developed(ivec2(floor((centre - 1.0) * cell / pitch)), place_amounts, place_effective);
@@ -210,7 +211,7 @@ void main() {
                 }
             }
             amounts = sum / total;
-            vec3 sigma = 0.326 * spread / total;
+            vec3 sigma = film_value(19.0).x * spread / total;
             unbias = kind > 0.5 && kind < 1.5 ? vec3(0.0) : 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
         } else {
             developed(at, amounts, effective);

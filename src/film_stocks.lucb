@@ -14,6 +14,10 @@ pub struct Stock:
     ## 0 a color negative, 1 a color reversal (slide) film, 2 a black-and-white
     ## negative (its three layers identical, its "dyes" neutral silver).
     pub var kind: i64
+    ## Its grain's dye clouds: how far apart (µm) and how wide each (a Gaussian's
+    ## σ in cells: smaller is crisper).
+    pub var grain_cell: f64
+    pub var grain_width: f64
     ## Its exposure index under the light it is balanced for, in kelvin.
     pub var speed: f64
     pub var kelvin: f64
@@ -60,6 +64,8 @@ pub func kodak_5298() -> Stock:
     return Stock(
         name = "Kodak EXR 500T 5298",
         kind = 0,
+        grain_cell = 8.0,
+        grain_width = 0.5,
         speed = 500.0,
         kelvin = 3200.0,
         grey_log_h = -1.744,
@@ -175,6 +181,8 @@ pub func kodak_5293() -> Stock:
     return Stock(
         name = "Kodak EXR 200T 5293",
         kind = 0,
+        grain_cell = 8.0,
+        grain_width = 0.5,
         speed = 200.0,
         kelvin = 3200.0,
         grey_log_h = -1.274,
@@ -290,6 +298,8 @@ pub func kodak_5279() -> Stock:
     return Stock(
         name = "Kodak Vision 500T 5279",
         kind = 0,
+        grain_cell = 8.0,
+        grain_width = 0.5,
         speed = 500.0,
         kelvin = 3200.0,
         grey_log_h = -1.744,
@@ -405,6 +415,8 @@ pub func kodak_5277() -> Stock:
     return Stock(
         name = "Kodak Vision 320T 5277",
         kind = 0,
+        grain_cell = 8.0,
+        grain_width = 0.5,
         speed = 320.0,
         kelvin = 3200.0,
         grey_log_h = -1.499,
@@ -520,6 +532,8 @@ pub func fuji_velvia_50() -> Stock:
     return Stock(
         name = "Fujifilm Velvia 50",
         kind = 1,
+        grain_cell = 6.0,
+        grain_width = 0.5,
         speed = 50.0,
         kelvin = 5500.0,
         grey_log_h = -0.699,
@@ -635,6 +649,8 @@ pub func fuji_acros_ii() -> Stock:
     return Stock(
         name = "Fujifilm Neopan 100 Acros II",
         kind = 2,
+        grain_cell = 5.0,
+        grain_width = 0.35,
         speed = 100.0,
         kelvin = 5400.0,
         grey_log_h = -0.8969,
