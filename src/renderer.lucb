@@ -309,6 +309,10 @@ pub struct Renderer:
             self.a.film_stale = true
             self.b.film_stale = true
 
+    ## Whether output A's stochastic render is still refining.
+    pub func is_refining() -> bool:
+        return self.still_refining(&self.a)
+
     ## How many samples a pixel output A's stochastic render has (0 while the
     ## statistical film shows).
     pub func refined_samples() -> i64:
