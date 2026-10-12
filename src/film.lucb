@@ -36,8 +36,10 @@
 ##    neutrals round-trip), the orange mask subtracted. Each channel's density
 ##    is inverted through its gamma at grey back to linear light, the floor of
 ##    the clear negative taken out by Black, then a 3×3 matrix, fitted per
-##    stock to colors of moderate saturation, turns the scan's primaries back
-##    toward AP1, and the telecine timing (Warmth, Tint, Contrast) applies.
+##    on a reference negative (Vision3 250D) to colors of moderate saturation,
+##    turns the scan's primaries back toward AP1 (or one fitted to the stock
+##    itself, with Calibration Matched), and the telecine timing (Warmth, Tint,
+##    Contrast) applies.
 ##    With the bleach bypassed, the silver left beside the dye adds a neutral
 ##    density in proportion to the image (`silver`), which the scan, set for a
 ##    bleached negative, reads as more exposure and less color.
@@ -173,16 +175,22 @@ pub func process_time(at: i64) -> f64:
 pub func process_temperature(at: i64) -> f64:
     return film_develop.processes[(usize)at].celsius
 
-## The process stock `at` develops in for develop_process `value`.
+## The process stock `at` develops in for develop_process `value`, and the
+## stock's normal time in process `process` (minutes).
 pub func stock_process(at: i64, value: f64) -> i64:
-    return film_develop.chosen(film_stocks.stock_at((usize)at).kind, value)
+    let stock = film_stocks.stock_at((usize)at)
+    return film_develop.chosen_for(&stock, value)
+pub func stock_process_time(at: i64, process: i64) -> f64:
+    let stock = film_stocks.stock_at((usize)at)
+    return film_develop.normal_minutes(&stock, process)
 
 ## The Process menu's items for stock `at`, "name=value|…": its standard
 ## process first (value 0), then the others of its family and its
 ## cross-process.
 pub func stock_processes(at: i64) -> interop.Owned[str]!:
-    let kind = film_stocks.stock_at((usize)at).kind
-    let standard = film_develop.standard(kind)
+    let stock = film_stocks.stock_at((usize)at)
+    let kind = stock.kind
+    let standard = film_develop.standard_of(&stock)
     var out: Buffer
     defer out.destroy()
     try out.put_text(film_develop.processes[(usize)standard].name)
@@ -268,7 +276,7 @@ pub struct Film:
             self.put(values_row, 7, 0.0, 0.0, 0.0, 0.0)
             return
         let chosen = film_stocks.stock_at((usize)(choice - 1))
-        let cross = film_develop.crossed(chosen.kind, film_develop.chosen(chosen.kind, settings.get(.develop_process)))
+        let cross = film_develop.crossed(chosen.kind, film_develop.chosen_for(&chosen, settings.get(.develop_process)))
         if choice != self.stock or cross != self.cross:
             self.model.release()
             self.model = try build_model(film_develop.cross_processed(chosen) if cross else chosen)
@@ -337,9 +345,9 @@ pub struct Film:
         # more contrast, more grain.
         let kind = model.stock.kind
         # The stock as published (a cross-processed slide's model is a negative).
-        let published = film_stocks.stock_at((usize)(self.stock - 1)).kind
-        let process = film_develop.chosen(published, settings.get(.develop_process))
-        let grown = film_develop.developing(published, process, settings.get(.develop_time), settings.get(.develop_temperature))
+        let published = film_stocks.stock_at((usize)(self.stock - 1))
+        let process = film_develop.chosen_for(&published, settings.get(.develop_process))
+        let grown = film_develop.developing(&published, process, settings.get(.develop_time), settings.get(.develop_temperature))
         # The bleach bypassed (develop_silver): silver stays where the dye
         # formed, adding its own grain. Only a color negative's silver is extra.
         let retained = settings.get(.develop_silver) / 100.0 if kind == 0 else 0.0
@@ -464,7 +472,9 @@ pub struct Film:
         if kind == 2 or self.cross:
             self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
             return
-        let fitted = self.fit_matrix()
+        # Calibrated to the reference negative (a scanner set up once, every
+        # stock's own color showing), or matched to this stock.
+        let fitted = self.fit_matrix() if settings.get(.scan_calibration) > 0.5 else reference_scan
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, fitted[row * 3], fitted[row * 3 + 1], fitted[row * 3 + 2], 0.0)
         self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
@@ -742,6 +752,15 @@ let silver_density: f64 = 0.8
 ## grain over the dye clouds' (an estimate, +30–60 % on print film).
 let silver_grain: f64 = 0.4
 
+## The scanner's matrix from its channels to AP1, calibrated on a reference
+## negative, Kodak Vision3 250D 5207 (today's ECN-2 dye set): `fit_matrix` for it
+## at the default settings (the test below holds the two together). Through it,
+## each stock shows the color its dyes, mask and interimage give it, as a
+## telecine set up once shows each stock it runs.
+let reference_scan: f64[9] = [0.6015033760672441, 0.35929172206533877, 0.039204901867417145,
+                              0.005940357249324697, 1.0390532098782324, -0.04499356712755703,
+                              -0.09594074042886971, 0.3722034596103214, 0.7237372808185483]
+
 ## Edge effects in log H per unit of their strength (film_develop.lucb's share of
 ## a step added as overshoot). For a negative of gamma 0.6 whose dye is about 2
 ## at most, a step's border gains about 0.15 of the hold's difference: 1 / 0.15.
@@ -870,11 +889,16 @@ test "every stock builds, returns grey in place and keeps neutrals neutral":
             else:
                 assert(math.abs(grey[k] / 0.18 - 1.0) < 0.01)
         assert(math.abs(math.log2(grey[0] / grey[1])) < 0.1 and math.abs(math.log2(grey[2] / grey[1])) < 0.1)
-        assert(math.abs(math.log2(bright[0] / bright[1])) < 0.1 and math.abs(math.log2(bright[2] / bright[1])) < 0.1)
+        # Above grey a slide's layers part as its sheet's curves do (Velvia 100's
+        # green falls faster: the magenta lean its highlights are known for).
+        let apart = 0.15 if stock.kind == 1 else 0.1
+        assert(math.abs(math.log2(bright[0] / bright[1])) < apart and math.abs(math.log2(bright[2] / bright[1])) < apart)
 
 test "film saturates warm colors and keeps their hue near":
+    # A scan matched to its stock, so colors of moderate saturation come back.
     var settings = defaults_with_film()
     settings.set(.film_grain, 0.0)
+    settings.set(.scan_calibration, 1.0)
     var film = Film()
     film.prepare(&settings) catch failure:
         assert(false)
@@ -887,6 +911,24 @@ test "film saturates warm colors and keeps their hue near":
     let spread_out = shot[0] - shot[2]
     assert(spread_out > spread_in * 0.95)
     assert(shot[0] > shot[1] and shot[1] > shot[2])
+
+test "through the reference scanner each stock keeps its own color":
+    # Skin's red-blue spread against the scene's: Vision3 50D's saturated dyes
+    # against EXR 200T's, as one telecine set up on Vision3 250D shows them.
+    let skin: f64[3] = [0.26, 0.16, 0.11]
+    var spreads: f64[2]
+    for (at, choice) in [((usize)0, 10.0), ((usize)1, 2.0)]:
+        var settings = defaults_with_film()
+        settings.set(.film_stock, choice)
+        settings.set(.film_grain, 0.0)
+        var film = Film()
+        film.prepare(&settings) catch failure:
+            assert(false)
+            return
+        let shot = develop(&film, skin, 0.5, 0.5, 20.0)
+        film.release()
+        spreads[at] = (shot[0] - shot[2]) / (skin[0] - skin[2])
+    assert(spreads[0] > spreads[1] + 0.3)
 
 test "grain averages out and follows the stock's granularity":
     var settings = defaults_with_film()
@@ -1003,3 +1045,17 @@ func defaults_with_film() -> Settings:
     var out = defaults()
     out.set(.film_stock, 1.0)
     return out
+
+test "the reference scanner is Vision3 250D's fit":
+    var settings = defaults_with_film()
+    settings.set(.film_stock, 9.0)
+    settings.set(.film_grain, 0.0)
+    var film = Film()
+    film.prepare(&settings) catch failure:
+        assert(false)
+        return
+    defer film.release()
+    assert(film_stocks.stock_at(8).name == "Kodak Vision3 250D 5207")
+    let fitted = film.fit_matrix()
+    for at in 0..<(usize)9:
+        assert(math.abs(fitted[at] - reference_scan[at]) < 0.002)

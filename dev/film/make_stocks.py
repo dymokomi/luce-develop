@@ -90,6 +90,7 @@ KINDS = {'negative': 0, 'reversal': 1, 'monochrome': 2}
 # finer (rms 9 for a slide); Acros II's, small and crisp-edged (Fujifilm's
 # Super Fine-Sigma grains: tight, high acutance).
 GRAIN = {'fuji_velvia_50': (6.0, 0.5), 'fuji_acros_ii': (5.0, 0.35)}
+CRISP = {'kodak_tri_x_400', 'kodak_tmax_100', 'eastman_double_x_5222', 'ilford_hp5_plus', 'kodak_tmax_100'}
 
 
 def planck(kelvin):
@@ -104,11 +105,14 @@ def planck(kelvin):
 
 
 def granularity_from_rms(log_h, curves, rms):
-    """A granularity table from one published rms value (at density 1.0 over
+    """A granularity table from one published rms value (σD, or as sheets print
+    it, σD × 1000; at density 1.0 over
     D-min): grain grows as the square root of the density over D-min (Selwyn's
     law for a layer of uniform grains), every 0.1 log H."""
     grid = log_h[::2]
     out = {'log_h': grid}
+    # Sheets print rms granularity as σD × 1000 (9); some readings keep σD (0.009).
+    rms = rms / 1000.0 if rms > 0.5 else rms
     for c in CHANNELS:
         least = min(curves[c])
         out[c] = [rms * max(curves[c][i * 2] - least, 0.02) ** 0.5 for i in range(len(grid))]
@@ -177,6 +181,138 @@ def from_acros():
             'mtf': {'cycles_per_mm': frequencies, 'red': response, 'green': response, 'blue': response}}
 
 
+def grain_geometry(ei, crisp=False):
+    """Dye clouds for a stock without its own estimate: a fast film's are bigger,
+    about 8 um at EI 500 and as the cube root of speed (grain volume grows
+    with speed); a black-and-white or T-grain film's are crisper. Estimates."""
+    return (round(8.0 * (ei / 500.0) ** (1.0 / 3.0), 2), 0.35 if crisp else 0.5)
+
+
+def layered_mtf(data):
+    """A sheet's one visual MTF curve standing for all three layers."""
+    mtf = data['mtf']
+    if 'visual' in mtf:
+        return {'cycles_per_mm': mtf['cycles_per_mm'], **{c: mtf['visual'] for c in CHANNELS}}
+    return mtf
+
+
+def estimated_mtf(spread_um):
+    """No MTF published: an exponential spread of `spread_um` (an estimate)."""
+    import math
+    frequencies = [3, 5, 10, 15, 20, 30, 40, 50, 60, 80, 100, 125, 150, 200]
+    response = [100.0 / (1.0 + (2 * math.pi * spread_um * 1e-3 * f) ** 2) for f in frequencies]
+    return {'cycles_per_mm': frequencies, **{c: response for c in CHANNELS}}
+
+
+def rising(values):
+    out = []
+    for v in filled(values):
+        out.append(max(v, out[-1]) if out else v)
+    return out
+
+
+def from_color(key, dyes_from='kodak_vision3_250d_5207'):
+    """A color negative from its sheet's JSON. Kodak's and Fujifilm's still sheets
+    draw only the midscale neutral, not each dye: their dye shapes are Vision3
+    250D's (Kodak builds its still negatives on Vision's technology), said so in
+    the source. Without a granularity curve, its rms number grows with density."""
+    data = json.load(open(here / f'{key}.json'))
+    char = data['characteristic']
+    for c in CHANNELS:
+        char[c] = rising(char[c])
+    if not all(d in data.get('dyes', {}) for d in ('cyan', 'magenta', 'yellow')):
+        donor = json.load(open(here / f'{dyes_from}.json'))
+        data['dyes'] = donor['dyes']
+        data['source'] += f'. Dye shapes: {donor["name"]}\'s (the sheet draws only the neutral)'
+    if 'granularity' not in data:
+        data['granularity'] = granularity_from_rms(char['log_h'], char, data['rms_granularity'])
+        data['source'] += f'. Granularity: rms {data["rms_granularity"]} at density 1.0, grown with density'
+    if 'mtf' not in data:
+        data['mtf'] = estimated_mtf(3.0)
+        data['source'] += '. MTF: none published, an estimate'
+    else:
+        data['mtf'] = layered_mtf(data)
+    if 'd_min' not in data:
+        donor = json.load(open(here / f'{dyes_from}.json'))
+        data['d_min'] = donor['d_min']
+    return data
+
+
+def from_slide(key):
+    """A reversal film as Velvia 50 is made: density only falls with exposure, a
+    clear base (0.13), granularity from its rms number (film_model.lucb balances
+    its layers so grey looks grey on the lightbox)."""
+    data = json.load(open(here / f'{key}.json'))
+    char = data['characteristic']
+    for c in CHANNELS:
+        falling = []
+        for v in filled(char[c]):
+            falling.append(min(v, falling[-1]) if falling else v)
+        char[c] = falling
+    data['mtf'] = layered_mtf(data)
+    return {**data, 'granularity': granularity_from_rms(char['log_h'], char, data['rms_granularity']),
+            'd_min': {'nm': NM, 'density': [0.13] * len(NM)}}
+
+
+def from_monochrome(key, curve, process, minutes, sensitivity=None, spectrogram_kelvin=None, spread_um=None, rms=None):
+    """A black-and-white film as Acros II is made: its sheet's normal curve
+    `curve` (developed `minutes` in `process`) for all three layers, three dyes
+    each covering a third of the spectrum (neutral silver), the sensitivity
+    curve named `sensitivity` (log), or a spectrogram to a black body (relative,
+    linear) with the light divided out."""
+    import math
+    data = json.load(open(here / f'{key}.json'))
+    grid = data['characteristic']['log_h']
+    normal = rising(data['characteristic'][curve])
+    char = {'log_h': grid, 'red': normal, 'green': normal, 'blue': normal}
+    if spectrogram_kelvin:
+        light = planck(spectrogram_kelvin)
+        table = data['spectrogram']
+        values = [None if v is None or v <= 0 else math.log10(v) for v in table['relative']]
+        log_s = [None if v is None else v - math.log10(l) for v, l in zip(
+            [interp(table['nm'], values, q) for q in NM], light)]
+        sens_nm = NM
+    else:
+        sens_nm = data['sensitivity']['nm']
+        log_s = data['sensitivity'][sensitivity]
+    segment = lambda lo, hi: [1.0 if lo <= q < hi else 0.0 for q in NM]
+    grain = rms if rms is not None else data['rms_granularity']
+    source = data['source'] + f'. Normal: {curve}'
+    if rms is not None:
+        source += f'; rms granularity {rms}, an estimate (none published)'
+    if 'mtf' in data:
+        mtf = layered_mtf(data)
+    else:
+        mtf = estimated_mtf(spread_um)
+        source += f'; MTF an estimate ({spread_um} um spread; none published)'
+    return {'name': data['name'], 'source': source, 'kind': 'monochrome', 'ei': data['ei'], 'kelvin': data.get('kelvin', 5500.0),
+            'grey_log_h': data['grey_log_h'], 'process': process, 'minutes': minutes,
+            'characteristic': char,
+            'sensitivity': {'nm': sens_nm, 'red': log_s, 'green': log_s, 'blue': log_s},
+            'dyes': {'nm': NM, 'cyan': segment(595, 1000), 'magenta': segment(495, 595), 'yellow': segment(0, 495)},
+            'd_min': {'nm': NM, 'density': [0.05] * len(NM)},
+            'granularity': granularity_from_rms(grid, char, grain),
+            'mtf': mtf}
+
+
+def from_1960s():
+    """Eastman Color Negative 5251, from Kodak's 1968 paper on 5254 (identical
+    sensitivities and dyes, a stop faster): printing densities onto 5385, no D-min
+    (5293's, an ECN dye set), no granularity or MTF (estimates: grainier than
+    5293, rms 13, and its MTF)."""
+    data = json.load(open(here / 'eastman_color_negative_5251.json'))
+    char = data['characteristic']
+    for c in CHANNELS:
+        char[c] = rising(char[c])
+    sheet_5293 = json.load(open(here / 'kodak_5293.json'))
+    data['d_min'] = sheet_5293['d_min']
+    data['granularity'] = granularity_from_rms(char['log_h'], char, 13.0)
+    data['mtf'] = sheet_5293['mtf']
+    data['process'] = 'ECN-1'
+    data['source'] += ". D-min and MTF: EXR 200T 5293's; granularity: rms 13, an estimate"
+    return data
+
+
 def number(v):
     t = ('%.5f' % v).rstrip('0')
     return t + '0' if t.endswith('.') else t
@@ -188,10 +324,28 @@ def block(values, size, per_line=12, indent='        '):
     return '[\n' + ',\n'.join(indent + line for line in lines) + ']'
 
 
+def thinned(axis, table, most):
+    """Every other reading, as often as it takes to fit `most` (an even step
+    stays even)."""
+    while len(axis) > most:
+        axis = axis[::2]
+        table = {c: v[::2] for c, v in table.items()}
+    return axis, table
+
+
+def geometry(key, data):
+    """The stocks made before these estimates keep their own (8 um, 0.5)."""
+    if key in GRAIN:
+        return GRAIN[key]
+    if key.startswith('kodak_52') or key in ('kodak_5298', 'kodak_5293', 'kodak_5279', 'kodak_5277'):
+        return (8.0, 0.5)
+    return grain_geometry(data['ei'], key in CRISP)
+
+
 def stock(key, data, d_min_from=None):
-    log_h, curves = full_rows(data['characteristic'], 'log_h')
-    grain_h, grains = full_rows(data['granularity'], 'log_h')
-    freqs, mtf = full_rows(data['mtf'], 'cycles_per_mm')
+    log_h, curves = thinned(*full_rows(data['characteristic'], 'log_h'), CURVE_MOST)
+    grain_h, grains = thinned(*full_rows(data['granularity'], 'log_h'), GRAIN_MOST)
+    freqs, mtf = thinned(*full_rows(data['mtf'], 'cycles_per_mm'), MTF_MOST)
     assert len(log_h) <= CURVE_MOST and len(grain_h) <= GRAIN_MOST and len(freqs) <= MTF_MOST
     curve_step = round(log_h[1] - log_h[0], 4)
     grain_step = round(grain_h[1] - grain_h[0], 4)
@@ -205,8 +359,10 @@ pub func {key}() -> Stock:
     return Stock(
         name = "{data['name']}",
         kind = {KINDS[data.get('kind', 'negative')]},
-        grain_cell = {number(GRAIN.get(key, (8.0, 0.5))[0])},
-        grain_width = {number(GRAIN.get(key, (8.0, 0.5))[1])},
+        grain_cell = {number(geometry(key, data)[0])},
+        grain_width = {number(geometry(key, data)[1])},
+        process = "{data.get('process', '')}",
+        minutes = {number(data.get('minutes', 0.0))},
         speed = {number(data['ei'])},
         kelvin = {number(data['kelvin'])},
         grey_log_h = {number(data['grey_log_h'])},
@@ -235,6 +391,26 @@ STOCKS = [
     ('kodak_5277', json.load(open(here / 'kodak_5277.json'))),
     ('fuji_velvia_50', from_velvia()),
     ('fuji_acros_ii', from_acros()),
+    ('kodak_vision3_500t_5219', from_color('kodak_vision3_500t_5219')),
+    ('kodak_vision3_200t_5213', from_color('kodak_vision3_200t_5213')),
+    ('kodak_vision3_250d_5207', from_color('kodak_vision3_250d_5207')),
+    ('kodak_vision3_50d_5203', from_color('kodak_vision3_50d_5203')),
+    ('kodak_portra_160', from_color('kodak_portra_160')),
+    ('kodak_portra_400', from_color('kodak_portra_400')),
+    ('kodak_portra_800', from_color('kodak_portra_800')),
+    ('kodak_ektar_100', from_color('kodak_ektar_100')),
+    ('fuji_pro_400h', from_color('fuji_pro_400h')),
+    ('kodak_ektachrome_e100', from_slide('kodak_ektachrome_e100')),
+    ('fuji_velvia_100', from_slide('fuji_velvia_100')),
+    ('kodak_tri_x_400', from_monochrome('kodak_tri_x_400', 'd76_8', 'D-76', 8.0, sensitivity='d_1_0')),
+    ('kodak_tmax_100', from_monochrome('kodak_tmax_100', 'd76_7.5', 'D-76', 7.5, sensitivity='d_1_0')),
+    # D-96, Kodak's motion picture negative developer, is a borax MQ developer of
+    # D-76's kind: Double-X develops in D-76's place, for its sheet's 5 minutes.
+    ('eastman_double_x_5222', from_monochrome('eastman_double_x_5222', 'd96_5', 'D-76', 5.0, sensitivity='above_fog_1_0')),
+    # Ilfotec HC 1+31 is Ilford's HC-110 dilution B.
+    ('ilford_hp5_plus', from_monochrome('ilford_hp5_plus', 'hc_1_31_6.5', 'HC-110 (B)', 6.5, spectrogram_kelvin=2850.0,
+                                        spread_um=2.0, rms=16.0)),
+    ('eastman_color_negative_5251', from_1960s()),
 ]
 
 header = f'''## Generated by dev/film/make_stocks.py; do not edit. The film stocks the film
@@ -257,6 +433,11 @@ pub struct Stock:
     ## σ in cells: smaller is crisper).
     pub var grain_cell: f64
     pub var grain_width: f64
+    ## The process its sheet's curves were developed in ("": its kind's standard,
+    ## film_develop.lucb) and for how long, in minutes (0: that process's table
+    ## time).
+    pub var process: str
+    pub var minutes: f64
     ## Its exposure index under the light it is balanced for, in kelvin.
     pub var speed: f64
     pub var kelvin: f64

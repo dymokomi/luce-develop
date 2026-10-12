@@ -123,13 +123,29 @@ let standards: i64[3] = [0, 3, 4]
 pub func standard(kind: i64) -> i64:
     return standards[(usize)math.clamp((f64)kind, 0.0, 2.0)]
 
-## The process develop_process `value` chooses for a stock of `kind`: 0 is its
-## standard, n the n-th process (from 1); one it cannot go through is the
-## standard. Its own family's processes, and a slide's cross-process, C-41.
-pub func chosen(kind: i64, value: f64) -> i64:
+## The process `stock`'s sheet was developed in: the one it names, else its kind's.
+pub func standard_of(stock: const Stock*) -> i64:
+    for index in 0..<process_count:
+        if processes[index].name == stock.process:
+            return (i64)index
+    return standard(stock.kind)
+
+## `stock`'s normal time in process `process`: the stock's own in its standard
+## process, and in another the process's table time scaled as the stock's is
+## (black-and-white films need different times; the tables are Acros II's).
+pub func normal_minutes(stock: const Stock*, process: i64) -> f64:
+    let table = processes[(usize)process].minutes
+    if stock.minutes <= 0.0:
+        return table
+    return table * stock.minutes / processes[(usize)standard_of(stock)].minutes
+
+## The process develop_process `value` chooses for `stock`: 0 is its standard,
+## n the n-th process (from 1); one it cannot go through is the standard. Its
+## own family's processes, and a slide's cross-process, C-41.
+pub func chosen_for(stock: const Stock*, value: f64) -> i64:
     let at = (i64)math.round(value) - 1
-    if at < 0 or at >= (i64)process_count or not (processes[(usize)at].family == kind or crossed(kind, at)):
-        return standard(kind)
+    if at < 0 or at >= (i64)process_count or not (processes[(usize)at].family == stock.kind or crossed(stock.kind, at)):
+        return standard_of(stock)
     return at
 
 ## Whether process `process` cross-processes a stock of `kind`: slide film in
@@ -164,15 +180,17 @@ let clear_base: f64 = 0.1
 let least: f64 = 0.4
 let most: f64 = 3.0
 
-## The development in process `process`, as a ratio to its normal, for
-## `minutes` at `celsius` (0 for either: the process's own).
-pub func ratio(process: i64, minutes: f64, celsius: f64) -> f64:
+## The development in process `process`, as a ratio to its normal (`normal`
+## minutes, 0: its table time), for `minutes` at `celsius` (0 for either: the
+## normal).
+pub func ratio(process: i64, minutes: f64, celsius: f64, normal: f64 = 0.0) -> f64:
     let used = processes[(usize)process]
     if used.fixed:
         return 1.0
-    let time = minutes if minutes > 0.0 else used.minutes
+    let base = normal if normal > 0.0 else used.minutes
+    let time = minutes if minutes > 0.0 else base
     let warmth = celsius if celsius > 0.0 else used.celsius
-    return math.clamp(time / used.minutes * math.exp(used.rate * (warmth - used.celsius)), least, most)
+    return math.clamp(time / base * math.exp(used.rate * (warmth - used.celsius)), least, most)
 
 ## What development `degree` (a ratio to normal) does to a stock of `kind`'s curve: its shift in log H
 ## (positive: the film rates faster) and its contrast gain.
@@ -210,12 +228,13 @@ pub func development(kind: i64, degree: f64) -> Development:
 ## `celsius`: the development against the stock's standard, normal development.
 ## Cross-processed, the stock is already the negative its process makes
 ## (`cross_processed`): only time and temperature apply.
-pub func developing(kind: i64, process: i64, minutes: f64, celsius: f64) -> Development:
+pub func developing(stock: const Stock*, process: i64, minutes: f64, celsius: f64) -> Development:
+    let kind = stock.kind
     let cross = crossed(kind, process)
     let shape = color_negative if cross else kind
-    var out = development(shape, ratio(process, minutes, celsius))
+    var out = development(shape, ratio(process, minutes, celsius, normal_minutes(stock, process)))
     let used = processes[(usize)process]
-    let normal = used if cross else processes[(usize)standard(kind)]
+    let normal = used if cross else processes[(usize)standard_of(stock)]
     out.shift += 0.30103 * (used.speed - normal.speed)
     out.gain *= used.contrast / normal.contrast
     out.grain = used.grain / normal.grain
@@ -225,8 +244,9 @@ pub func developing(kind: i64, process: i64, minutes: f64, celsius: f64) -> Deve
     return out
 
 test "normal development in the standard process changes nothing":
-    for kind in 0..<3:
-        let normal = developing((i64)kind, standard((i64)kind), 0.0, 0.0)
+    for at in 0..<film_stocks.stock_count:
+        let stock = film_stocks.stock_at(at)
+        let normal = developing(&stock, standard_of(&stock), 0.0, 0.0)
         assert(math.abs(normal.shift) < 1.0e-12 and math.abs(normal.gain - 1.0) < 1.0e-12 and normal.grain == 1.0)
 
 test "D-76 4 and 10 minutes give the fitted contrast and speed":
@@ -239,23 +259,26 @@ test "D-76 4 and 10 minutes give the fitted contrast and speed":
     assert(ratio(d76, 7.0, 24.0) > 1.3)
 
 test "a process of another family is the standard one":
-    assert(chosen(color_negative, 0.0) == 0 and chosen(color_negative, 2.0) == 1 and chosen(color_negative, 4.0) == 0)
+    let vision = film_stocks.stock_at(2)
+    assert(chosen_for(&vision, 0.0) == 0 and chosen_for(&vision, 2.0) == 1 and chosen_for(&vision, 5.0) == 0)
 
 test "a two-bath ignores time and temperature; Rodinal stand is slow and compensating":
     let diafine = 18
     assert(processes[diafine].name == "Diafine" and ratio(diafine, 12.0, 28.0) == 1.0)
-    let stand = developing(black_and_white, 12, 0.0, 0.0)
+    let acros = film_stocks.stock_at(5)
+    let stand = developing(&acros, 12, 0.0, 0.0)
     assert(processes[12].name == "Rodinal 1+100 stand" and stand.shift < -0.15 and stand.compensation > 0.2)
 
 test "an ECN-2 push gains under a third of a stop, two pushes about half":
-    let one = developing(color_negative, 0, 3.0 + 40.0 / 60.0, 0.0)
-    let two = developing(color_negative, 0, 4.0 + 40.0 / 60.0, 0.0)
+    let vision = film_stocks.stock_at(2)
+    let one = developing(&vision, 0, 3.0 + 40.0 / 60.0, 0.0)
+    let two = developing(&vision, 0, 4.0 + 40.0 / 60.0, 0.0)
     assert(one.shift / 0.30103 < 0.34 and math.abs(two.shift / 0.30103 - 0.5) < 0.1)
 
 test "a slide in C-41 becomes a negative, steeper than a negative stock":
     let c41 = 1
-    assert(chosen(reversal, (f64)(c41 + 1)) == c41 and crossed(reversal, c41) and not crossed(color_negative, c41))
     let velvia = film_stocks.stock_at(4)
+    assert(chosen_for(&velvia, (f64)(c41 + 1)) == c41 and crossed(reversal, c41) and not crossed(color_negative, c41))
     let negative = cross_processed(velvia)
     assert(negative.kind == color_negative)
     # Density now rises with exposure: the first reading thinnest.
@@ -265,3 +288,10 @@ test "a slide in C-41 becomes a negative, steeper than a negative stock":
 test "E-6 push steps rate a slide as Ektachrome E200's did":
     let push = development(reversal, ratio(standard(reversal), 8.0, 0.0))
     assert(math.abs(push.shift / 0.30103 - 0.75) < 1.0e-9 and push.gain < 1.0)
+
+test "stocks develop in their sheets' processes":
+    # Super Panavision 70 (recipe.lucb's mode) chooses stock 22: 5251, in ECN-1.
+    let ecn = film_stocks.stock_at(21)
+    assert(ecn.name == "Eastman Color Negative 5251" and processes[(usize)standard_of(&ecn)].name == "ECN-1")
+    let tri_x = film_stocks.stock_at(17)
+    assert(tri_x.name == "Kodak Tri-X 400" and processes[(usize)standard_of(&tri_x)].name == "D-76" and normal_minutes(&tri_x, standard_of(&tri_x)) == 8.0)

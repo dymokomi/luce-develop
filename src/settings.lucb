@@ -17,9 +17,11 @@
 ##   Develop          the process (0 the stock's standard), time (minutes)
 ##                    and temperature (°C), 0 for the process's normal
 ##                    (film_develop.lucb)
-##   Scan             the transfer's warmth, tint, contrast and black
+##   Scan             the transfer's warmth, tint, contrast and black; its
+##                    calibration (0 a reference negative's, 1 the stock's own)
 ##   Print            printer lights, red, green and blue, in points (0.025 log
-##                    exposure on the print each)
+##                    exposure on the print each); the print's silver kept
+##                    (bleach bypass, ENR, CCE; percent)
 ##   Tone             contrast, highlights, shadows, whites and blacks: a tone
 ##                    curve on luminance (tone.lucb)
 ##   Levels           input black and white, gamma, output black and white, on

@@ -179,22 +179,35 @@ flare, the eye adapted to the screen. Kodak's 2383 sheet has raster graphs:
 print curves are made to one shape, so the three are read as that shape set
 apart, which Kodak's toes (run together on the graph) cannot be read apart for.
 
-Stocks, the tungsten negatives American television shot through the 1990s:
-Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277;
-and two of Fujifilm's. Velvia 50 is a slide (reversal) film: its dyes form a
-positive, seen on a D50 lightbox and brought into scene light through the ACES
-view's inverse, as display pictures come in, so through the default view it
-shows as the slide does (Contrast is a power about grey). Neopan 100 Acros II
-is a black-and-white negative: three identical layers of its panchromatic
-sensitivity (the spectrogram to 5400 K with the light divided out), neutral
-silver, one grain for all three channels, developed per its D-76 7-minute
-curve. The Fuji sheets' graphs are raster scans, traced like 2383's.
-5298's curves were read off the raster graphs of Kodak's TI2082 datasheet
-(`digitize_ti2082.py`); its sheet has no per-dye spectra or marked normal
-exposure, so it takes 5293's dye shapes and 5279's grey (the same speed). The
-others were read exactly from their datasheets' vector graphs
-(`read_vector_sheets.py`). Each stock's grey is the 18% grey card Kodak marks
-on its curves. `dev/film` holds the readings, the scripts that took them, and
+Stocks, 22 of them, each from its maker's sheet:
+
+- **Television's 1990s tungsten negatives:** Kodak EXR 500T 5298 and EXR 200T
+  5293, Vision 500T 5279 and Vision 320T 5277.
+- **Cinema today:** Vision3 500T 5219, 200T 5213, 250D 5207 and 50D 5203.
+- **Still color negatives (C-41):** Portra 160, 400 and 800, Ektar 100,
+  Fujifilm Pro 400H.
+- **Slides (E-6):** Fujifilm Velvia 50 and 100, Kodak Ektachrome E100.
+- **Black and white:** Fujifilm Neopan 100 Acros II, Kodak Tri-X 400 and T-MAX
+  100, Eastman Double-X 5222, Ilford HP5 Plus.
+- **The 1960s:** Eastman Color Negative 5251, 2001: A Space Odyssey's 65 mm
+  negative, from Kodak's 1968 paper on 5254 (same sensitivities and dyes).
+
+A slide's dyes form a positive, seen on a D50 lightbox and brought into scene
+light through the ACES view's inverse, as display pictures come in; the model
+balances its layers so grey looks grey there (sheets' typical curves stand a few
+hundredths apart). A black-and-white film is three identical layers of its
+sensitivity, neutral silver, one grain for all three channels, developed per its
+sheet's normal curve in its own process and time (Tri-X: D-76, 8 minutes; HP5:
+Ilfotec HC, Ilford's HC-110 dilution B).
+
+Most sheets' graphs are vector paths, read exactly by `read_drawings.py` (curves
+by drawing index, axes from the tick labels, an overlay image of every graph to
+check against), with each stock's spec in `sheets_*.py`; older or Fujifilm and
+Ilford sheets are raster scans, traced by `trace_raster_curves.py`. Kodak's and
+Fujifilm's still sheets draw the midscale neutral, not each dye, so those stocks
+take Vision3 250D's dye shapes; sheets that print a grain index rather than an
+rms granularity, and those without an MTF, have estimates, said so in each
+stock's source line. `dev/film` holds the readings, the scripts that took them, and
 `make_stocks.py`, which writes `film_stocks.lucb`. Kodak publishes nothing above log H 0, no interimage numbers and no
 Status M tables: the shoulder, the interimage matrix and the densitometer's
 bands (Gaussians at Status M's band centres) are estimates, labelled where

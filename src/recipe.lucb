@@ -249,15 +249,18 @@ pub struct Path:
 
 ## Recipes to start from: the stages each mode chains, top to bottom, and the
 ## stock (film_stock: 0-based stock + 1) it starts with.
-pub let mode_count: usize = 4
-pub let mode_names: str[4] = ["Television", "Cinema", "Slide", "Black & White"]
-let mode_chains: str[4] = ["file|white_balance|exposure|film|develop|scan|grade|view|easel",
+pub let mode_count: usize = 5
+pub let mode_names: str[5] = ["Television", "Cinema", "Slide", "Black & White", "Super Panavision 70"]
+let mode_chains: str[5] = ["file|white_balance|exposure|film|develop|scan|grade|view|easel",
                            "file|white_balance|exposure|film|develop|print|project|easel",
                            "file|white_balance|exposure|film|develop|lightbox|easel",
-                           "file|exposure|filter|film|develop|scan|grade|view|easel"]
-let mode_stocks: f64[4] = [3.0, 1.0, 5.0, 6.0]
+                           "file|exposure|filter|film|develop|scan|grade|view|easel",
+                           "file|white_balance|exposure|film|develop|print|project|easel"]
+## Super Panavision 70 is 2001: A Space Odyssey's chain: Eastman Color Negative
+## 5251 on 65 mm (developed in its ECN-1), printed and projected.
+let mode_stocks: f64[5] = [3.0, 1.0, 5.0, 6.0, 22.0]
 ## Settings a mode sets besides its stock, in the settings' text form.
-let mode_extras: str[4] = ["", "", "", ""]
+let mode_extras: str[5] = ["", "", "", "", "film_format=3"]
 ## The space between stages in a mode's graph, which runs top to bottom.
 let mode_spacing: f64 = 64.0
 

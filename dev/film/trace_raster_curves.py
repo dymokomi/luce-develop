@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Trace curves on raster datasheet graphs, column by column: Kodak 2383's,
-Fujifilm Velvia 50's and Neopan 100 Acros II's.
+Fujifilm Velvia 50's and Neopan 100 Acros II's, Eastman Double-X's
+development series, and Eastman Color Negative 5251's (from Kodak's 1968 paper
+on 5254).
 
     pdfimages -png KODAK-VISION-Color-Print-Film-2383-3383-data-sheet.pdf g
     trace_raster_curves.py 2383 DIR     # DIR holds g-002.png, g-007.png, g-008.png
@@ -8,6 +10,12 @@ Fujifilm Velvia 50's and Neopan 100 Acros II's.
     trace_raster_curves.py velvia DIR   # v-000.png .. v-003.png (white lines on black)
     pdfimages -f 3 -l 3 -png NEOPAN_100_ACROSII_120_data_sheet.pdf a
     trace_raster_curves.py acros DIR    # a-014.png (spectrogram), a-018.png (D-76)
+    pdfimages -f 3 -l 3 -png DOUBLEX-Technical-Data-EN.pdf x  # Double-X (H-1-5222, 2022)
+    trace_raster_curves.py doublex DIR  # x-000.png (D-96 at 4, 5, 6 1/2, 9 and 12 min)
+    pdfimages -f 3 -l 3 -png 07262803.pdf e # J. SMPTE 77 (Sept 1968), 988-990: Type 5254
+    trace_raster_curves.py ecn5251 DIR  # e-000.png, Figs. 1-3, for Eastman Color Negative 5251
+    pdfimages -png HP5-Plus_201811.pdf h                     # Ilford HP5 Plus (Nov 2018)
+    trace_raster_curves.py hp5 DIR      # h-002.png (spectrogram), h-006.png (ILFOTEC HC)
 
 A curve starts at a point on it (pixels) and is followed both ways: in each column
 the dark run nearest the position its recent slope predicts, so crossing curves
@@ -16,7 +24,7 @@ on its slope) and gridline rows ignored. Writes char.json, sens.json and
 dyes.json beside the images, in axis units. Each graph's calibration was read off
 its frame and tick marks (the dye graph's printed wavelength labels sit off its
 ticks; the ticks, 250–750 nm, are used). Needs Pillow."""
-import json, sys
+import json, math, sys
 from pathlib import Path
 from PIL import Image
 
@@ -269,6 +277,158 @@ def trace_acros(folder):
     json.dump(data, open(Path(__file__).resolve().parent / 'fuji_acros_ii.json', 'w'), indent=1)
 
 
+def trace_doublex(folder):
+    """Double-X 5222's D-96 series from the 2022 sheet (H-1-5222, revised 3-22):
+    4, 5, 6 1/2, 9 and 12 minutes at 21 C. The curves are followed from their
+    right ends, where they stand apart, down into the toe, where they run within
+    a few pixels of each other; below log H -2.6 they are not told apart and are
+    left out. Writes eastman_double_x_5222_d96.json beside this file."""
+    # The frame: log H -3.0 at x 101, 1.0 at x 668; density 0 at y 666, 4.0 at y 100.
+    _, dark = load(folder / 'x-000.png', threshold=128)
+    xmap = lambda x: -3.0 + (x - 101.0) / 141.75
+    ymap = lambda y: (666.0 - y) / 141.5
+    starts = (('d96_12', 316.0), ('d96_9', 388.0), ('d96_6_5', 436.5), ('d96_5', 470.5), ('d96_4', 491.5))
+    curves = {}
+    for name, y0 in starts:
+        points = track(dark, 460, y0, 102, 472, 102, 664, tol=1.5, max_gap=4, slope0=0.6)
+        curves[name] = to_axis({x: y for x, y in points.items() if xmap(x) >= -2.6}, xmap, ymap)
+    grid = [round(-2.6 + 0.05 * i, 2) for i in range(45)]
+    data = {
+        'name': 'Eastman Double-X 5222', 'kind': 'monochrome',
+        'source': "Kodak H-1-5222 (revised 3-22), its raster sensitometric curves traced by dev/film/trace_raster_curves.py: daylight "
+                  "1/50 s, D-96 at 21 C for 4, 5, 6 1/2, 9 and 12 min (gamma 0.50, 0.56, 0.66, 0.84, 1.05 as labelled), Status M (blue). "
+                  "The toe below log H -2.6, where the five curves run together, is left out.",
+        'characteristic': {'log_h': grid, **{name: resample(points, grid) for name, points in curves.items()}},
+    }
+    json.dump(data, open(Path(__file__).resolve().parent / 'eastman_double_x_5222_d96.json', 'w'), indent=1)
+
+
+def trace_hp5(folder):
+    """Ilford HP5 Plus (Nov 2018 sheet): its one characteristic curve, ILFOTEC HC
+    (1+31) for 6 1/2 min at 20 C, and its wedge spectrogram to 2850 K tungsten.
+    The curve's axis is relative log exposure: it is placed so that density 0.1
+    over fog falls at ISO 6's speed point for EI 400, log10(0.8 / 400). Writes
+    ilford_hp5_plus.json beside this file."""
+    # The curve: relative log H 1..4 at the ticks x 98, 189, 279, 370; density 1.0
+    # and 2.0 at the ticks y 186 and 98.
+    _, dark = load(folder / 'h-006.png', threshold=128)
+    columns = band([8, 53, 98, 144, 189, 234, 279, 324, 370, 414], 2)
+    rows = band([7, 53, 98, 142, 186, 231, 276], 2)
+    xmap = lambda x: 1.0 + (x - 98.0) / 90.67
+    ymap = lambda y: 1.0 + (186.0 - y) / 88.0
+    curve = to_axis(track(dark, 300, start_on(dark, 300, 10, 270, 134), 9, 413, 9, 274, skip_cols=columns, tol=3.0,
+                          max_gap=12, skip_rows=rows, slope0=-0.9), xmap, ymap)
+    fog = sum(d for _, d in curve[:10]) / 10
+    speed = next(r for r, d in curve if d >= fog + 0.1)
+    shift = math.log10(0.8 / 400) - speed
+    # The spectrogram: 400 and 650 nm at the ticks x 72 and 359; 0.5 and 1.0 at the
+    # ticks y 129 and 72, 0 at the frame's foot (y 186), so a linear scale.
+    _, dark = load(folder / 'h-002.png', threshold=128)
+    x0 = int(72 + (550 - 400) * 1.148)
+    spectrogram = to_axis(track(dark, x0, start_on(dark, x0, 13, 185, 80), 14, 417, 13, 186, tol=3.0, max_gap=12),
+                          lambda x: 400 + (x - 72.0) / 1.148, lambda y: (186.0 - y) / 114.0)
+    first = math.ceil((curve[0][0] + shift) / 0.05) * 0.05
+    grid = [round(first + 0.05 * i, 2) for i in range(int((curve[-1][0] + shift - first) / 0.05) + 1)]
+    data = {
+        'name': 'Ilford HP5 Plus', 'kind': 'monochrome', 'ei': 400, 'kelvin': 5500.0,
+        'source': "HARMAN technology, ILFORD HP5 PLUS technical information (Nov 2018): its raster graphs traced by "
+                  "dev/film/trace_raster_curves.py. Characteristic curve ILFOTEC HC (1+31) 6 1/2 min at 20 C, intermittent "
+                  "agitation, on relative log exposure, placed with density 0.1 over fog at log H %.2f (ISO 6's speed point "
+                  "for EI 400); wedge spectrogram to tungsten light (2850 K), relative, on the sheet's linear 0-1.0 scale. "
+                  "Ilford publishes no MTF and no rms granularity." % math.log10(0.8 / 400),
+        # ISO 6's speed point plus four stops (1.2 log H), as for Acros II.
+        'grey_log_h': round(math.log10(0.8 / 400) + 1.2, 2),
+        'characteristic': {'log_h': grid, 'hc_1_31_6.5': resample([(r + shift, d) for r, d in curve], grid)},
+        'spectrogram': {'nm': NM, 'relative': resample(spectrogram, NM, 0.05)},
+    }
+    json.dump(data, open(Path(__file__).resolve().parent / 'ilford_hp5_plus.json', 'w'), indent=1)
+
+
+def trace_ecn5251(folder):
+    """Eastman Color Negative 5251 (2001: A Space Odyssey's camera stock) from
+    Beeler, Morris and Simonds, "A New, Higher Speed Color Negative Film", J. SMPTE
+    77 (Sept 1968), 988-990: a 300 dpi bitonal scan of page 990. The paper's
+    Type 5254 has "spectral sensitivities ... identical to those of Type 5251"
+    (Fig. 1), "the same dyes" (Fig. 2), and is otherwise identical apart from one
+    stop of speed, so its curves stand for 5251 moved 0.3 log H to the right.
+    Calibrations are the figures' tick marks; the lines are hand-drawn and thick
+    (about 10 px), so read them to about +-0.03 in density or log. Writes
+    eastman_color_negative_5251.json beside this file."""
+    _, dark = load(folder / 'e-000.png', threshold=128)
+
+    def through(ticks):
+        """Piecewise-linear pixel -> value through (pixel, value) ticks, extended at the ends."""
+        def f(p):
+            (a, va), (b, vb) = ticks[0], ticks[1]
+            for (p0, v0), (p1, v1) in zip(ticks, ticks[1:]):
+                a, va, b, vb = p0, v0, p1, v1
+                if p <= p1:
+                    break
+            return va + (p - a) * (vb - va) / (b - a)
+        return f
+
+    # Fig. 1, spectral sensitivity S(lambda), log scale: the wavelength ticks are
+    # unevenly drawn (400, 500, 600, 700 nm at x 385.5, 573, 753.5, 935); decades
+    # 10, 1, 0.1, 0.01 at y 399, 520.5, 643, 764.5. Relative units.
+    xmap = through([(385.5, 400.0), (573.0, 500.0), (753.5, 600.0), (935.0, 700.0)])
+    ymap = lambda y: 1.0 - (y - 399.0) / 121.83
+    sens = {}
+    # The blue curve ends at 545 nm, on the red one: it is stopped there.
+    for name, x0, y0, x_hi in (('blue', 420, 380.0, 652), ('green', 650, 422.0, 958), ('red', 840, 421.0, 958)):
+        sens[name] = to_axis(track(dark, x0, y0, 292, x_hi, 300, 878, tol=4.0, max_gap=10), xmap, ymap)
+    # Fig. 2, dye absorption (densities, not normalized): 500, 600, 700 nm at x 429,
+    # 599.5, 769 (400 nm at the axis, 258.5); density 1.0 and 2.0 at y 1596 and 1354.
+    xmap = lambda x: 500.0 + (x - 429.0) / 1.7
+    ymap = lambda y: 1.0 + (1596.0 - y) / 242.0
+    dyes = {}
+    for name, x0, y0 in (('neutral', 330, 1147.0), ('yellow', 335, 1311.0), ('magenta', 510, 1473.0), ('cyan', 640, 1560.0)):
+        dyes[name] = to_axis(track(dark, x0, y0, 261, 772, 1100, 1830, tol=4.0, max_gap=10), xmap, ymap)
+    # Fig. 3: density 0.2 and 3.4 at y 1137.5 and 275.5. Its log exposure axis has
+    # two unlabelled ticks (x 1751, 2029.5), taken as 1.0 log H apart; the origin
+    # is placed below (see 'grey_log_h'). The solid printing densities onto
+    # Eastman Color Print 5385 are followed; the dashed Status M ones run within a
+    # few hundredths of them and often merge into one run, so each curve starts
+    # where its solid line stands clear: green at the toe, blue and red at the
+    # top end. Red still drifts onto the dashed line in places (about 0.03).
+    ymap = lambda y: 0.2 + (1137.5 - y) * 3.2 / 862.0
+    relative = lambda x: (x - 1751.0) / 278.5
+    char = {}
+    for name, x0, y0 in (('blue', 2200, 577.0), ('green', 1500, 1031.5), ('red', 2240, 778.0)):
+        char[name] = to_axis(track(dark, x0, y0, 1480, 2256, 262, 1186, tol=4.0, max_gap=10), relative, ymap)
+    # Normal exposure is not marked. Place it where green printing density is 0.80
+    # over its D-min, as on Kodak's Vision3 sheets at their camera stop 0, and call
+    # that log H -0.70: 5254's EI 100 is one stop under Vision3 200T (normal -1.284,
+    # so about -0.98), and 5251's EI 50 one more (-0.68, rounded).
+    green = sorted(char['green'])
+    floor = min(v for _, v in green[:20])
+    at = next(q for q, v in green if v >= floor + 0.80)
+    grey = -0.70
+    char = {name: [(q - at + grey, v) for q, v in pts] for name, pts in char.items()}
+    first = min(min(q for q, _ in pts) for pts in char.values())
+    last = max(max(q for q, _ in pts) for pts in char.values())
+    grid = [round(math.ceil(first / 0.05) * 0.05 + 0.05 * i, 2) for i in range(int((last - first) / 0.05) + 1)]
+    grid = [q for q in grid if q <= last]
+    data = {
+        'name': 'Eastman Color Negative 5251', 'kind': 'negative', 'ei': 50, 'kelvin': 3200.0,
+        'source': "Beeler, Morris and Simonds (Eastman Kodak), \"A New, Higher Speed Color Negative Film\", J. SMPTE 77 (Sept 1968), "
+                  "988-990, on Type 5254, which it states is identical to Type 5251 in structure, spectral sensitivity and dyes, one "
+                  "stop faster. Its 300 dpi scanned figures traced by dev/film/trace_raster_curves.py: Fig. 1 spectral sensitivity "
+                  "(relative S, log); Fig. 2 dye absorption (densities as drawn, with the neutral); Fig. 3 printing densities onto "
+                  "Eastman Color Print 5385, process ECN (SD-30, 12 min at 21 C). Fig. 3's log exposure axis is unlabelled: its two "
+                  "ticks are taken as 1.0 log H apart and its origin set so that green is 0.80 over D-min at log H -0.70 (an "
+                  "estimate, see grey_log_h).",
+        'grey_log_h': grey,
+        'characteristic': {'log_h': grid, **{name: resample(char[name], grid) for name in ('red', 'green', 'blue')}},
+        'sensitivity': {'nm': NM, **{name: resample(sens[name], NM, 0.02) for name in ('red', 'green', 'blue')}},
+        'dyes': {'nm': NM, **{name: [None if v is None else max(0.0, v) for v in resample(dyes[name], NM, 0.02)] for name in ('cyan', 'magenta', 'yellow')}},
+        'neutral': {'nm': NM, 'density': resample(dyes['neutral'], NM, 0.02)},
+        'note': "No granularity or MTF is published for 5251 or 5254 here (the paper says only that 5254 has the same "
+                "graininess as 5251); none is given.",
+    }
+    json.dump(data, open(Path(__file__).resolve().parent / 'eastman_color_negative_5251.json', 'w'), indent=1)
+
+
 if __name__ == '__main__':
     which, folder = sys.argv[1], Path(sys.argv[2])
-    {'2383': trace_2383, 'velvia': trace_velvia, 'acros': trace_acros}[which](folder)
+    {'2383': trace_2383, 'velvia': trace_velvia, 'acros': trace_acros, 'doublex': trace_doublex,
+     'hp5': trace_hp5, 'ecn5251': trace_ecn5251}[which](folder)

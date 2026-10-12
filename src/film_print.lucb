@@ -14,7 +14,9 @@
 ## 3. The print develops each layer through its characteristic curve (Status A,
 ##    unmixed into dye amounts as film_model.lucb does for negatives; the layers
 ##    of a print do not hold each other back).
-## 4. Projection: the dyes' spectral density under a xenon arc (taken as a 5600 K
+## 4. With the bleach bypassed (ENR, CCE), silver kept beside the dyes, neutral
+##    density where the print is dense (`print_silver_density`).
+## 5. Projection: the dyes' spectral density under a xenon arc (taken as a 5600 K
 ##    black body), white the clear print, 0.2% of white added as projector flare,
 ##    and the eye adapted to the screen: the light's white goes to the display's.
 import memory
@@ -156,18 +158,29 @@ func build_model():
     build(made)
     built = made
 
+## Silver left in a print whose bleach was bypassed (Technicolor's ENR,
+## Deluxe's CCE, skip bleach): neutral density per unit of the print's own
+## density over its base, all of it kept. Labs' infrared readings put a fully
+## unbleached print 1.8 over normal at a D-max near 4: 0.45. The silver sits
+## where the print is dense, in the shadows: blacks deepen, color drains there.
+let print_silver_density: f64 = 0.45
+
 ## Scene light `rgb` (AP1) printed and projected: XYZ adapted to D65, the print's
-## white at Y = 1.
-pub func projected(rgb: f64[3]) -> xyz.XYZ:
+## white at Y = 1. `silver` is the share of the print's silver kept (0..1).
+pub func projected(rgb: f64[3], silver: f64 = 0.0) -> xyz.XYZ:
     built_once.run(build_model)
     let model = built else trap("the print model was not built")
     var amounts: f64[3]
     for layer in 0..<(usize)3:
         let negative = negative_gamma * math.log10(math.max(rgb[layer], 1.0e-6) / 0.18)
         amounts[layer] = model.amount(layer, model.printer[layer] - negative)
+    # The kept silver: the dyes' amounts are visual densities (Kodak's
+    # normalized dyes make a visual neutral of 1.0 at 1.0 each), so their mean
+    # is the print's density over its base.
+    let kept = silver * print_silver_density * math.max((amounts[0] + amounts[1] + amounts[2]) / 3.0, 0.0)
     var shown = xyz.XYZ(0.0, 0.0, 0.0)
     for at in 0..<spectral.samples:
-        let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at]
+        let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at] + kept
         let power = model.light.values[at] * math.pow(10.0, -d)
         shown.x += power * spectral.observer[at * 3]
         shown.y += power * spectral.observer[at * 3 + 1]
@@ -194,3 +207,11 @@ test "grey prints near a tenth of white, neutral; white shows white and black ne
         let shown = projected([v, v, v]).y
         assert(shown >= previous - 1.0e-4)
         previous = shown
+
+test "silver kept in a print deepens its shadows, leaves its whites":
+    # A shadow above the projector's flare.
+    let shadow = projected([0.05, 0.05, 0.05])
+    let kept = projected([0.05, 0.05, 0.05], 1.0)
+    assert(kept.y < shadow.y * 0.6)
+    let white = projected([20.0, 20.0, 20.0], 1.0)
+    assert(white.y > 0.75)

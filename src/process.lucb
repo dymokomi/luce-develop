@@ -41,6 +41,8 @@ struct Develop:
     var matrix: f64[9]
     var tables: Tables
     var shown: View
+    ## The print view's silver kept (0..1).
+    var silver: f64
     var to_display: f64[9]
     var vibrance: f64
     var saturation: f64
@@ -174,7 +176,7 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
         c = with_lens(d, c, su, sv)
     c = with_tone(d, c)
     c = with_color(d, c)
-    c = view.display(d.shown, c, d.to_display, d.output)
+    c = view.display(d.shown, c, d.to_display, d.output, d.silver)
     c = with_curves(d, c)
     return with_vignette(d, c, u, v)
 
@@ -231,7 +233,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
     let height = (usize)out_height
     let camera = film.camera_settings(settings)
     let develop = Develop(matrix = try source.matrix(&camera), tables = tables.build(settings),
-                          shown = (View)(i64)settings.get(.view), to_display = view.working_to_output(output), output = output,
+                          shown = (View)(i64)settings.get(.view), silver = settings.get(.print_silver) / 100.0, to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     var out = Rendering(develop = develop, source = source, width = width, height = height)
