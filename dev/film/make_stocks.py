@@ -571,8 +571,9 @@ print_dyes = sum((spectral(print_data['dyes']['nm'], print_data['dyes'][d], 0.0)
 n = len(char['log_h'])
 body += f'''
 ## A color print stock as its datasheet describes it, for printing images held
-## as printing density (film_print.lucb), whose definition is the print's own spectral
-## response: so its spectral sensitivity, though in its data, is not needed.
+## as printing density (film_print.lucb; film_model.lucb reads a negative's by
+## SMPTE RP 180), whose definition stands for the print's own spectral response:
+## so its spectral sensitivity, though in its data, is not needed.
 pub struct PrintStock:
     pub var name: str
     ## Spectral density of the cyan, magenta and yellow dyes, each scaled so the

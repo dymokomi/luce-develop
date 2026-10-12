@@ -53,7 +53,8 @@ pixel size only decides how finely the film is sampled.
    (±40 s around 3:15); D-76 time series for Acros, Tri-X and HP5; E-6 push
    speeds of EI 320/640/1000 at 8/11/14 min.
 
-3. **Spectral print chain.** The print exposure comes from the simulated
+3. **Spectral print chain** (done for 2383 printed straight from the
+   negative; paper prints come with part 8). The print exposure comes from the simulated
    negative's spectral density: lamp × printer filters × print-stock (or paper)
    sensitivity × 10^(−D_neg(λ)), with printer points of 0.025 log E. This
    replaces the Cineon-encoded scene. Exit tests: 2383 LAD aim of Status A
@@ -70,6 +71,22 @@ pixel size only decides how finely the film is sampled.
    gamma ratios 0.8–1.3 (scan films); Nelson's adjacency (e-folding ≈ 20 µm,
    2–5 %); stand development's strong edges; agitation changing edges, not
    contrast.
+
+   *How it runs.* A film-plane grid per layer at the chemistry's scale (cells
+   no wider than 10 µm, or the pixel when that is finer), holding per layer:
+   developable silver m∞ (from exposure and the latent image), developed
+   silver m, developer C, bromide B and DIR inhibitor I (cyan, magenta and
+   yellow records' own). Each step: development `dm/dt = k(x, T)·(m∞ − m)·
+   C/(K_C + C)/(1 + K_B·B + K_I·I)`; developer used and halide and inhibitor
+   released in proportion to dm; diffusion in the plane (a five-point stencil
+   or a separable kernel per step, D per species) and between layers;
+   developer entering from the bath at the top surface at a rate set by
+   agitation (h), its reaction products leaving. Compute kernels on luce-gpu
+   advance it a number of steps per frame, and the viewport shows the
+   developing negative (or the print or scan it makes) frame by frame; the
+   export runs it to the end on the same kernels. A large even patch must
+   reproduce the closed form of part 2 (its constants are fitted so), so
+   edges, interimage and agitation come out as differences from it.
 
 5. **Grain populations.** Each colour record holds two or three emulsion
    populations (fast, mid, slow) as a persistent marked point process in

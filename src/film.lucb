@@ -88,7 +88,8 @@ from film_develop import Development
 from film_model import Model, build_model, invert3, log_h_at, lut_size, curve_samples, log_low, log_high
 import film_exposure
 from film_exposure import Input
-from settings import Settings, defaults
+from settings import Settings, View, defaults
+import recipe
 
 # mark: Layout ================================================================
 
@@ -179,6 +180,13 @@ pub func camera_settings(settings: const Settings*) -> Settings:
         out.set(.tint, 0.0)
     return out
 
+## Whether the negative is printed straight onto print film: the 2383 print
+## view with no scanner and no film recorder on the way (a lab's photochemical
+## chain), so the print stock sees the negative's dyes themselves.
+pub func prints_directly(settings: const Settings*) -> bool:
+    let direct = not settings.recipe.active((i64)recipe.Stage.scan) and not settings.recipe.active((i64)recipe.Stage.record)
+    return direct and settings.get(.view) == (f64)(i64)View.print
+
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
 ## setting is one more), for building a menu.
 pub func stock_count() -> i64:
@@ -265,6 +273,9 @@ pub struct Film:
     ## Whether the model is the stock cross-processed (film_develop.lucb).
     var cross: bool
     var on: bool
+    ## Whether the negative goes straight to print (`prints_directly`): the
+    ## table then holds what the print stock sees, not what a scanner reads.
+    var printing: bool
 
     pub func release():
         self.model.release()
@@ -295,12 +306,17 @@ pub struct Film:
             return
         let chosen = film_stocks.stock_at((usize)(choice - 1))
         let cross = film_develop.crossed(chosen.kind, film_develop.chosen_for(&chosen, settings.get(.develop_process)))
+        let printing = prints_directly(settings) and chosen.kind != 2 and (chosen.kind == 0 or cross)
+        let reprint = printing != self.printing
+        self.printing = printing
         if choice != self.stock or cross != self.cross:
             self.model.release()
             self.model = try build_model(film_develop.cross_processed(chosen) if cross else chosen)
             self.stock = choice
             self.cross = cross
             self.fill_model()
+        elif reprint:
+            self.fill_table()
         self.on = true
         self.fill_settings(settings)
         self.fill_exposure(settings, &input)
@@ -375,14 +391,21 @@ pub struct Film:
 
     func fill_model():
         let model = &self.model
+        self.fill_table()
+        for at in 0..<curve_samples:
+            self.put(neutral_row, at, model.neutral[at * 3], model.neutral[at * 3 + 1], model.neutral[at * 3 + 2], 1.0)
+
+    ## The table over dye amounts: the scanner's densities, or what the print
+    ## stock sees when the negative prints directly.
+    func fill_table():
+        let model = &self.model
+        let table = model.printed if self.printing else model.scan
         let n = lut_size
         for b in 0..<n:
             for g in 0..<n:
                 for r in 0..<n:
                     let at = ((b * n + g) * n + r) * 3
-                    self.put(g, b * n + r, model.scan[at], model.scan[at + 1], model.scan[at + 2], 1.0)
-        for at in 0..<curve_samples:
-            self.put(neutral_row, at, model.neutral[at * 3], model.neutral[at * 3 + 1], model.neutral[at * 3 + 2], 1.0)
+                    self.put(g, b * n + r, table[at], table[at + 1], table[at + 2], 1.0)
 
     func fill_settings(settings: const Settings*):
         let model = &self.model
@@ -514,6 +537,18 @@ pub struct Film:
         self.put(values_row, 15, halation[0] * halo, halation[1] * halo, halation[2] * halo, halation_spread)
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, 1.0 if row == 0 else 0.0, 1.0 if row == 1 else 0.0, 1.0 if row == 2 else 0.0, 0.0)
+        if self.printing:
+            # Printing density goes to the print as it is, at the print view's
+            # 0.6 per decade about the normal negative's grey (film_print.lucb),
+            # where the printer lights put the print's mid-grey: no scanner's
+            # gamma, matrix or timing, only the printer lights (values 10).
+            let at_grey = self.scan_of(self.neutral_at(grey))
+            self.put(values_row, 7, at_grey[0], at_grey[1], at_grey[2], 1.0)
+            self.put(values_row, 8, print_balance[0] / 0.6, print_balance[1] / 0.6, print_balance[2] / 0.6, 0.0)
+            self.put(values_row, 9, 0.0, 0.0, 0.0, 0.0)
+            self.put(values_row, 10, lights[0], lights[1], lights[2], 0.0)
+            self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
+            return
         if kind == 1:
             # A slide is seen, not scanned: its table holds scene light already.
             # Contrast is a power about grey; Black has nothing to take out.
@@ -544,6 +579,16 @@ pub struct Film:
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, fitted[row * 3], fitted[row * 3 + 1], fitted[row * 3 + 2], 0.0)
         self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
+
+    ## The print layers' contrast that prints this negative's grey scale
+    ## neutral (each layer's printing-density gamma about grey over their mean).
+    func print_balance_of() -> f64[3]:
+        let grey = self.model.grey_log_h
+        let high = self.scan_of(self.neutral_at(grey + 0.3))
+        let low = self.scan_of(self.neutral_at(grey - 0.3))
+        let gammas: f64[3] = [high[0] - low[0], high[1] - low[1], high[2] - low[2]]
+        let mean = (gammas[0] + gammas[1] + gammas[2]) / 3.0
+        return [mean / gammas[0], mean / gammas[1], mean / gammas[2]]
 
     ## The matrix from the scan's channels to AP1 that best returns colors of
     ## moderate saturation to themselves (least squares), its rows scaled so
@@ -855,6 +900,13 @@ let reference_scan: f64[9] = [0.5966151428927311, 0.3880712781760212, 0.01531357
                               -0.0031287639353947717, 1.0387166430979844, -0.035587879162589875,
                               -0.009707447667084562, 0.26949005401104037, 0.7402173936560442]
 
+## 2383's layers' contrast against the shape its curves share here (Kodak's
+## graph runs them together where they could be read apart): Kodak matches
+## them to its camera negatives so a normal grey scale prints neutral. Fitted
+## so the reference negative, Vision3 250D 5207, does (`print_balance_of`; the
+## test below holds them together); each stock then prints its own balance.
+let print_balance: f64[3] = [1.0337625302615536, 0.915533957418388, 1.0633760709750428]
+
 ## Edge effects in log H per unit of their strength (film_develop.lucb's share of
 ## a step added as overshoot). For a negative of gamma 0.6 whose dye is about 2
 ## at most, a step's border gains about 0.15 of the hold's difference: 1 / 0.15.
@@ -1158,3 +1210,29 @@ test "the reference scanner is Vision3 250D's fit":
         # What to put in reference_scan when the exposure or the scan changed.
         print(f"reference_scan: {fitted[0]}, {fitted[1]}, {fitted[2]}, {fitted[3]}, {fitted[4]}, {fitted[5]}, {fitted[6]}, {fitted[7]}, {fitted[8]}")
     assert(close)
+
+test "2383's layers are balanced to print Vision3 250D's grey scale neutral":
+    var settings = defaults_with_film()
+    settings.set(.film_stock, 9.0)
+    settings.set(.film_grain, 0.0)
+    settings.recipe = recipe.mode(1)
+    settings.set(.view, (f64)(i64)View.print)
+    var film = Film()
+    film.prepare(&settings) catch failure:
+        assert(false)
+        return
+    defer film.release()
+    assert(film.printing)
+    let fitted = film.print_balance_of()
+    var close = true
+    for at in 0..<(usize)3:
+        close = close and math.abs(fitted[at] - print_balance[at]) < 0.002
+    if not close:
+        # What to put in print_balance when the negative's model changed.
+        print(f"print_balance: {fitted[0]}, {fitted[1]}, {fitted[2]}")
+    assert(close)
+    # A grey scale on it prints neutral (printing density over grey, per stop).
+    for k in [-3.0, -1.0, 1.0, 3.0]:
+        let v = 0.18 * math.exp2(k)
+        let out = develop(&film, [v, v, v], 0.5, 0.5, 20.0)
+        assert(math.abs(math.log2(out[0] / out[1])) < 0.08 and math.abs(math.log2(out[2] / out[1])) < 0.08)

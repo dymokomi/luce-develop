@@ -3,11 +3,12 @@
 ## and it replaces the view's tone scale instead of stacking on it: the print's
 ## own toe and shoulder are the tone mapping.
 ##
-## 1. Printing density. The graded scene, channel by channel, is held as a
-##    negative's printing density the Cineon way: 0.6 density per decade of
-##    scene light, grey (0.18) at 0.70 over D-min. Printing density is by
-##    definition the density the print stock sees, so each print layer's log
-##    exposure is its printer light less the negative's density.
+## 1. Printing density, what the print stock sees of the negative: each print
+##    layer's log exposure is its printer light less it. A negative printed
+##    straight (film.lucb's `prints_directly`) hands its own, read through
+##    SMPTE RP 180 from its dyes (film_model.lucb); a scan, a grade or a film
+##    recorder in between hands the image the Cineon way, as recorders write
+##    it: 0.6 density per decade of scene light, grey (0.18) at 0.70 over D-min.
 ## 2. Printer lights put grey on the print's visual neutral of density 1.0: the
 ##    amounts of dye Kodak's normalized curves define (each 1.0), so grey shows
 ##    at a tenth of the print's white, as a cinema shows it.
