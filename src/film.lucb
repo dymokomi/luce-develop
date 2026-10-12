@@ -155,12 +155,14 @@ pub func stock_name(at: i64) -> str:
 ## Friends (NBC, 1994–2004) was shot on 35 mm tungsten negative under bright
 ## multi-camera set light and graded on a telecine to tape, never printed. No
 ## source names its stocks; EXR 500T fits the first seasons and Vision 500T the
-## later ones, which reviewers describe as cleaner and brighter after the early
-## seasons' "burnished 90s orange": warm, slightly flat and grainier. Tuned by
-## eye, not against the broadcast.
+## later ones. Their timing is matched to 24 stills of the 4:3 standard-definition
+## broadcast (12 from each half): the near-neutral pixels' cast in Oklab, about
+## +0.010 a and +0.005 b early (warm, toward red-magenta) and +0.007 a and +0.007 b
+## later, measured as each look shifts a photo's neutrals. The early look is also
+## flatter and grainier, as the stills and reviewers have it.
 let look_names: str[2] = ["Film · Friends, Seasons 1–5", "Film · Friends, Seasons 6–10"]
-let look_texts: str[2] = ["film_stock=1;film_warmth=28;film_tint=4;film_contrast=-12;film_black=75;film_grain=110",
-                          "film_stock=3;film_warmth=14;film_black=60;film_grain=85"]
+let look_texts: str[2] = ["film_stock=1;film_warmth=12;film_tint=7;film_contrast=-12;film_black=75;film_grain=110",
+                          "film_stock=3;film_warmth=21;film_tint=2;film_black=60;film_grain=85"]
 
 pub func look_count() -> i64:
     return 2
