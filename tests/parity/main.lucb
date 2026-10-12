@@ -121,6 +121,63 @@ func check_file(device: gpu.Device, path: str) -> i64!:
             failed += 1
     return failed
 
+## The stochastic render (film_grains.lucb) on the GPU, drawn until it has
+## refined to 64 samples a pixel or more, against the CPU's with as
+## many samples: the same grains, the same samples. The GPU computes the
+## effective log H itself (half floats, rounded a little differently), so a
+## grain right at its threshold can develop on one and not the other, and a
+## silver grain is nearly opaque: a mean within 1.5 levels, under 3 % over 6.
+let stochastic_cases: str[3] = ["film_stock=3", "film_stock=5;film_grain=150", "film_stock=18;develop_process=5"]
+
+func check_stochastic(device: gpu.Device, path: str) -> i64!:
+    var failed: i64 = 0
+    for wanted in stochastic_cases:
+        let settings = parse(wanted)
+        var drawer = try renderer.create(gpu.Format.rgba8)
+        defer drawer.close()
+        drawer.show(try scene.open(path, 128))
+        drawer.set_settings(settings)
+        let width = (u32)drawer.width()
+        let height = (u32)drawer.height()
+        var texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba8)
+        defer texture.destroy()
+        var draws = 0
+        while drawer.refined_samples() < 64 and draws < 400:
+            let frame = try texture.frame()
+            defer frame.release()
+            let target = try frame.value().target()
+            defer target.release()
+            try drawer.draw(target, 0.0, 0.0, (f64)width, (f64)height)
+            _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+            draws += 1
+        let refined = drawer.refined_samples()
+        let shown = try new u8[(usize)(width * height * 4)] in memory.heap
+        defer free(shown) in memory.heap
+        try texture.read(shown)
+        var cpu_scene = try scene.open(path, 128)
+        defer cpu_scene.close()
+        var expected = try process.render(&cpu_scene, settings, samples = (usize)refined)
+        defer expected.close()
+        let want = expected.pixels()
+        var total = 0.0
+        var largest = 0
+        var outliers = 0
+        for at in 0..<shown.length:
+            if at % 4 == 3:
+                continue
+            let difference = (i64)shown[at] - (i64)want[at]
+            let size = difference if difference >= 0 else -difference
+            total += (f64)size
+            largest = size if size > largest else largest
+            outliers += 1 if size > 6 else 0
+        let values = (f64)(shown.length // 4 * 3)
+        let mean = total / values
+        let good = refined >= 64 and mean < 1.5 and (f64)outliers / values < 0.03
+        print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [stochastic {wanted}, {refined} samples]  mean {mean}  over 6: {outliers}  largest {largest}")
+        if not good:
+            failed += 1
+    return failed
+
 ## A and B compared, the split at 0.4: each side within the film limit (8) of
 ## its own CPU develop (B: the recipe shown at Develop, scanned as is).
 func check_compare(device: gpu.Device, path: str) -> i64!:
@@ -192,6 +249,7 @@ pub func main(arguments: str[]) -> i32!:
         for path in arguments[1..]:
             failed += try check_file(device, path)
             failed += try check_compare(device, path)
+            failed += try check_stochastic(device, path)
         return 1 if failed > 0 else 0
     for sample in samples:
         if not try present(sample):
@@ -200,4 +258,5 @@ pub func main(arguments: str[]) -> i32!:
     for sample in samples:
         failed += try check_file(device, sample)
         failed += try check_compare(device, sample)
+        failed += try check_stochastic(device, sample)
     return 1 if failed > 0 else 0

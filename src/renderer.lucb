@@ -129,6 +129,16 @@ func view_key(settings: const Settings*) -> i64:
 ## How long watching development takes, seconds of real time.
 let watch_seconds: f64 = 2.5
 
+## The stochastic render (film_grains.lucb): samples a pixel it refines to, and
+## how many it needs before it is shown in place of the statistical film (fewer
+## leave the sampling's own noise on top of the grain: silver, nearly opaque,
+## needs the most).
+pub let refine_target: u32 = 256
+pub let shown_after: u32 = 4
+## About how much of it a frame does (pixels times samples), so frames stay a
+## few tens of milliseconds while it refines, however large the photo.
+let frame_work: u32 = 524288
+
 func developing() -> Developing:
     return Developing(settings = defaults(), view_baked = -1)
 
@@ -164,6 +174,8 @@ pub struct Renderer:
     ## as it was taken. Whether they apply the crop; off while it is chosen.
     var geometry_shown: bool
     var crop_shown: bool
+    ## The stochastic render: whether it refines the film once the settings settle.
+    var refining: bool
     ## For the histogram: a pipeline drawing into 8-bit textures, and the bins.
     var probe_pipeline: gpu.Pipeline?
     var bins: i64[1024]
@@ -284,9 +296,27 @@ pub struct Renderer:
         self.a.film_stale = true
         self.b.film_stale = true
 
-    ## Whether development is being shown running (draw again soon).
+    ## Whether development is being shown running, or the stochastic render is
+    ## still refining (draw again soon).
     pub func animating() -> bool:
-        return self.watch_running
+        return self.watch_running or self.still_refining(&self.a) or (self.comparing and self.still_refining(&self.b))
+
+    ## Refine the film stochastically once the settings settle (on by default).
+    pub func refine_grain(on: bool):
+        self.refining = on
+        if not on:
+            # Back to the statistical film.
+            self.a.film_stale = true
+            self.b.film_stale = true
+
+    ## How many samples a pixel output A's stochastic render has (0 while the
+    ## statistical film shows).
+    pub func refined_samples() -> i64:
+        return (i64)self.a.film_passes.samples
+
+    func still_refining(which: const Developing*) -> bool:
+        let wanted = self.refining and not self.watch_running and which.film.active() and which.settings.get(.film_grain) > 0.0
+        return wanted and which.film_passes.samples < refine_target
 
     ## Whether outputs A and B are both shown, and where B begins across the
     ## photo (0..1 of its width).
@@ -458,14 +488,7 @@ pub struct Renderer:
             try held.upload(u8[]((u8*)texels.data, texels.length * 2))
             let camera = film.camera_settings(&which.settings)
             try which.film.prepare(&which.settings, try self.shown.film_input(&camera))
-            let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
-            defer free(atlas) in memory.heap
-            for at in 0..<atlas.length:
-                atlas[at] = (f16)which.film.texels[at]
-            if which.film_texture == none:
-                which.film_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
-            let film_held = which.film_texture else return
-            try film_held.upload(u8[]((u8*)atlas.data, atlas.length * 2))
+            try upload_atlas(device, which)
             which.tables_stale = false
             which.film_stale = true
         # The view and what its table depends on, as one key.
@@ -503,6 +526,22 @@ pub struct Renderer:
                                                    try self.scene_matrix(which), aspect, (u32)self.shown.width(), (u32)self.shown.height(),
                                                    try self.veil_of(which))
             which.film_stale = false
+        elif self.still_refining(which):
+            try self.refine_develop(device, which)
+
+    ## More of `which`'s stochastic render (a frame's share), its grains fitted
+    ## first; shown once it has enough.
+    func refine_develop(device: gpu.Device, which: Developing*) -> !:
+        let tables_texture = which.tables_texture else return
+        if not which.film.has_grains():
+            try which.film.fit_grains()
+            try upload_atlas(device, which)
+        let film_texture = which.film_texture else return
+        # A small photo takes several samples a pass; a large one one.
+        let pixels = (u32)(self.shown.width() * self.shown.height())
+        let count = math.clamp((f64)frame_work / (f64)(pixels if pixels > 0 else 1), 1.0, 16.0)
+        if let resolved = try which.film_passes.refine(device, tables_texture, film_texture, (u32)count, frame_work, shown_after):
+            which.filmed = resolved
 
     ## Stop the loading thread and let every texture go.
     pub func close():
@@ -546,18 +585,31 @@ pub struct Renderer:
 
 pub let renderer_type: interop.Type[Renderer] = interop.Type[Renderer]("Renderer", Renderer.close, Renderer.trace, closeable = true, main_thread = true)
 
+## `which`'s film atlas onto the GPU.
+func upload_atlas(device: gpu.Device, which: Developing*) -> !:
+    let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
+    defer free(atlas) in memory.heap
+    for at in 0..<atlas.length:
+        atlas[at] = (f16)which.film.texels[at]
+    if which.film_texture == none:
+        which.film_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
+    let film_held = which.film_texture else return
+    try film_held.upload(u8[]((u8*)atlas.data, atlas.length * 2))
+
 ## A renderer drawing into targets of `format` (the window's when none), its
 ## loading thread started; the caller closes it.
 pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, a = developing(), b = developing(), split = 0.5, format = format, geometry_shown = true, crop_shown = true)
+    return Renderer(loading = loading, worker = worker, a = developing(), b = developing(), split = 0.5, format = format, geometry_shown = true, crop_shown = true,
+                    refining = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
-    let renderer = new Renderer(loading = made.loading, worker = made.worker, a = developing(), b = developing(), split = 0.5, geometry_shown = true, crop_shown = true) in memory.heap catch failure:
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, a = developing(), b = developing(), split = 0.5, geometry_shown = true, crop_shown = true,
+                                refining = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

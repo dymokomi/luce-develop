@@ -301,12 +301,20 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
         pass.out[at + 2] = (f16)out[2]
         pass.out[at + 3] = (f16)spent
 
-## What a grain's place says (film_grains.lucb's `clouds`): its layer's
-## populations' shares and strength at the effective log H there (`first`).
+## What the film says at a grain's centre (`x`, `y` µm) for layer `layer`
+## (film_grains.lucb's `clouds`): its populations' shares developed and the
+## clouds' strength at the effective log H there (`first`), the shares as far
+## as the development has come (a slide's first developer is what grows).
 func grain_place(context: void*, layer: usize, x: f64, y: f64) -> f64[4]:
     let pass = (Pass*)context
     let h = bilinear(pass.first, pass.width, pass.height, x / pass.pitch - 0.5, y / pass.pitch - 0.5)
-    return pass.film.grain_table(layer, h[layer])
+    var said = pass.film.grain_table(layer, h[layer])
+    if pass.share < 1.0:
+        let grown = film.progress(pass.film, h, pass.share)[layer]
+        let reversal = pass.film.value(17)[3] == 1.0
+        for p in 0..<film_grains.populations:
+            said[p] = 1.0 - (1.0 - said[p]) * grown if reversal else said[p] * grown
+    return said
 
 ## Pixel (`column`, `row`) of the stochastic render: `samples` points spread
 ## over it, each the dye of the grains there scanned to light (a negative's
@@ -334,25 +342,26 @@ func stochastic_reading(pass: const Pass*, column: usize, row: usize) -> (f64[3]
     let developed = film.developed_amounts(source, effective, pass.share)
     let mean = source.density_read(developed)
     let slopes = source.scan_slopes(developed)
-    let reversal = source.value(17)[3] == 1.0
     let base = source.value(338)
     let layers = (usize)base[3]
-    let grown = film.progress(source, effective, pass.share) if pass.share < 1.0 else [1.0, 1.0, 1.0]
     var light: f64[3] = [0.0, 0.0, 0.0]
     for k in 0..<pass.samples:
         let (ox, oy) = film_grains.sample_place((u32)column, (u32)row, (u32)k)
         let x = ((f64)column + ox) * pass.pitch
         let y = ((f64)row + oy) * pass.pitch
-        let clouds = film_grains.clouds(pass.geometry, layers, x, y, grown, reversal, grain_place, (void*)pass)
+        let clouds = film_grains.clouds(pass.geometry, layers, x, y, grain_place, (void*)pass)
+        # Light over the developed film's (film.frag keeps it near 1, in half floats).
         for c in 0..<(usize)3:
-            var d = mean[c]
+            var d = 0.0
             for layer in 0..<(usize)3:
                 d += slopes[layer * 3 + c] * (base[layer] + clouds[0 if layers == 1 else layer] - developed[layer])
-            light[c] += math.pow(10.0, -d) / (f64)pass.samples
+            # Within four decades of it (the scan's slopes are a line; far
+            # from the film's reading they would run away).
+            light[c] += math.pow(10.0, -math.clamp(d, -4.0, 4.0)) / (f64)pass.samples
     let bias = source.grain_bias(effective, slopes)
     var read: f64[3]
     for c in 0..<(usize)3:
-        read[c] = -math.log10(math.max(light[c], 1.0e-30)) - bias[c]
+        read[c] = mean[c] - math.log10(math.max(light[c], 1.0e-30)) - bias[c]
     return (mean, read)
 
 ## `source` (camera values) through the film: the filmed scene, scene light in
@@ -568,8 +577,8 @@ test "part of the way through, a negative is thinner":
 
 ## Where a large grey patch develops: each layer's effective log H (held back
 ## by its own inhibitor, as film.lucb's `develop` has it).
-func even_effective(source: const Film*) -> f64[3]:
-    let e = film.expose(source, [0.18, 0.18, 0.18])
+func even_effective(source: const Film*, light: f64 = 0.18) -> f64[3]:
+    let e = film.expose(source, [light, light, light])
     let held = film.neutral(source, e)
     return film.developed(source, e, held, film.exhaustion(source, held) * source.value(54)[3]).effective
 
@@ -577,11 +586,11 @@ func even_effective(source: const Film*) -> f64[3]:
 ## (its effective log H the stock's grey), read by the stochastic render with
 ## `samples` a pixel, per channel in density (a slide's light as density too):
 ## the readings' mean light, the grainless reading, and the readings' rms.
-func even_reading(source: Film*, size: usize, pitch: f64, samples: usize) -> (f64[3], f64[3], f64[3])!:
+func even_reading(source: Film*, size: usize, pitch: f64, samples: usize, level: f64 = 0.18) -> (f64[3], f64[3], f64[3])!:
     try source.fit_grains()
     let field = try new f16[size * size * 4] --- in memory.heap
     defer free(field) in memory.heap
-    let grey = even_effective(source)
+    let grey = even_effective(source, level)
     for at in 0..<size * size:
         for k in 0..<(usize)3:
             field[at * 4 + k] = (f16)grey[k]
@@ -636,3 +645,5 @@ test "the stochastic render reads grey as the curve and the stock's granularity"
             let scaled = rms[c] * math.sqrt(pitch * pitch / film_grains.aperture_area)
             print(f"{text} channel {c}: read {read[c]} flat {flat[c]} as 48 µm {scaled} wanted {wanted}")
             assert(math.abs(read[c] - flat[c]) < 0.015)
+
+

@@ -790,9 +790,10 @@ pub struct Film:
             self.put(values_row, 340 + at, film_grains.light_taken(film_grains.peak_at(at)), 0.0, 0.0, 0.0)
         self.grains_fitted = true
 
-    ## The scan's reading of dye `amounts` as density (a slide's light too).
+    ## The scan's reading of dye `amounts` (the retained silver included) as
+    ## density (a slide's light too).
     pub func density_read(amounts: f64[3]) -> f64[3]:
-        let read = self.scanned_lut(amounts, self.value(6)[1])
+        let read = silver(&self, self.scanned_lut(amounts, self.value(6)[1]))
         if self.model.stock.kind != 1:
             return read
         var out: f64[3]
@@ -839,14 +840,21 @@ pub struct Film:
     ## stochastic render reads a pixel's grain through them, about the
     ## developed film's reading there.
     pub func scan_slopes(amounts: f64[3]) -> f64[9]:
-        let here = self.density_read(amounts)
+        let top = self.value(6)[1]
         var slopes: f64[9]
         for layer in 0..<(usize)3:
-            var nudged = amounts
-            nudged[layer] += 0.02
-            let moved = self.density_read(nudged)
+            # Either side of it, inside the table (at its ends it holds still).
+            var up = amounts
+            var down = amounts
+            up[layer] = math.min(amounts[layer] + 0.02, top)
+            down[layer] = math.max(amounts[layer] - 0.02, 0.0)
+            let span = math.max(up[layer] - down[layer], 1.0e-6)
+            let above = self.density_read(up)
+            let below = self.density_read(down)
+            # A dye never makes a channel lighter (the table's steps near its
+            # ends can say otherwise).
             for channel in 0..<(usize)3:
-                slopes[layer * 3 + channel] = (moved[channel] - here[channel]) / 0.02
+                slopes[layer * 3 + channel] = math.max((above[channel] - below[channel]) / span, 0.0)
         return slopes
 
     ## What the grains add on average to each channel's density over the

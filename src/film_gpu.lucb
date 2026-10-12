@@ -1,7 +1,9 @@
 ## Film on the negative, on the GPU: shaders/film.frag's passes, in the order
 ## film_passes.lucb runs them on the CPU, into three half-float textures at the
 ## scene's size. The renderer runs them when the scene or the settings change and
-## then draws the filmed scene in place of the camera's.
+## then draws the filmed scene in place of the camera's. Then, frame by frame,
+## the stochastic render (`refine`): samples through the grains kept as a
+## running mean, read back once there are enough.
 from luce_gpu import gpu
 from film import Film
 from luce_std import math
@@ -9,6 +11,10 @@ import film
 import film_passes
 from film_passes import Plan, Blur
 from shaders import film_frag_words, film_frag_msl
+
+## The most samples (pixels times samples each) one submission of the
+## stochastic render takes.
+let band_work: u32 = 262144
 
 pub struct FilmPasses:
     var shader: gpu.Shader?
@@ -28,6 +34,24 @@ pub struct FilmPasses:
     ## How much of the development is still to come in what is shown (0: none,
     ## the developed film; 1: none of it yet), for watching it develop.
     pub var remaining: f64
+    ## The stochastic render: the effective log H (`run` leaves it), the
+    ## samples' mean light (two, one read while the other is written), what it
+    ## reads back to, and how many samples are in. What the last run used, for
+    ## the passes after it.
+    var effective: gpu.Texture?
+    var sums: gpu.Texture?
+    var sums_next: gpu.Texture?
+    var resolved: gpu.Texture?
+    pub var samples: u32
+    ## The last submission of the last batch: the next batch waits for it, so
+    ## batches never pile up on the GPU's queue.
+    var submitted: gpu.Submission?
+    ## How far down the image the pass in progress is (rows), and its samples a pixel.
+    var band_top: f64
+    var pass_count: u32
+    var last_plan: Plan
+    var last_matrix: f64[9]
+    var last_aspect: f64
 
     ## Film `scene` (the camera's values, `width` × `height`): `matrix` into AP1,
     ## `tables` and `aspect` for the lens vignetting, `atlas` the film's. The
@@ -46,6 +70,10 @@ pub struct FilmPasses:
             self.one = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.two = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.three = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.effective = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.resolved = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.sums = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.sums_next = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
             self.width = width
             self.height = height
         let exposed = self.exposed else return scene
@@ -93,6 +121,14 @@ pub struct FilmPasses:
             field = scratch
             scratch = held
         let shown: f32[4] = [(f32)(1.0 - self.remaining), 0.0f32, 0.0f32, 0.0f32]
+        # Where the film developed, for the stochastic render; its samples start over.
+        if let effective = self.effective:
+            try self.pass(effective, 10, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
+        self.samples = 0
+        self.band_top = 0.0
+        self.last_plan = plan
+        self.last_matrix = matrix
+        self.last_aspect = aspect
         try self.pass(spare, 4, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
         # The duplicates between negative and print soften the developed image.
         if plan.duplicated.radius > 0:
@@ -100,13 +136,63 @@ pub struct FilmPasses:
             try self.pass(spare, 1, field, field, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
         return spare
 
-    ## One stage into `target`.
+    ## Go on with the stochastic render of the film last `run` (its grains
+    ## fitted in `atlas`: Film.fit_grains): about `budget` samples (pixels
+    ## times samples each) more this call, so a frame stays short; each pass
+    ## over the image adds `count` samples a pixel, in bands of rows. When a
+    ## pass completes with at least `shown_after` samples in, the render read
+    ## back (and duplicated as `run` does), a texture these passes own until
+    ## the next run; else none (what was shown stays).
+    pub func refine(device: gpu.Device, tables: gpu.Texture, atlas: gpu.Texture, count: u32, budget: u32, shown_after: u32) -> gpu.Texture?!:
+        # The last call's work done first: calls never pile up on the queue.
+        if let before = self.submitted:
+            try device.wait(before)
+        let effective = self.effective else return none
+        let sums = self.sums else return none
+        let next = self.sums_next else return none
+        let resolved = self.resolved else return none
+        let one = self.one else return none
+        let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false, alpha = 0.0f32)
+        let plan = self.last_plan
+        let matrix = self.last_matrix
+        let aspect = self.last_aspect
+        let share = (f32)(1.0 - self.remaining)
+        # `sums` holds the latest; this pass reads it and writes the other, in
+        # bands of rows, each its own submission.
+        if self.band_top == 0.0:
+            self.pass_count = count
+        let batch: f32[4] = [share, (f32)self.samples, (f32)self.pass_count, 0.0f32]
+        let per_row = (f64)self.width * (f64)self.pass_count
+        let rows = math.max(1.0, math.floor((f64)band_work / per_row))
+        var done = 0.0
+        while self.band_top < (f64)self.height and done < (f64)budget:
+            let band = math.min(rows, (f64)self.height - self.band_top)
+            try self.pass(next, 11, effective, sums, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, batch, self.band_top, band)
+            self.band_top += band
+            done += band * per_row
+        if self.band_top < (f64)self.height:
+            return none
+        self.band_top = 0.0
+        self.sums = next
+        self.sums_next = sums
+        self.samples += self.pass_count
+        if self.samples < shown_after:
+            return none
+        let read: f32[4] = [share, (f32)self.samples, 0.0f32, 0.0f32]
+        try self.pass(resolved, 12, effective, next, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, read)
+        if plan.duplicated.radius > 0:
+            try self.pass(one, 1, resolved, resolved, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
+            try self.pass(resolved, 1, one, one, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
+        return resolved
+
+    ## One stage into `target` (rows `top` on, `rows` of them; all when 0).
     ## `row0` replaces the matrix's first row for development's stages (8: the
     ## step's shares; 4: the share shown).
     func pass(target: gpu.Texture, stage: i64, first: gpu.Texture, second: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture,
-              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64, row0: f32[4]? = none) -> !:
+              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64, row0: f32[4]? = none, top: f64 = 0.0, rows: f64 = 0.0) -> !:
         let pipeline = self.pipeline else return
-        let frame = try target.frame()
+        # A band keeps the rest of the texture as the other bands left it.
+        let frame = try target.frame(keep = rows > 0.0)
         defer frame.release()
         let area = try frame.value().target()
         defer area.release()
@@ -126,8 +212,10 @@ pub struct FilmPasses:
             for k in 0..<(usize)4:
                 uniforms[16 + k] = row[k]
         let images: gpu.Texture[4] = [first, second, tables, atlas]
-        try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
+        let band = gpu.Rect(0.0, top, (f64)w, rows) if rows > 0.0 else gpu.Rect(0.0, 0.0, (f64)w, (f64)h)
+        try gpu.shade(try area.get(), pipeline, band, u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+        self.submitted = frame.value().submission()
 
     func release_low():
         if let held = self.low:
@@ -141,6 +229,11 @@ pub struct FilmPasses:
 
     func release_textures():
         self.release_low()
+        for slot in [&self.effective, &self.sums, &self.sums_next, &self.resolved]:
+            if let held = *slot:
+                var gone = held
+                gone.destroy()
+            *slot = none
         if let held = self.exposed:
             var gone = held
             gone.destroy()
