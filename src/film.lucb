@@ -404,10 +404,18 @@ pub struct Film:
         let generations = settings.get(.print_generations)
         let optical = settings.get(.print_optical) > 0.5
         let duplicated = math.sqrt(1.0 + generation_grain * (generations + (1.0 if optical else 0.0))) * (optical_callier if optical else 1.0)
+        # Grain grows with the silver developed: each developable grain develops
+        # further, so σ follows the density's own factor (Kodak's pushes: about
+        # 10–15 % more granularity per stop, as contrast rises).
         let coarse = grown.gain * grown.grain * (1.0 + silver_grain * retained) * duplicated
         for at in 0..<curve_samples:
-            let grain = along_model(model.grain, log_h_at(at) + grown.shift)
-            self.put(grain_row, at, grain[0] * coarse, grain[1] * coarse, grain[2] * coarse, 1.0)
+            let x = log_h_at(at) + grown.shift
+            let grain = along_model(model.grain, x)
+            var grows: f64[3] = [1.0, 1.0, 1.0]
+            if not grown.reversal:
+                for layer in 0..<(usize)3:
+                    grows[layer] = grown.factor(layer, x)
+            self.put(grain_row, at, grain[0] * coarse * grows[0], grain[1] * coarse * grows[1], grain[2] * coarse * grows[2], 1.0)
         # Inhibition, and the development corrected for it: a neutral at log H x
         # develops at x − D·a(x); tabulate the inverse so it still reaches a(x).
         let strength = settings.get(.film_interimage) / 100.0
@@ -632,19 +640,30 @@ pub struct Film:
         return [near_slice[0] + (far_slice[0] - near_slice[0]) * t, near_slice[1] + (far_slice[1] - near_slice[1]) * t, near_slice[2] + (far_slice[2] - near_slice[2]) * t]
 
 ## Layer `layer`'s effective log H for neutral sample `at` under interimage `dir`.
-## Layer `layer`'s dye at curve sample `at` once developed as `grown`: the
-## normal curve read `shift` further along, its rise over the fog scaled by the
-## gain and flattened above grey by the compensation (film_develop.lucb).
+## Layer `layer`'s dye at curve sample `at` once developed as `grown`
+## (film_develop.lucb): on a negative, its normal amount over fog times the
+## kinetics' factor, the fog grown, flattened above grey by the compensation; on
+## a slide, the first developer's negative silver (the halide its dye did not
+## get) grown by the factor, its fog taking from what is left.
 func developed_amount(model: const Model*, grown: Development, layer: usize, at: usize) -> f64:
+    let x = log_h_at(at) + grown.shift
+    let normal = along_model(model.neutral, x)[layer]
+    if grown.reversal:
+        let top = model.neutral[layer]
+        let bottom = model.neutral[(curve_samples - 1) * 3 + layer]
+        let span = math.max(top - bottom, 1.0e-9)
+        var taken = math.min(1.0, (top - normal) / span * grown.factor(layer, x))
+        taken += grown.fog(layer) * (1.0 - taken)
+        return bottom + span * (1.0 - math.clamp(taken, 0.0, 1.0)) * grown.gain
     let fog = model.neutral[layer]
-    let normal = along_model(model.neutral, log_h_at(at) + grown.shift)
-    var rise = grown.gain * (normal[layer] - fog)
+    var rise = grown.gain * (normal - fog) * grown.factor(layer, x)
     # Compensation: above grey the developer runs out, and the slope flattens.
     if grown.compensation > 0.0 and model.stock.kind != 1:
-        let grey = grown.gain * (along_model(model.neutral, model.grey_log_h + grown.shift)[layer] - fog)
+        let at_grey = model.grey_log_h + grown.shift
+        let grey = grown.gain * (along_model(model.neutral, at_grey)[layer] - fog) * grown.factor(layer, at_grey)
         if rise > grey:
             rise = grey + (rise - grey) * (1.0 - grown.compensation)
-    return fog + rise
+    return fog + grown.fog(layer) + rise
 
 ## A curve of `curve_samples` × 3 values (a model's neutral or grain) at
 ## `log_h`, linearly, held at its ends.

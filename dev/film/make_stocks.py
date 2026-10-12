@@ -234,6 +234,10 @@ def from_color(key, dyes_from='kodak_vision3_250d_5207'):
     if 'd_min' not in data:
         donor = json.load(open(here / f'{dyes_from}.json'))
         data['d_min'] = donor['d_min']
+    # Still negatives are made for C-41 (their sheets' curves are C-41's);
+    # motion picture negatives for ECN-2, their kind's standard.
+    if not key.startswith('kodak_vision3'):
+        data['process'] = 'C-41'
     return data
 
 
@@ -359,6 +363,23 @@ def geometry(key, data):
     return grain_geometry(data['ei'], key in CRISP)
 
 
+DEVELOPMENT = json.load(open(here / 'development.json'))
+# Stocks without a development series of their own borrow one's kinetics
+# (dimensionless: relative to their own normal development): HP5 Plus, a
+# conventional cubic-grain 400 like Tri-X, takes Tri-X's.
+BORROWED = {'ilford_hp5_plus': 'kodak_tri_x_400'}
+
+
+def kinetics(key, data):
+    """The development kinetics for stock `key` (dev/film/fit_development.py)."""
+    if key in DEVELOPMENT or key in BORROWED:
+        return DEVELOPMENT[BORROWED.get(key, key)]
+    kind = data.get('kind', 'negative')
+    if kind == 'monochrome':
+        raise ValueError(f'{key}: a black-and-white stock needs a development series or a borrowed one')
+    return DEVELOPMENT['reversal' if kind == 'reversal' else 'color_negative']
+
+
 def stock(key, data, d_min_from=None):
     log_h, curves = thinned(*full_rows(data['characteristic'], 'log_h'), CURVE_MOST)
     grain_h, grains = thinned(*full_rows(data['granularity'], 'log_h'), GRAIN_MOST)
@@ -371,6 +392,7 @@ def stock(key, data, d_min_from=None):
     d_min_data = data.get('d_min') or d_min_from
     d_min = spectral(d_min_data['nm'], d_min_data['density'], 0.0)
     pad = lambda table, n, most: sum((list(table[c]) + [table[c][-1]] * (most - n) for c in CHANNELS), [])
+    developing = kinetics(key, data)
     return f'''## {data['name']}: {data['source']}.{' D-min: Kodak EXR 500T 5298 (none drawn).' if 'd_min' not in data else ''}
 pub func {key}() -> Stock:
     return Stock(
@@ -396,7 +418,12 @@ pub func {key}() -> Stock:
         granularity = {block(pad(grains, len(grain_h), GRAIN_MOST), GRAIN_MOST * 3)},
         mtf_count = {len(freqs)},
         mtf_frequencies = {block(freqs, MTF_MOST)},
-        mtf = {block(pad(mtf, len(freqs), MTF_MOST), MTF_MOST * 3)})
+        mtf = {block(pad(mtf, len(freqs), MTF_MOST), MTF_MOST * 3)},
+        # Development kinetics: {developing['source']}.
+        saturation = {block(developing['saturation'], 3)},
+        rate_slope = {block(developing['slope'], 3)},
+        induction = {number(developing['induction'])},
+        fog_rate = {block(developing['fog_rate'], 3)})
 '''
 
 
@@ -483,6 +510,16 @@ pub struct Stock:
     pub var mtf_count: usize
     pub var mtf_frequencies: f64[{MTF_MOST}]
     pub var mtf: f64[{MTF_MOST * 3}]
+    ## Development kinetics (film_develop.lucb), relative to its normal
+    ## development: per layer how near saturation grey's development runs
+    ## (k·(t − t_i)), how the rate grows per log H (more latent image develops
+    ## sooner), the induction time as a share of the normal time, and the fog
+    ## gained per normal time (a reversal stock's first developer: the share of
+    ## its unexposed silver halide).
+    pub var saturation: f64[3]
+    pub var rate_slope: f64[3]
+    pub var induction: f64
+    pub var fog_rate: f64[3]
 
 ## The stocks, in the Film Stock menu's order (after none).
 pub let stock_count: usize = {len(STOCKS)}
