@@ -11,8 +11,9 @@ color and box, and every text span's centre, so the tick labels give the axes).
 A stock's spec (STOCKS, in any sheets_*.py beside this file) gives, per graph:
 the page, two (point, value) references per axis read off its tick labels'
 centres, whether an axis is logarithmic, and each curve as a drawing's index (all
-its pieces), "index:piece" (one piece, as the survey numbers them), or a list of
-those joined. Needs PyMuPDF (and Pillow for the checks).
+its pieces), "index:piece" (one piece, as the survey numbers them),
+"index@first-last" (a run of its path items, where one path draws two curves),
+or a list of those joined. Needs PyMuPDF (and Pillow for the checks).
 
     STOCKS = {'kodak_portra_400': {
         'pdf': 'portra_400/e4050.pdf', 'name': 'Kodak Portra 400', 'source': 'Kodak E-4050 (1-25)',
@@ -74,7 +75,26 @@ def subpaths(page, index):
 
 
 def drawing_points(page, which):
-    """The points of `which`: a drawing's index (all its pieces), or "index:piece"."""
+    """The points of `which`: a drawing's index (all its pieces), "index:piece",
+    or "index@first-last", a run of the drawing's path items (where one
+    unbroken path draws two curves)."""
+    if isinstance(which, str) and '@' in which:
+        index, span = which.split('@')
+        first, last = (int(v) for v in span.split('-'))
+        points = []
+        for item in page.get_drawings()[int(index)]['items'][first:last + 1]:
+            ps = [p for p in item[1:] if hasattr(p, 'x')]
+            if not points:
+                points.append((ps[0].x, ps[0].y))
+            if item[0] == 'c':
+                p0, p1, p2, p3 = ps
+                for k in range(1, 9):
+                    t = k / 8
+                    a, b, c, e = (1 - t) ** 3, 3 * (1 - t) ** 2 * t, 3 * (1 - t) * t * t, t ** 3
+                    points.append((a * p0.x + b * p1.x + c * p2.x + e * p3.x, a * p0.y + b * p1.y + c * p2.y + e * p3.y))
+            else:
+                points.append((ps[-1].x, ps[-1].y))
+        return points
     if isinstance(which, str):
         index, piece = (int(v) for v in which.split(':'))
         return subpaths(page, index)[piece]

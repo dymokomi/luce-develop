@@ -31,16 +31,25 @@ import film_stocks
 let negative_gamma: f64 = 0.6
 let grey_density: f64 = 0.7
 ## Projector flare, a share of white; and the projector's light.
-let flare: f64 = 0.002
+let projector_flare: f64 = 0.002
 let projector_kelvin: f64 = 5600.0
 
-## The print's development over log H: 1024 samples from `log_low` to `log_high`.
+## A print's development over log H: 1024 samples over its stock's range (2383's
+## from -1.5 to 3.5).
 let samples: usize = 1024
-let log_low: f64 = -1.5
-let log_high: f64 = 3.5
 
-struct PrintModel:
+## A print material's model: its stock, its development unmixed into dye
+## amounts, the light it is seen by, its flare. 2383 projected here; a color
+## paper seen by reflection (film_paper.lucb).
+pub struct PrintModel:
     var stock: PrintStock
+    var low: f64
+    var high: f64
+    ## Where grey prints: each layer's dye amount 1.0 (Kodak's print dyes make a
+    ## visual neutral of 1.0 there), or, when set, each layer's density over
+    ## base (a paper's mid-grey, 0.70).
+    var grey_density: f64
+    var flare: f64
     ## Dye amounts per layer over log H, the layers' printer lights (grey's log H),
     ## and Status A's bands.
     var curve: f64[3072]
@@ -65,7 +74,7 @@ struct PrintModel:
 
     ## Layer `layer`'s dye at log H `log_h`.
     func amount(layer: usize, log_h: f64) -> f64:
-        let position = math.clamp((log_h - log_low) / (log_high - log_low), 0.0, 1.0) * (f64)(samples - 1)
+        let position = math.clamp((log_h - self.low) / (self.high - self.low), 0.0, 1.0) * (f64)(samples - 1)
         let below = (usize)math.min(math.floor(position), (f64)(samples - 2))
         let t = position - (f64)below
         return self.curve[below * 3 + layer] * (1.0 - t) + self.curve[(below + 1) * 3 + layer] * t
@@ -104,7 +113,7 @@ func build(out: PrintModel*):
     # The neutral ramp unmixed into dye amounts, by Newton from the last.
     var a: f64[3] = [0.0, 0.0, 0.0]
     for at in 0..<samples:
-        let log_h = log_low + (log_high - log_low) * (f64)at / (f64)(samples - 1)
+        let log_h = out.low + (out.high - out.low) * (f64)at / (f64)(samples - 1)
         let target: f64[3] = [over_minimum(&out.stock, 0, log_h), over_minimum(&out.stock, 1, log_h), over_minimum(&out.stock, 2, log_h)]
         for _ in 0..<30:
             let here = out.read(a)
@@ -126,16 +135,20 @@ func build(out: PrintModel*):
         for k in 0..<(usize)3:
             let before = out.curve[(at - 1) * 3 + k] if at > 0 else 0.0
             out.curve[at * 3 + k] = math.max(math.max(a[k], 0.0), before)
-    # Printer lights: each layer's log H where it forms grey's dye (1.0).
+    # Printer lights: each layer's log H where it forms grey's dye (1.0), or
+    # reaches grey's density over base.
     for layer in 0..<(usize)3:
-        out.printer[layer] = log_high
-        for at in 1..<samples:
-            if out.curve[at * 3 + layer] >= 1.0:
-                let low = out.curve[(at - 1) * 3 + layer]
-                let high = out.curve[at * 3 + layer]
-                let t = (1.0 - low) / math.max(high - low, 1.0e-9)
-                out.printer[layer] = log_low + (log_high - log_low) * ((f64)(at - 1) + t) / (f64)(samples - 1)
+        out.printer[layer] = out.high
+        var previous = 0.0
+        for at in 0..<samples:
+            let log_h = out.low + (out.high - out.low) * (f64)at / (f64)(samples - 1)
+            let reached = over_minimum(&out.stock, layer, log_h) if out.grey_density > 0.0 else out.curve[at * 3 + layer]
+            let aim = out.grey_density if out.grey_density > 0.0 else 1.0
+            if at > 0 and reached >= aim:
+                let t = (aim - previous) / math.max(reached - previous, 1.0e-9)
+                out.printer[layer] = out.low + (out.high - out.low) * ((f64)(at - 1) + t) / (f64)(samples - 1)
                 break
+            previous = reached
     out.white = out.light.xyz()
     let white_point = xyz.Chromaticity(out.white.x / (out.white.x + out.white.y + out.white.z), out.white.y / (out.white.x + out.white.y + out.white.z))
     out.adapt = xyz.adapt(white_point, xyz.d65)
@@ -153,10 +166,40 @@ var built: PrintModel*? = none
 var built_once: sync.Once
 
 func build_model():
-    let made = new PrintModel(stock = kodak_2383(), bands = status_a(), light = spectral.planck(projector_kelvin)) in memory.heap catch failure:
+    built = make(kodak_2383(), projector_kelvin, -1.5, 3.5, 0.0, projector_flare)
+
+## A model of `stock` seen by a black body of `kelvin`, developed over log H
+## `low`..`high`, grey at `grey_at` density over base (0: dye 1.0), with `flare`
+## (a share of white); kept for the program's life.
+pub func make(stock: PrintStock, kelvin: f64, low: f64, high: f64, grey_at: f64, flare: f64) -> PrintModel*:
+    let made = new PrintModel(stock = stock, low = low, high = high, grey_density = grey_at, flare = flare, bands = status_a(),
+                              light = spectral.planck(kelvin)) in memory.heap catch failure:
         trap("the print model could not be allocated")
     build(made)
-    built = made
+    return made
+
+## Layer `layer`'s dye in `model` at log H `log_h`, and its printer light (grey's
+## log H).
+pub func amount_in(model: const PrintModel*, layer: usize, log_h: f64) -> f64:
+    return model.amount(layer, log_h)
+pub func printer_of(model: const PrintModel*, layer: usize) -> f64:
+    return model.printer[layer]
+
+## Dye `amounts` in `model` (plus `neutral`, density of silver alike at every
+## wavelength), seen by its light: XYZ adapted to D65, white at Y = 1, its flare
+## added.
+pub func seen(model: const PrintModel*, amounts: f64[3], neutral: f64 = 0.0) -> xyz.XYZ:
+    var shown = xyz.XYZ(0.0, 0.0, 0.0)
+    for at in 0..<spectral.samples:
+        let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at] + neutral
+        let power = model.light.values[at] * math.pow(10.0, -d)
+        shown.x += power * spectral.observer[at * 3]
+        shown.y += power * spectral.observer[at * 3 + 1]
+        shown.z += power * spectral.observer[at * 3 + 2]
+    let scale = 1.0 / (model.white.y * (1.0 + model.flare))
+    let lit = xyz.XYZ((shown.x + model.flare * model.white.x) * scale, (shown.y + model.flare * model.white.y) * scale,
+                      (shown.z + model.flare * model.white.z) * scale)
+    return xyz.apply(model.adapt, lit)
 
 ## Silver left in a print whose bleach was bypassed (Technicolor's ENR,
 ## Deluxe's CCE, skip bleach): neutral density per unit of the print's own
@@ -185,17 +228,7 @@ pub func projected(rgb: f64[3], silver: f64 = 0.0) -> xyz.XYZ:
     # normalized dyes make a visual neutral of 1.0 at 1.0 each), so their mean
     # is the print's density over its base.
     let kept = silver * print_silver_density * math.max((amounts[0] + amounts[1] + amounts[2]) / 3.0, 0.0)
-    var shown = xyz.XYZ(0.0, 0.0, 0.0)
-    for at in 0..<spectral.samples:
-        let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at] + kept
-        let power = model.light.values[at] * math.pow(10.0, -d)
-        shown.x += power * spectral.observer[at * 3]
-        shown.y += power * spectral.observer[at * 3 + 1]
-        shown.z += power * spectral.observer[at * 3 + 2]
-    # Flare, then white at Y = 1.
-    let scale = 1.0 / (model.white.y * (1.0 + flare))
-    let lit = xyz.XYZ((shown.x + flare * model.white.x) * scale, (shown.y + flare * model.white.y) * scale, (shown.z + flare * model.white.z) * scale)
-    return xyz.apply(model.adapt, lit)
+    return seen(model, amounts, kept)
 
 test "grey prints near a tenth of white, neutral; white shows white and black near black":
     # Kodak's normalized dyes, as read, make a visual density of 0.93, not 1.0.

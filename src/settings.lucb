@@ -19,6 +19,10 @@
 ##                    (film_develop.lucb)
 ##   Scan             the transfer's warmth, tint, contrast and black; its
 ##                    calibration (0 a reference negative's, 1 the stock's own)
+##   Paper            the paper (film_stocks.paper_at), its grade, the
+##                    enlarger (diffusion, condenser, contact), the print's
+##                    exposure (stops off grey's) and the color head's
+##                    filtration (yellow, magenta, cyan, CC)
 ##   Print            printer lights, red, green and blue, in points (0.025 log
 ##                    exposure on the print each); the print's silver kept,
 ##                    as its infrared density at D-max (0.60 bleached, 2.40
@@ -62,6 +66,8 @@ pub enum View as i64:
     ## Printed on Kodak Vision 2383 and projected (film_print.lucb): the print's own
     ## toe and shoulder are the tone scale.
     print = 3
+    ## Printed on photographic paper and seen by reflection (film_paper.lucb).
+    paper = 4
 
 ## The tone curves, in text-form order: all channels, red, green, blue, luma.
 pub let curve_count: usize = 5
@@ -227,6 +233,8 @@ pub func compile_to(settings: const Settings*, target: i64) -> Settings:
         out.set(.film_stock, 0.0)
     if plan.active((i64)recipe.Stage.project) and plan.active((i64)recipe.Stage.print):
         out.set(.view, (f64)(i64)View.print)
+    elif plan.active((i64)recipe.Stage.paper):
+        out.set(.view, (f64)(i64)View.paper)
     elif plan.active((i64)recipe.Stage.lightbox):
         out.set(.view, (f64)(i64)View.aces)
     elif not plan.active((i64)recipe.Stage.view):

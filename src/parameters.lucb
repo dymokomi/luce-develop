@@ -117,12 +117,19 @@ pub enum Parameter as u8:
     print_green = 100
     print_blue = 101
     print_silver = 102
-    view = 103
+    paper_stock = 103
+    paper_grade = 104
+    paper_enlarger = 105
+    paper_exposure = 106
+    paper_yellow = 107
+    paper_magenta = 108
+    paper_cyan = 109
+    view = 110
 
 ## How many parameters there are.
-pub let parameter_count: usize = 104
+pub let parameter_count: usize = 111
 
-pub let parameters: ParameterSpec[104] = [
+pub let parameters: ParameterSpec[111] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -226,4 +233,11 @@ pub let parameters: ParameterSpec[104] = [
     ParameterSpec("print_green", "Green", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_blue", "Blue", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_silver", "Silver (IR)", "Print", 0.6, 2.4, 0.6, 2),
-    ParameterSpec("view", "View", "View", 0.0, 3.0, 0.0, 0)]
+    ParameterSpec("paper_stock", "Paper", "Paper", 0.0, 5.0, 0.0, 0),
+    ParameterSpec("paper_grade", "Grade", "Paper", -1.0, 5.0, 2.0, 1),
+    ParameterSpec("paper_enlarger", "Enlarger", "Paper", 0.0, 2.0, 0.0, 0),
+    ParameterSpec("paper_exposure", "Exposure", "Paper", -3.0, 3.0, 0.0, 2),
+    ParameterSpec("paper_yellow", "Yellow", "Paper", 0.0, 200.0, 0.0, 0),
+    ParameterSpec("paper_magenta", "Magenta", "Paper", 0.0, 200.0, 0.0, 0),
+    ParameterSpec("paper_cyan", "Cyan", "Paper", 0.0, 200.0, 0.0, 0),
+    ParameterSpec("view", "View", "View", 0.0, 4.0, 0.0, 0)]

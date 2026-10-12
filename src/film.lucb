@@ -78,6 +78,7 @@ from luce_color import temperature
 from luce_color import xyz
 import film_stocks
 import film_develop
+import film_paper
 from film_develop import Development
 from film_model import Model, build_model, invert3, log_h_at, lut_size, grid_size, curve_samples, log_low, log_high
 from settings import Settings, defaults
@@ -163,6 +164,24 @@ pub func stock_count() -> i64:
 
 pub func stock_name(at: i64) -> str:
     return film_stocks.stock_at((usize)at).name
+
+## How `settings` print on paper (film_paper.lucb): the Paper stage's choices,
+## and whether the negative is silver (a black-and-white stock).
+pub func paper_settings(settings: const Settings*) -> film_paper.PaperSettings:
+    let stock = (i64)settings.get(.film_stock)
+    let silvered = stock < 1 or film_stocks.stock_at((usize)(stock - 1)).kind == 2
+    return film_paper.chosen_by(settings.get(.paper_stock), settings.get(.paper_grade), settings.get(.paper_enlarger),
+                                settings.get(.paper_exposure), settings.get(.paper_yellow), settings.get(.paper_magenta),
+                                settings.get(.paper_cyan), silvered)
+
+## The papers (film_stocks.paper_at): how many, paper `at`'s name, and whether
+## it is a color paper.
+pub func paper_total() -> i64:
+    return (i64)film_stocks.paper_count
+pub func paper_name(at: i64) -> str:
+    return film_stocks.paper_at((usize)at).name
+pub func paper_is_color(at: i64) -> bool:
+    return film_stocks.paper_at((usize)at).kind == 1
 
 ## Stock `at`'s kind: 0 color negative, 1 slide, 2 black and white.
 pub func stock_kind(at: i64) -> i64:

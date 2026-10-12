@@ -24,6 +24,7 @@ import geometry
 import view
 import film_print
 import lens
+from parameters import Parameter
 import film
 from film import Film
 from film_gpu import FilmPasses
@@ -111,6 +112,15 @@ struct Developing:
                 var gone = held
                 gone.destroy()
             *slot = none
+
+## What a view's table depends on, as one number: the view; the print's silver;
+## the paper's choices.
+func view_key(settings: const Settings*) -> i64:
+    var key = (i64)settings.get(.view)
+    for parameter in [Parameter.print_silver, Parameter.paper_stock, Parameter.paper_grade, Parameter.paper_enlarger, Parameter.paper_exposure,
+                      Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan, Parameter.film_stock]:
+        key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 100.0)
+    return key
 
 func developing() -> Developing:
     return Developing(settings = defaults(), view_baked = -1)
@@ -413,13 +423,14 @@ pub struct Renderer:
             try film_held.upload(u8[]((u8*)atlas.data, atlas.length * 2))
             which.tables_stale = false
             which.film_stale = true
-        # The view, and the print view's silver kept, as one key.
-        let baked = (i64)which.settings.get(.view) * 1000 + (i64)math.round(which.settings.get(.print_silver) * 100.0)
+        # The view and what its table depends on, as one key.
+        let baked = view_key(&which.settings)
         if which.view_texture == none or which.view_baked != baked:
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
-            view.bake((View)(i64)which.settings.get(.view), table, film_print.silver_kept(which.settings.get(.print_silver)))
+            view.bake((View)(i64)which.settings.get(.view), table, film_print.silver_kept(which.settings.get(.print_silver)),
+                      film.paper_settings(&which.settings))
             if which.view_texture == none:
                 which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
             let held = which.view_texture else return

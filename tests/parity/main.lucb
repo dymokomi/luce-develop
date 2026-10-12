@@ -21,7 +21,7 @@ from luce_develop import renderer
 from luce_develop.settings import parse, Settings
 from luce_develop import recipe
 
-let cases: str[25] = [
+let cases: str[27] = [
     "",
     "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50",
@@ -46,7 +46,9 @@ let cases: str[25] = [
     "view=3;film_stock=1;film_grain=0;print_silver=2.4",
     "view=1;film_stock=2;film_grain=0;film_flash=15;film_filter=5",
     "recipe=file:0:0:|lens:0:64:file:d;lens_coating=2;lens_diffusion=4",
-    "recipe=file:0:0:|lens:0:64:file|film:0:128:lens|develop:0:192:film|scan:0:256:develop|view:0:320:scan:d;view=1;film_stock=3;film_grain=0;lens_coating=2;lens_diffusion=3"]
+    "recipe=file:0:0:|lens:0:64:file|film:0:128:lens|develop:0:192:film|scan:0:256:develop|view:0:320:scan:d;view=1;film_stock=3;film_grain=0;lens_coating=2;lens_diffusion=3",
+    "recipe=file:0:0:|exposure:0:64:file|filter:0:128:exposure|film:0:192:filter|develop:0:256:film|paper:0:320:develop|easel:0:384:paper:d;film_stock=18;film_grain=0;paper_grade=3.5;paper_enlarger=1",
+    "recipe=file:0:0:|white_balance:0:64:file|exposure:0:128:white_balance|film:0:192:exposure|develop:0:256:film|paper:0:320:develop|easel:0:384:paper:d;film_stock=12;film_grain=0;paper_stock=3;paper_yellow=20;paper_exposure=0.5"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
@@ -98,9 +100,12 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         let share = (f64)outliers / (f64)(shown.length // 4 * 3)
         # Film goes through nine half-float passes on the negative first, grain
         # included, so it may differ by a few levels more.
-        let tabled = settings.get(.view) == 0.0 or settings.get(.view) == 3.0
+        let tabled = settings.get(.view) == 0.0 or settings.get(.view) >= 3.0
         let limit = 40 if tabled else (8 if settings.get(.film_stock) > 0.0 else 3)
-        let good = mean < 1.0 and share < 0.001 and largest < limit
+        # A color paper's curves are the steepest a table follows (Endura's
+        # gamma near 2.6): a few more of its values miss by more than 6.
+        let allowed = 0.01 if settings.get(.paper_stock) >= 3.0 else 0.001
+        let good = mean < 1.0 and share < allowed and largest < limit
         print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [{wanted}]  mean {mean}  over 6: {outliers}  largest {largest}")
         if not good:
             failed += 1

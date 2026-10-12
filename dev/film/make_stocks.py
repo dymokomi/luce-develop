@@ -559,5 +559,103 @@ pub func kodak_2383() -> PrintStock:
         curve_count = {n},
         curves = {block(sum((print_curves[i * n:(i + 1) * n] + [print_curves[(i + 1) * n - 1]] * (CURVE_MOST - n) for i in range(3)), []), CURVE_MOST * 3)})
 '''
+# Papers: black-and-white variable contrast (a curve per grade or filter) and
+# color (RA-4: a curve per layer, Status A reflection density, and dyes).
+PAPER_GRADES_MOST = 16
+PAPER_STEP = 0.05
+
+
+def paper_curves(data, graphs):
+    """The named curves of `graphs` ((graph, curve name, grade) each) on one log
+    exposure grid every 0.05, each held at its ends, rising."""
+    lows = [min(q for q, v in zip(data[g]['log_h'], data[g][c]) if v is not None) for g, c, _ in graphs]
+    highs = [max(q for q, v in zip(data[g]['log_h'], data[g][c]) if v is not None) for g, c, _ in graphs]
+    grid = [round(min(lows) + PAPER_STEP * i, 4) for i in range(int(round((max(highs) - min(lows)) / PAPER_STEP)) + 1)]
+    curves = []
+    for g, c, _ in graphs:
+        xs, ys = data[g]['log_h'], filled(data[g][c])
+        pairs = [(x, y) for x, y in zip(xs, data[g][c]) if y is not None]
+        first, last = pairs[0], pairs[-1]
+        out = []
+        for q in grid:
+            v = first[1] if q <= first[0] else (last[1] if q >= last[0] else interp(xs, ys, q))
+            out.append(max(v, out[-1]) if out else v)
+        curves.append(out)
+    return grid, curves
+
+
+PAPERS = [
+    # Ilford Multigrade IV RC: grades 00 (-1) to 5 by Multigrade filter.
+    ('ilford_multigrade_iv_rc', 0, [('characteristic', 'grade_00', -1.0), ('characteristic', 'grade_0', 0.0), ('characteristic', 'grade_1', 1.0),
+                                    ('characteristic', 'grade_2', 2.0), ('characteristic', 'grade_3', 3.0),
+                                    ('grades_4_5', 'grade_4', 4.0), ('grades_4_5', 'grade_5', 5.0)]),
+    # Kodak Polymax II RC: Polymax filters -1 to 5+, F surface in Dektol.
+    ('kodak_polymax_ii_rc', 0, [('filters_m1_1.5_3.5', 'filter_minus1', -1.0), ('filters_0_2_4', 'filter_0', 0.0),
+                                ('filters_0.5_2.5_4.5', 'filter_0.5', 0.5), ('characteristic', 'filter_1', 1.0),
+                                ('filters_m1_1.5_3.5', 'filter_1.5', 1.5), ('filters_0_2_4', 'filter_2', 2.0),
+                                ('filters_0.5_2.5_4.5', 'filter_2.5', 2.5), ('characteristic', 'filter_3', 3.0),
+                                ('filters_m1_1.5_3.5', 'filter_3.5', 3.5), ('filters_0_2_4', 'filter_4', 4.0),
+                                ('filters_0.5_2.5_4.5', 'filter_4.5', 4.5), ('characteristic', 'filter_5plus', 5.0)]),
+    # Kodak Polycontrast IV RC: filters 1, 3 and 5+, F surface in Dektol.
+    ('kodak_polycontrast_iv_rc', 0, [('characteristic', 'filter_1', 1.0), ('characteristic', 'filter_3', 3.0),
+                                     ('characteristic', 'filter_5plus', 5.0)]),
+    ('kodak_endura_premier', 1, [('characteristic', c, 0.0) for c in CHANNELS]),
+    ('kodak_portra_endura', 1, [('characteristic', c, 0.0) for c in CHANNELS]),
+    ('kodak_supra_endura', 1, [('characteristic', c, 0.0) for c in CHANNELS]),
+]
+
+body += f"""
+## A photographic paper as its datasheet describes it, for prints viewed by
+## reflection (film_paper.lucb). Black-and-white variable-contrast paper: a
+## curve per grade (by filter); color paper: a curve per layer (red, green,
+## blue: cyan-, magenta-, yellow-forming) and its dyes. Reflection density over
+## base, over log exposure from `curve_first` every `curve_step` (relative where
+## the sheet's axis is).
+pub struct PaperStock:
+    pub var name: str
+    ## 0 black-and-white variable contrast, 1 color.
+    pub var kind: i64
+    pub var curve_first: f64
+    pub var curve_step: f64
+    pub var curve_count: usize
+    pub var grade_count: usize
+    pub var grades: f64[{PAPER_GRADES_MOST}]
+    pub var curves: f64[{PAPER_GRADES_MOST * CURVE_MOST}]
+    pub var dyes: f64[243]
+
+pub let paper_count: usize = {len(PAPERS)}
+"""
+paper_funcs = []
+for key, kind, graphs in PAPERS:
+    data = json.load(open(here / f'{key}.json'))
+    grid, curves = paper_curves(data, graphs)
+    while len(grid) > CURVE_MOST:
+        grid = grid[::2]
+        curves = [c[::2] for c in curves]
+    step = round(grid[1] - grid[0], 4)
+    flat = sum((c + [c[-1]] * (CURVE_MOST - len(c)) for c in curves), [])
+    grades = [g for _, _, g in graphs]
+    dyes = sum((spectral(data['dyes']['nm'], data['dyes'][d], 0.0) for d in ('cyan', 'magenta', 'yellow')), []) if kind == 1 else [1.0] * 243
+    body += f"""
+## {data['name']}: {data['source']}
+pub func {key}() -> PaperStock:
+    return PaperStock(
+        name = "{data['name']}",
+        kind = {kind},
+        curve_first = {number(grid[0])},
+        curve_step = {number(step)},
+        curve_count = {len(grid)},
+        grade_count = {len(grades)},
+        grades = {block(grades, PAPER_GRADES_MOST)},
+        curves = {block(flat, PAPER_GRADES_MOST * CURVE_MOST)},
+        dyes = {block(dyes, 243)})
+"""
+body += f"""
+## Paper `at` (0-based in the Paper menu's order).
+pub func paper_at(at: usize) -> PaperStock:
+    return match at:
+{chr(10).join(f"        {i} => {key}()" for i, (key, _, _) in enumerate(PAPERS[:-1]))}
+        _ => {PAPERS[-1][0]}()
+"""
 (here.parents[1] / 'src/film_stocks.lucb').write_text(header + body)
-print('wrote src/film_stocks.lucb:', ', '.join(d['name'] for _, d in STOCKS), '+', print_data['name'])
+print('wrote src/film_stocks.lucb:', ', '.join(d['name'] for _, d in STOCKS), '+', print_data['name'], '+', ', '.join(k for k, _, _ in PAPERS))
