@@ -156,4 +156,43 @@ STOCKS = {
         # Diffuse rms granularity 14 at a net diffuse visual density of 1.0 (48 um).
         'rms_granularity': 14.0,
     },
+    'kodak_5293': {
+        'pdf': '125px_5293.pdf', 'name': 'Kodak EXR 200T 5293',
+        'source': 'Kodak H-1-5293t (August 2003)',
+        'kind': 'negative', 'ei': 200, 'kelvin': 3200.0,
+        # Normal exposure: the Camera-Stops scale's 0, at log H -1.274. Granularity is
+        # read on the graph's right-hand log scale (0.001 to 0.1).
+        'grey_log_h': -1.274,
+        'characteristic': {'page': 2, 'x': ((126.83, -3.0), (218.88, 0.0)), 'y': ((554.29, 1.0), (432.52, 3.0)), 'curves': {'blue': '12:0', 'green': '12:1', 'red': ['12:2', 13]}},
+        'sensitivity': {'page': 3, 'x': ((74.4, 250.0), (276.1, 750.0)), 'y': ((570.4, -1.0), (421.7, 3.0)), 'curves': {'blue': '24:0', 'green': ['24:1', '25:0'], 'red': '25:1'}},
+        'dyes': {'page': 3, 'x': ((376.0, 350.0), (523.48, 750.0)), 'y': ((246.4, 0.0), (61.5, 1.8)), 'curves': {'yellow': 31, 'magenta': ['32:1', '33:0'], 'cyan': ['33:1', 34], 'neutral': 35, 'd_min': 36}},
+        'mtf': {'page': 2, 'x': ((357.7, 1.0), (492.7, 100.0)), 'y': ((213.9, 1.0), (112.8, 100.0)), 'log_x': True, 'log_y': True, 'curves': {'blue': '20:0', 'green': '20:1', 'red': ['20:2', 21]}},
+        'granularity': {'page': 3, 'x': ((115.88, 1.0), (208.53, 3.0)), 'y': ((255.8, 0.001), (140.8, 0.1)), 'log_y': True, 'curves': {'blue': 12, 'green': [13, 14], 'red': [15, 16]}, 'copy': {'blue': 6, 'green': 8, 'red': [9, 10]}, 'density_y': ((254.3, 0.0), (69.7, 3.0))},
+    },
+    'kodak_5279': {
+        'pdf': '125px_5279.pdf', 'name': 'Kodak Vision 500T 5279',
+        'source': 'Kodak H-1-5279 (March 1996)',
+        'kind': 'negative', 'ei': 500, 'kelvin': 3200.0,
+        # Normal exposure ("N", an 18% grey card) on the camera-stop scale, at log H
+        # -1.744. The sheet draws no D-min (make_stocks.py gives it 5298's).
+        'grey_log_h': -1.744,
+        'characteristic': {'page': 1, 'x': ((365.78, -4.0), (516.52, 0.0)), 'y': ((598.6, 0.0), (460.6, 3.0)), 'curves': {'blue': 84, 'green': 85, 'red': 86}},
+        'sensitivity': {'page': 2, 'x': ((96.0, 250.0), (276.3, 750.0)), 'y': ((263.2, -2.0), (126.6, 2.0)), 'curves': {'blue': 27, 'green': 26, 'red': 25}},
+        'dyes': {'page': 2, 'x': ((96.0, 300.0), (275.3, 800.0)), 'y': ((545.9, 0.0), (432.0, 1.0)), 'curves': {'yellow': 53, 'magenta': 51, 'cyan': 52}},
+        'mtf': {'page': 1, 'x': ((359.8, 1.0), (490.7, 100.0)), 'y': ((286.4, 1.0), (166.2, 100.0)), 'log_x': True, 'log_y': True, 'curves': {'blue': 82, 'green': 81, 'red': 83}},
+        'granularity': {'page': 1, 'x': ((79.7, 0.0), (235.5, 4.0)), 'y': ((608.0, 0.001), (511.6, 0.1)), 'log_y': True, 'curves': {'blue': 35, 'green': 32, 'red': [37, 38, 39]}, 'copy': {'blue': 34, 'green': 33, 'red': 36}, 'density_y': ((610.3, 0.0), (454.2, 3.0))},
+    },
+    'kodak_5277': {
+        'pdf': '125px_5277.pdf', 'name': 'Kodak Vision 320T 5277',
+        'source': 'Kodak H-1-5277t',
+        'kind': 'negative', 'ei': 320, 'kelvin': 3200.0,
+        # Normal exposure: the camera-stop scale's N, midway between its -2 and 2, at
+        # log H -1.499.
+        'grey_log_h': -1.499,
+        'characteristic': {'page': 3, 'x': ((94.05, -4.0), (264.36, 0.0)), 'y': ((654.8, 0.0), (501.5, 3.0)), 'curves': {'blue': 22, 'green': '21:0', 'red': '21:1'}},
+        'sensitivity': {'page': 3, 'x': ((350.3, 250.0), (550.7, 750.0)), 'y': ((271.2, 0.0), (121.9, 4.0)), 'curves': {'blue': 28, 'green': '27:1', 'red': '27:0'}},
+        'dyes': {'page': 3, 'x': ((357.3, 300.0), (541.1, 800.0)), 'y': ((535.4, 0.0), (370.0, 1.8)), 'curves': {'yellow': 42, 'magenta': 43, 'cyan': 40, 'neutral': 39, 'd_min': 41}},
+        'mtf': {'page': 3, 'x': ((72.5, 1.0), (218.2, 100.0)), 'y': ((310.0, 1.0), (176.4, 100.0)), 'log_x': True, 'log_y': True, 'curves': {'blue': '11:0', 'green': '11:1', 'red': 10}},
+        'granularity': {'page': 2, 'x': ((359.0, 0.0), (532.0, 4.0)), 'y': ((417.8, 0.001), (310.7, 0.1)), 'log_y': True, 'curves': {'blue': '9:2', 'green': '9:1', 'red': '9:0'}, 'copy': {'blue': 11, 'green': '10:0', 'red': '10:1'}, 'density_y': ((420.4, 0.0), (246.9, 3.0))},
+    },
 }

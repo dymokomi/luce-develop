@@ -21,7 +21,6 @@
 from luce_std import math
 import interop
 from settings import Settings, Guide, Look, defaults
-from parameters import Parameter
 
 ## The largest tilt or pan the Vertical and Horizontal sliders reach, in degrees.
 pub let reach_degrees: f64 = 30.0

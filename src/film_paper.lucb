@@ -20,7 +20,6 @@
 ## 4. Seen: black and white as neutral reflectance; color as the dyes' spectra
 ##    (film_print's model, its curves unmixed into dye amounts) under D50, the
 ##    paper white the display's white.
-import memory
 import sync
 from luce_std import math
 from luce_color import xyz

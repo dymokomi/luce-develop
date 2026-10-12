@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Write src/film_stocks.lucb: each film stock's published curves resampled for the
-film model (src/film.lucb). Add a stock's JSON (from read_vector_sheets.py, or a
-digitization like digitize_ti2082.py's) to STOCKS, then run dev/film/make_stocks.py.
+film model (src/film.lucb). Add a stock's JSON (from read_drawings.py's vector
+graphs, or a raster tracing: trace_raster_curves.py, digitize_ti2082.py) to STOCKS,
+then run dev/film/make_stocks.py.
 
 Kodak EXR 500T 5298 comes from Kodak's own datasheet (TI2082, revised 10-93), read
 off its raster graphs into kodak_5298_ti2082.json. That sheet has no per-dye
@@ -61,21 +62,19 @@ def full_rows(table, axis):
 def from_ti2082():
     """5298's digitization in the common form."""
     sheet = json.load(open(here / 'kodak_5298_ti2082.json'))
-    dyes = json.load(open(here / 'kodak_5293_dyes.json'))
+    dyes = json.load(open(here / 'kodak_5293.json'))
     rename = {'red': 'red', 'green': 'olive', 'blue': 'blue'}
     def table(t, axis):
         return {axis: t[axis], **{c: t[rename[c]] for c in CHANNELS}}
     sensitivity = table(sheet['sensitivity'], 'nm')
     # The blue curve starts at 400 nm on the graph (2.65); the digitizer's first reading is 405.
     sensitivity['blue'] = [2.65 if q == 400 else v for q, v in zip(sensitivity['nm'], sensitivity['blue'])]
-    def dye(points):
-        return [interp([p[0] for p in points], [p[1] for p in points], q) for q in NM]
     return {
         'name': 'Kodak EXR 500T 5298', 'source': sheet['source'] + ' Dye shapes: ' + dyes['source'],
         'ei': 500, 'kelvin': 3200.0, 'grey_log_h': -1.744,
         'characteristic': table(sheet['characteristic'], 'log_h'),
         'sensitivity': sensitivity,
-        'dyes': {'nm': NM, 'cyan': dye(dyes['cyan']), 'magenta': dye(dyes['magenta']), 'yellow': dye(dyes['yellow'])},
+        'dyes': dyes['dyes'],
         'd_min': {'nm': sheet['dye_density']['nm'], 'density': sheet['dye_density']['olive']},
         'granularity': table(sheet['granularity'], 'log_h'),
         'mtf': table(sheet['mtf'], 'cycles_per_mm'),

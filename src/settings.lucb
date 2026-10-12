@@ -48,7 +48,7 @@ import memory
 import ownership
 from luce_std import math
 from luce_std.collections import Buffer
-from parameters import Parameter, ParameterSpec, parameters, parameter_count
+from parameters import Parameter, parameters, parameter_count
 from recipe import Recipe
 import recipe
 import codes

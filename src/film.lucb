@@ -210,8 +210,6 @@ pub func process_total() -> i64:
     return (i64)film_develop.process_count
 pub func process_name(at: i64) -> str:
     return film_develop.processes[(usize)at].name
-pub func process_time(at: i64) -> f64:
-    return film_develop.processes[(usize)at].minutes
 pub func process_temperature(at: i64) -> f64:
     return film_develop.processes[(usize)at].celsius
 

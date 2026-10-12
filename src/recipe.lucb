@@ -9,10 +9,9 @@
 ## physical: light from the scene, a latent exposure on film, processed film, a
 ## scanned image (scene light again), and display light. One stage of each kind
 ## at most, so a stage's parameters are its own.
-import memory
 from luce_std import math
 from luce_std.collections import Buffer
-from parameters import Parameter, parameters, parameter_count
+from parameters import parameters
 
 # mark: Stages ==================================================================
 
