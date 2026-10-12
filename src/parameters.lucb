@@ -120,7 +120,7 @@ pub let parameters: ParameterSpec[93] = [
     ParameterSpec("shadows", "Shadows", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
     ParameterSpec("whites", "Whites", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
     ParameterSpec("blacks", "Blacks", "Exposure & Tone", -100.0, 100.0, 0.0, 0),
-    ParameterSpec("film_stock", "Stock", "Film", 0.0, 1.0, 0.0, 0),
+    ParameterSpec("film_stock", "Stock", "Film", 0.0, 4.0, 0.0, 0),
     ParameterSpec("film_format", "Format", "Film", 0.0, 3.0, 0.0, 0),
     ParameterSpec("film_exposure", "Film Exposure", "Film", -3.0, 3.0, 0.0, 2),
     ParameterSpec("film_interimage", "Interimage", "Film", 0.0, 200.0, 100.0, 0),

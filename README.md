@@ -104,8 +104,7 @@ only tone scale. Everything comes from the stock's datasheet
 1. **Exposure.** A color gets a smooth spectrum (luce-color's `spectral`
    upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
    each layer is exposed to it through its spectral sensitivity. Middle grey
-   lands on the stock's normal exposure, 4 stops over the green layer's
-   threshold; Film Exposure over- or underexposes the negative, and the
+   lands on the stock's normal exposure; Film Exposure over- or underexposes the negative, and the
    transfer brings grey back.
 2. **Development.** The characteristic curves (Status M) are unmixed into
    cyan, magenta and yellow dye amounts. Interimage effects (DIR couplers) hold
@@ -121,11 +120,15 @@ only tone scale. Everything comes from the stock's datasheet
    a matrix fitted per stock back to AP1, then the telecine's Warmth, Tint and
    Contrast.
 
-Stocks: Kodak EXR 500T 5298 (1993). Its curves were read off Kodak's TI2082
-datasheet (`dev/film`: the digitized readings, the scripts that read them, and
-`make_stocks.py`, which writes `film_stocks.lucb`); the sheet has no per-dye
-spectra, so the dye shapes are EXR 200T 5293's from its datasheet's vector
-graphs. Kodak publishes nothing above log H 0, no interimage numbers and no
+Stocks, the tungsten negatives American television shot through the 1990s:
+Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277.
+5298's curves were read off the raster graphs of Kodak's TI2082 datasheet
+(`digitize_ti2082.py`); its sheet has no per-dye spectra or marked normal
+exposure, so it takes 5293's dye shapes and 5279's grey (the same speed). The
+others were read exactly from their datasheets' vector graphs
+(`read_vector_sheets.py`). Each stock's grey is the 18% grey card Kodak marks
+on its curves. `dev/film` holds the readings, the scripts that took them, and
+`make_stocks.py`, which writes `film_stocks.lucb`. Kodak publishes nothing above log H 0, no interimage numbers and no
 Status M tables: the shoulder, the interimage matrix and the densitometer's
 bands (Gaussians at Status M's band centres) are estimates, labelled where
 they are made. The model builds in about 0.1 s when a stock is first chosen;

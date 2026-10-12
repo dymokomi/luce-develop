@@ -10,8 +10,8 @@
 ##    surface for its chromaticity, lit by that light, times its luminance.
 ##    Each layer's exposure is that spectrum through the layer's spectral
 ##    sensitivity, relative to the light itself, so a neutral exposes all three
-##    layers alike. Middle grey (0.18) lands on the stock's normal exposure,
-##    4 stops over the green layer's threshold, moved by Film Exposure.
+##    layers alike. Middle grey (0.18) lands on the stock's normal exposure (the
+##    18% grey card Kodak marks on the curves), moved by Film Exposure.
 ## 2. Development. Each layer's characteristic curve (Status M density over log
 ##    exposure) is unmixed into the amount of its dye: the amounts of cyan,
 ##    magenta and yellow dye whose spectra, over D-min, read the curve's three
@@ -20,7 +20,7 @@
 ##    are corrected for it, so a neutral still develops to the datasheet's
 ##    densities and only colors gain saturation and the film's hue shifts.
 ##    Beyond what Kodak plots, a toe settles 0.015 under the first reading and
-##    a shoulder rolls off from 7 stops over grey: estimates.
+##    a shoulder rolls off from 8 stops over grey: estimates.
 ## 3. Grain. In dye amount, per layer, at the stock's rms granularity for that
 ##    exposure (48 µm aperture), scaled to the area a pixel covers on the
 ##    negative (Format's frame width over the output's width).
@@ -54,7 +54,8 @@ import time
 from luce_std import math
 from luce_color import spectral
 from luce_color import xyz
-from film_stocks import Stock, kodak_5298
+from film_stocks import Stock
+import film_stocks
 from settings import Settings, defaults
 
 # mark: Layout ================================================================
@@ -72,11 +73,6 @@ pub let values_row: usize = 84
 ## The curves' log H range.
 pub let log_low: f64 = -4.5
 pub let log_high: f64 = 2.5
-
-## The stocks by the Film Stock setting (0 is none).
-pub enum StockChoice as i64:
-    off = 0
-    kodak_5298 = 1
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
 ## 4:3 television frame), Super 35, 16 mm and 65 mm.
@@ -125,6 +121,14 @@ func status_m() -> Densitometer:
             out.bands[channel * 81 + at] /= sum
     return out
 
+## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
+## setting is one more), for building a menu.
+pub func stock_count() -> i64:
+    return (i64)film_stocks.stock_count
+
+pub func stock_name(at: i64) -> str:
+    return film_stocks.stock_at((usize)at).name
+
 # mark: The stock's model =====================================================
 
 ## Everything that depends on the stock alone, built once per stock.
@@ -166,25 +170,27 @@ func release_table(table: f64[]*):
     *table = empty
 
 ## Layer `channel`'s Status M density over its toe at `log_h`: the datasheet's
-## readings, a toe below them and a shoulder above (estimates).
+## readings, a toe below them and a shoulder above (estimates: Kodak plots
+## neither), rolling off from 8 stops over normal exposure.
 func over_minimum(stock: const Stock*, channel: usize, log_h: f64) -> f64:
-    let curve = stock.curves[channel * 59..<channel * 59 + 59]
+    let n = stock.curve_count
+    let curve = stock.curves[channel * film_stocks.curve_most..<channel * film_stocks.curve_most + n]
     let first = curve[0]
     let toe = first - 0.015
-    let start_slope = (curve[1] - curve[0]) / stock.curve_step
-    let last_x = stock.curve_first + 58.0 * stock.curve_step
+    let start_slope = math.max((curve[1] - curve[0]) / stock.curve_step, 0.01)
+    let last_x = stock.curve_first + (f64)(n - 1) * stock.curve_step
     if log_h <= stock.curve_first:
         # Approaches the toe exponentially, meeting the first reading's slope.
         let k = start_slope / ((first - toe) * 2.302585092994046)
         return (first - toe) * math.pow(10.0, k * (log_h - stock.curve_first))
     if log_h >= last_x:
-        let end_slope = (curve[58] - curve[54]) / (4.0 * stock.curve_step)
-        let shoulder = 0.9
+        let end_slope = math.max((curve[n - 1] - curve[n - 5]) / (4.0 * stock.curve_step), 0.0)
+        let shoulder = stock.grey_log_h + 2.4
         let width = 0.35
         let run = (log_h - last_x) - width * (softplus((log_h - shoulder) / width) - softplus((last_x - shoulder) / width))
-        return curve[58] - toe + end_slope * run
+        return curve[n - 1] - toe + end_slope * run
     let position = (log_h - stock.curve_first) / stock.curve_step
-    let below = (usize)math.floor(position)
+    let below = (usize)math.min(math.floor(position), (f64)(n - 2))
     let t = position - (f64)below
     return curve[below] + (curve[below + 1] - curve[below]) * t - toe
 
@@ -274,17 +280,13 @@ func build_model(stock: Stock) -> Model!:
         start = unmix(&out, target, start)
         for layer in 0..<(usize)3:
             out.neutral[at * 3 + layer] = math.max(start[layer], 0.0)
-            let position = math.clamp((log_h - stock.granularity_first) / stock.granularity_step, 0.0, 28.0)
-            let below = (usize)math.min(math.floor(position), 27.0)
+            let last = (f64)(stock.granularity_count - 1)
+            let position = math.clamp((log_h - stock.granularity_first) / stock.granularity_step, 0.0, last)
+            let below = (usize)math.min(math.floor(position), last - 1.0)
             let t = position - (f64)below
-            out.grain[at * 3 + layer] = stock.granularity[layer * 29 + below] * (1.0 - t) + stock.granularity[layer * 29 + below + 1] * t
-    # Normal exposure: 4 stops (1.2 log H) over the green layer's threshold, where
-    # it reaches 0.1 over its toe.
-    out.grey_log_h = 0.0
-    for at in 0..<curve_samples:
-        if over_minimum(&stock, 1, log_h_at(at)) >= 0.1:
-            out.grey_log_h = log_h_at(at) + 1.2
-            break
+            let row = layer * film_stocks.granularity_most
+            out.grain[at * 3 + layer] = stock.granularity[row + below] * (1.0 - t) + stock.granularity[row + below + 1] * t
+    out.grey_log_h = stock.grey_log_h
     out.top = 0.0
     for layer in 0..<(usize)3:
         out.top = math.max(out.top, out.neutral[(curve_samples - 1) * 3 + layer] * 1.1)
@@ -340,7 +342,7 @@ pub struct Film:
             return
         if choice != self.stock:
             self.model.release()
-            self.model = try build_model(kodak_5298())
+            self.model = try build_model(film_stocks.stock_at((usize)(choice - 1)))
             self.stock = choice
             self.fill_model()
         self.on = true
@@ -636,6 +638,23 @@ test "grey comes back in place, and the ramp around it neutral with the film's t
         assert(math.abs(math.log2(shot[0] / shot[1])) < 0.1 and math.abs(math.log2(shot[2] / shot[1])) < 0.1)
     let bright = develop(&film, [2.88, 2.88, 2.88], 0.5, 0.5, 1.5, 1000.0)
     assert(bright[1] < 2.88 and bright[1] > 1.8)
+
+test "every stock builds, returns grey in place and keeps neutrals neutral":
+    for choice in 1..=(i64)film_stocks.stock_count:
+        var settings = defaults_with_film()
+        settings.set(.film_stock, (f64)choice)
+        settings.set(.film_grain, 0.0)
+        var film = Film()
+        film.prepare(&settings) catch failure:
+            assert(false)
+            return
+        defer film.release()
+        let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 1.5, 1000.0)
+        let bright = develop(&film, [0.72, 0.72, 0.72], 0.5, 0.5, 1.5, 1000.0)
+        print(f"{film_stocks.stock_at((usize)(choice - 1)).name}: grey {grey[0]} {grey[1]} {grey[2]}, +2 stops {bright[0]} {bright[1]} {bright[2]}")
+        for k in 0..<(usize)3:
+            assert(math.abs(grey[k] / 0.18 - 1.0) < 0.01)
+        assert(math.abs(math.log2(bright[0] / bright[1])) < 0.1 and math.abs(math.log2(bright[2] / bright[1])) < 0.1)
 
 test "film saturates warm colors and keeps their hue near":
     var settings = defaults_with_film()
