@@ -118,7 +118,7 @@ struct Developing:
 func view_key(settings: const Settings*) -> i64:
     var key = (i64)settings.get(.view)
     for parameter in [Parameter.print_silver, Parameter.paper_stock, Parameter.paper_grade, Parameter.paper_enlarger, Parameter.paper_exposure,
-                      Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan, Parameter.film_stock]:
+                      Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan, Parameter.film_stock, Parameter.print_material]:
         key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 100.0)
     return key
 
@@ -430,7 +430,7 @@ pub struct Renderer:
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
             view.bake((View)(i64)which.settings.get(.view), table, film_print.silver_kept(which.settings.get(.print_silver)),
-                      film.paper_settings(&which.settings))
+                      film.paper_settings(&which.settings), (i64)which.settings.get(.print_material))
             if which.view_texture == none:
                 which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
             let held = which.view_texture else return

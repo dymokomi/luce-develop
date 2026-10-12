@@ -117,19 +117,22 @@ pub enum Parameter as u8:
     print_green = 100
     print_blue = 101
     print_silver = 102
-    paper_stock = 103
-    paper_grade = 104
-    paper_enlarger = 105
-    paper_exposure = 106
-    paper_yellow = 107
-    paper_magenta = 108
-    paper_cyan = 109
-    view = 110
+    print_material = 103
+    print_generations = 104
+    print_optical = 105
+    paper_stock = 106
+    paper_grade = 107
+    paper_enlarger = 108
+    paper_exposure = 109
+    paper_yellow = 110
+    paper_magenta = 111
+    paper_cyan = 112
+    view = 113
 
 ## How many parameters there are.
-pub let parameter_count: usize = 111
+pub let parameter_count: usize = 114
 
-pub let parameters: ParameterSpec[111] = [
+pub let parameters: ParameterSpec[114] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -141,7 +144,7 @@ pub let parameters: ParameterSpec[111] = [
     ParameterSpec("film_stock", "Stock", "Film", 0.0, 31.0, 3.0, 0),
     ParameterSpec("film_format", "Format", "Film", 0.0, 5.0, 0.0, 0),
     ParameterSpec("film_filter", "Balance", "Filter", 0.0, 5.0, 0.0, 0),
-    ParameterSpec("film_color_filter", "Color Filter", "Filter", 0.0, 5.0, 0.0, 0),
+    ParameterSpec("film_color_filter", "Color Filter", "Filter", 0.0, 8.0, 0.0, 0),
     ParameterSpec("develop_process", "Process", "Develop", 0.0, 31.0, 0.0, 0),
     ParameterSpec("develop_time", "Time", "Develop", 0.0, 30.0, 0.0, 2),
     ParameterSpec("develop_temperature", "Temperature", "Develop", 0.0, 50.0, 0.0, 1),
@@ -233,6 +236,9 @@ pub let parameters: ParameterSpec[111] = [
     ParameterSpec("print_green", "Green", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_blue", "Blue", "Print", -24.0, 24.0, 0.0, 0),
     ParameterSpec("print_silver", "Silver (IR)", "Print", 0.6, 2.4, 0.6, 2),
+    ParameterSpec("print_material", "Print Film", "Print", 0.0, 1.0, 0.0, 0),
+    ParameterSpec("print_generations", "Generations", "Print", 0.0, 4.0, 0.0, 0),
+    ParameterSpec("print_optical", "Optical Step", "Print", 0.0, 1.0, 0.0, 0),
     ParameterSpec("paper_stock", "Paper", "Paper", 0.0, 5.0, 0.0, 0),
     ParameterSpec("paper_grade", "Grade", "Paper", -1.0, 5.0, 2.0, 1),
     ParameterSpec("paper_enlarger", "Enlarger", "Paper", 0.0, 2.0, 0.0, 0),

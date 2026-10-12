@@ -40,6 +40,8 @@ pub struct Plan:
     pub var halation: Blur
     pub var halation_weights: f32[3]
     pub var spread: Blur
+    ## The duplicates' blur over the developed image (none: radius 0).
+    pub var duplicated: Blur
 
 ## Gaussians are cut at 3σ, exponentials at 6 lengths.
 func blur_of(sigmas: f64[3], exponential: bool = false) -> Blur:
@@ -58,7 +60,8 @@ pub func plan_for(source: const Film*, width: usize) -> Plan:
     let used = source.value(20)[3] / pitch
     held.alpha = (f32)used
     held.radius = (i32)math.min(math.max((f64)held.radius, math.ceil(3.0 * used)), widest)
-    return Plan(pitch = (f32)pitch,
+    let copies = source.value(21)[1] / pitch
+    return Plan(pitch = (f32)pitch, duplicated = blur_of([copies, copies, copies]),
                 scatter = blur_of([sharp[0] / pitch, sharp[1] / pitch, sharp[2] / pitch], true),
                 halation = blur_of([halo[3] / pitch, halo[3] / pitch, halo[3] / pitch]),
                 halation_weights = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
@@ -226,6 +229,10 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
     pass.second = one
     pass.out = out
     try parallel.for_each(height, (void*)&pass, run_row)
+    # The duplicates between negative and print soften the developed image.
+    if plan.duplicated.radius > 0:
+        try run_blur(&pass, out, out, one, 1, 1, 0, plan.duplicated)
+        try run_blur(&pass, one, one, out, 1, 0, 1, plan.duplicated)
     return Scene.from_pixels(width, height, out)
 
 func run_blur(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, dx: i64, dy: i64, blur: Blur) -> !:

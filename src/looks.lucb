@@ -7,9 +7,9 @@
 ## printer lights. Where a stock is not here, the nearest one stands in, and
 ## where the record is silent, the setting is an inference; both are said below.
 ##
-## Not modelled yet, though some pictures relied on them: Technicolor dye-transfer
-## prints (The Godfather), chocolate filters, intermediate generations and 70 mm
-## blow-ups.
+## Release prints went through duplicates: an interpositive and an internegative
+## (two generations), and for Super 35 an optical squeeze to anamorphic; The
+## Godfather's dye-transfer prints were struck from the cut camera negative.
 import interop
 from luce_std.collections import Buffer
 import settings
@@ -39,45 +39,45 @@ let looks: Look[20] = [
     Look(name = "Friends, Seasons 6–10", mode = -1, settings = "film_stock=3;film_warmth=21;film_tint=2;film_black=60;film_grain=85"),
     # Kamiński: 5279 (and 5293, Fuji F-series: not here), Super 35, printed on 2383
     # with ENR at IR 65–75 on every release print.
-    Look(name = "Munich (2005)", mode = 1, settings = "film_stock=3;film_format=1;print_silver=0.7"),
+    Look(name = "Munich (2005)", mode = 1, settings = "film_stock=3;film_format=1;print_silver=0.7;print_generations=2;print_optical=1"),
     # Its bypassed scenes: the negative's bleach skipped and the negative pulled
     # 1½ stops (ECN-2 pull 1 is 2:30; 1½ stops extrapolated, about 2:10).
-    Look(name = "Munich (2005), bypassed negative", mode = 1, settings = "film_stock=3;film_format=1;develop_silver=100;develop_time=2.17;print_silver=0.7"),
+    Look(name = "Munich (2005), bypassed negative", mode = 1, settings = "film_stock=3;film_format=1;develop_silver=100;develop_time=2.17;print_silver=0.7;print_generations=2;print_optical=1"),
     # EXR 200T 5293 pushed a stop (3:40), ½ Coral in place of the 85, 15 % flash
     # (Panaflasher), ENR on the prints that the lab ran at IR 1.00, and lenses
     # with their coatings stripped by Panavision.
     Look(name = "Saving Private Ryan (1998)", mode = 1, lens = true,
-         settings = "film_stock=2;develop_time=3.67;film_filter=5;film_flash=15;print_silver=1.0;lens_coating=2"),
+         settings = "film_stock=2;develop_time=3.67;film_filter=5;film_flash=15;print_silver=1.0;lens_coating=2;print_generations=2"),
     # Khondji: interiors on 5293 at box speed, Super 35; Deluxe CCE on release
     # prints (IR about 1.85).
-    Look(name = "Se7en (1995)", mode = 1, settings = "film_stock=2;film_format=1;print_silver=1.85"),
+    Look(name = "Se7en (1995)", mode = 1, settings = "film_stock=2;film_format=1;print_silver=1.85;print_generations=2;print_optical=1"),
     # Cronenweth: Vision 500T 5279 at box speed for interiors and nights, Super
     # 35; ENR at IR 0.80 on a number of prints.
-    Look(name = "Fight Club (1999)", mode = 1, settings = "film_stock=3;film_format=1;print_silver=0.8"),
+    Look(name = "Fight Club (1999)", mode = 1, settings = "film_stock=3;film_format=1;print_silver=0.8;print_generations=2;print_optical=1"),
     # Willis: Eastman Color Negative (5254) rated 250 and pushed a stop, "a
     # half-stop underexposure"; ECN-1's push time an inference (12 → 16 min);
-    # printed warm on one light: brassy yellow (the lights an inference; its
-    # Technicolor dye-transfer prints are not modelled).
-    Look(name = "The Godfather (1972)", mode = 1, settings = "film_stock=23;exposure=-0.5;develop_time=16;print_blue=3;print_green=1"),
+    # printed warm on one light: brassy yellow (the lights an inference), as
+    # Technicolor dye transfer, the matrices made from the cut camera negative.
+    Look(name = "The Godfather (1972)", mode = 1, settings = "film_stock=23;exposure=-0.5;develop_time=16;print_blue=3;print_green=1;print_material=1"),
     # Alcott: 5254, the whole film pushed a stop; no 85 on exteriors, the blue
     # timed out in printing (so balanced here); a Tiffen Low Contrast No. 3 on
     # every shot.
     Look(name = "Barry Lyndon (1975)", mode = 1, lens = true, settings = "film_stock=23;develop_time=16;lens_diffusion=4"),
     # Almendros: 5247 (not here: EXR 200T stands in), magic hour pushed a stop
-    # with the 85 pulled; 70 mm blow-up prints not modelled.
-    Look(name = "Days of Heaven (1978)", mode = 1, settings = "film_stock=2;develop_time=3.67;film_filter=1"),
+    # with the 85 pulled; blown up optically to 70 mm.
+    Look(name = "Days of Heaven (1978)", mode = 1, settings = "film_stock=2;develop_time=3.67;film_filter=1;print_optical=1"),
     # Super Panavision 70 on 65 mm Eastman Color: 5250 (5251, its successor at the
     # same speed, stands in), an 85 in the desert, ECN-1, 70 mm prints.
     Look(name = "Lawrence of Arabia (1962)", mode = 4, settings = "film_stock=22;film_format=3;film_filter=2"),
     Look(name = "2001: A Space Odyssey (1968)", mode = 4, settings = "film_stock=22;film_format=3"),
     # Sigel: the opening on Kodak daylight negative skip-bleached (Vision 250D
     # 5246 inferred; Vision3 250D stands in) ...
-    Look(name = "Three Kings (1999), the base", mode = 1, settings = "film_stock=9;develop_silver=100"),
+    Look(name = "Three Kings (1999), the base", mode = 1, settings = "film_stock=9;develop_silver=100;print_generations=2"),
     # ... the rest on Ektachrome cross-processed in negative chemistry.
-    Look(name = "Three Kings (1999), cross-processed", mode = 1, settings = "film_stock=16;develop_process=2"),
+    Look(name = "Three Kings (1999), cross-processed", mode = 1, settings = "film_stock=16;develop_process=2;print_generations=2"),
     # Deakins: bleach bypass on all the prints (Kays): a full bypass, IR 2.40. The
     # negative is not documented: EXR 200T stands in.
-    Look(name = "Nineteen Eighty-Four (1984)", mode = 1, settings = "film_stock=2;print_silver=2.4"),
+    Look(name = "Nineteen Eighty-Four (1984)", mode = 1, settings = "film_stock=2;print_silver=2.4;print_generations=2"),
     # Deakins and Cinesite: 5279 and 5293, Super 35, then the first full digital
     # intermediate: greens turned toward dry yellow and brown, color drained,
     # recorded to film and printed. The grade is an inference from their account

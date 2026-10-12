@@ -47,8 +47,10 @@ struct Develop:
     ## The print view's silver kept (0..1); the lens's veiling glare (lens.lucb).
     var silver: f64
     var veil: f64
-    ## How a paper print is made (the paper view).
+    ## How a paper print is made (the paper view), and the print material (the
+    ## print view: 0 2383, 1 dye transfer).
     var paper: film_paper.PaperSettings
+    var material: i64
     var to_display: f64[9]
     var vibrance: f64
     var saturation: f64
@@ -183,7 +185,7 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
         c = with_lens(d, c, su, sv)
     c = with_tone(d, c)
     c = with_color(d, c)
-    c = view.display(d.shown, c, d.to_display, d.output, d.silver, d.paper)
+    c = view.display(d.shown, c, d.to_display, d.output, d.silver, d.paper, d.material)
     c = with_curves(d, c)
     return with_vignette(d, c, u, v)
 
@@ -246,7 +248,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
     let veil = lens.veil(settings, [matrix[0] * mean[0] + matrix[1] * mean[1] + matrix[2] * mean[2],
                                     matrix[3] * mean[0] + matrix[4] * mean[1] + matrix[5] * mean[2],
                                     matrix[6] * mean[0] + matrix[7] * mean[1] + matrix[8] * mean[2]])
-    let develop = Develop(matrix = matrix, tables = tables.build(settings), veil = veil, paper = film.paper_settings(settings),
+    let develop = Develop(matrix = matrix, tables = tables.build(settings), veil = veil, paper = film.paper_settings(settings), material = (i64)settings.get(.print_material),
                           shown = (View)(i64)settings.get(.view), silver = film_print.silver_kept(settings.get(.print_silver)), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))

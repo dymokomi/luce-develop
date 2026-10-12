@@ -55,6 +55,10 @@ pub struct FilmPasses:
         try self.pass(two, 1, one, one, tables, atlas, 1, 0, plan.spread, plan, matrix, aspect)
         try self.pass(one, 1, two, two, tables, atlas, 0, 1, plan.spread, plan, matrix, aspect)
         try self.pass(two, 4, exposed, one, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        # The duplicates between negative and print soften the developed image.
+        if plan.duplicated.radius > 0:
+            try self.pass(one, 1, two, two, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
+            try self.pass(two, 1, one, one, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
         return two
 
     ## One stage into `target`.

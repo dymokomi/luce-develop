@@ -202,7 +202,7 @@ func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
 ## its primaries, 0..1. `to_display` is `working_to_output(output)`; `silver` the
 ## print view's silver kept (0..1).
 pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = Output.srgb, silver: f64 = 0.0,
-                 paper: PaperSettings = PaperSettings()) -> f64[3]:
+                 paper: PaperSettings = PaperSettings(), material: i64 = 0) -> f64[3]:
     if view == View.aces:
         # AP1 in, a stop brighter: ACES shows scene grey at 10 nits, a stop darker
         # than a camera's rendering, and photographs are exposed for cameras. Out:
@@ -219,7 +219,7 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
         # the print's gamut is mostly inside the display's.
         # Lifted a stop as for ACES: photographs are exposed for cameras.
         let lifted: f64[3] = [rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift]
-        let shown = film_paper.printed(lifted, &paper) if view == View.paper else film_print.projected(lifted, silver)
+        let shown = film_paper.printed(lifted, &paper) if view == View.paper else film_print.projected(lifted, silver, material)
         let m = xyz.xyz_to_rgb(primaries_of(output)).m
         let c = apply(m, shown.x, shown.y, shown.z)
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
@@ -250,14 +250,14 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
 ## lut_size² wide and lut_size high, red fastest, blue choosing the slice.
 ## `silver`: a print's silver kept (the print view's bleach bypass, 0..1).
 ## `paper`: how a paper print is made (the paper view).
-pub func bake(view: View, table: f16[], silver: f64 = 0.0, paper: PaperSettings = PaperSettings()):
+pub func bake(view: View, table: f16[], silver: f64 = 0.0, paper: PaperSettings = PaperSettings(), material: i64 = 0):
     let n = lut_size
     let to_display = working_to_display()
     for b in 0..<n:
         for g in 0..<n:
             for r in 0..<n:
                 let scene: f64[3] = [unshape((f64)r / (f64)(n - 1)), unshape((f64)g / (f64)(n - 1)), unshape((f64)b / (f64)(n - 1))]
-                let shown = display(view, scene, to_display, silver = silver, paper = paper)
+                let shown = display(view, scene, to_display, silver = silver, paper = paper, material = material)
                 let at = (g * n * n + b * n + r) * 4
                 table[at] = (f16)shown[0]
                 table[at + 1] = (f16)shown[1]

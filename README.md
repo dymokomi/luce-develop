@@ -230,6 +230,23 @@ where a stock is not here, each named in `looks.lucb`. Dye-transfer prints, Low
 Contrast filters, uncoated lenses and intermediate generations are not modelled
 yet.
 
+## Stages beyond the negative
+
+- **Lens** (`lens`): veiling glare beyond a modern lens's, for single-coated and
+  uncoated lenses and Tiffen Low Contrast filters (estimates).
+- **Filters**: 85, 81A, 81EF, ½ Coral; black-and-white Wratten filters; Chocolate
+  1–3 (Lee 156's spectrum at a share of its density, an estimate).
+- **Record**: the digital intermediate's film recorder, so a graded scan prints.
+- **Print** (`film_print`): Vision 2383 or Technicolor dye transfer (dyes from
+  Flueckiger et al.'s 2018 measurement of a 1949 print, tone estimated),
+  printer lights, silver kept (ENR, CCE, by infrared density), duplication
+  generations and an optical step (blur from the 2004 SMPTE resolution study,
+  grain in quadrature).
+- **Paper** (`film_paper`): six photographic papers from their sheets, by grade
+  or CC filtration, contact or enlarged (the Callier effect, enlarger flare),
+  seen by reflection under D50.
+- **Formats**: 35 mm Academy, Super 35, 16 mm, Super 16, 65 mm, IMAX 15/70.
+
 ## Tests
 
 `luc test` runs the module tests and the test programs in `tests/<name>/`. One of

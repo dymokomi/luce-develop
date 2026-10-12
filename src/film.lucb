@@ -67,7 +67,7 @@
 ##          20 the retained silver's density per unit of dye density, the
 ##          scan's mean density at the fog, the edge effects' strength (log H
 ##          per unit of exhaustion) and width (µm); 21 flashing, a share of
-##          grey's exposure added evenly
+##          grey's exposure added evenly, and the duplicates' blur (σ, µm)
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -124,12 +124,17 @@ let filter_stops: f64[6] = [0.0, 0.0, 0.667, 0.333, 0.667, 0.333]
 
 ## Color filters on the lens, by the Color Filter setting, the black-and-white
 ## photographer's: none, Yellow (Wratten 8), Orange (21), Red (25), Green (11)
-## and Blue (47). Their transmission at `nm`, modelled on Kodak's published
+## and Blue (47); and the cinematographer's brown Chocolate 1, 2 and 3 (The
+## Godfather's Sicily). Their transmission at `nm`, modelled on Kodak's published
 ## Wratten curves (smooth edges at their cut-on wavelengths; estimates): yellow
 ## darkens a blue sky a little, orange more, red to near black and lightens skin;
 ## green darkens skin and reds; blue the opposite of yellow. Exposure is opened up
 ## by each filter's factor, so a grey stays where it was.
 func transmission(filter: usize, nm: f64) -> f64:
+    if filter >= 6:
+        # Chocolate 1, 2, 3: Lee 156's density, a fifth, a third and a half of it.
+        let share: f64[3] = [0.2, 0.35, 0.5]
+        return math.pow(chocolate(nm), share[filter - 6])
     return match filter:
         1 => pass_above(nm, 480.0, 9.0)
         2 => pass_above(nm, 548.0, 9.0)
@@ -137,6 +142,17 @@ func transmission(filter: usize, nm: f64) -> f64:
         4 => 0.04 + 0.75 * math.exp(-0.5 * ((nm - 530.0) / 45.0) * ((nm - 530.0) / 45.0)) + 0.25 * pass_above(nm, 660.0, 12.0)
         5 => 0.02 + 0.6 * math.exp(-0.5 * ((nm - 445.0) / 32.0) * ((nm - 445.0) / 32.0))
         _ => 1.0
+
+## Chocolate: no camera filter maker publishes its curve, so the brown is Lee
+## Filters' 156 Chocolate lighting gel's (published every 5 nm, 405–700 nm),
+## held at its ends; a camera's grades are a share of its density (estimates).
+let chocolate_gel: f64[60] = [0.3029, 0.2924, 0.2696, 0.2389, 0.2144, 0.1925, 0.1680, 0.1443, 0.1265, 0.1132, 0.1003, 0.0891, 0.0809, 0.0776, 0.0785, 0.0826, 0.0876, 0.0921, 0.0970, 0.1049, 0.1197, 0.1429, 0.1716, 0.2015, 0.2317, 0.2602, 0.2772, 0.2768, 0.2558, 0.2226, 0.1889, 0.1642, 0.1563, 0.1674, 0.1964, 0.2385, 0.2809, 0.3165, 0.3383, 0.3442, 0.3394, 0.3281, 0.3136, 0.2997, 0.2924, 0.2974, 0.3159, 0.3448, 0.3755, 0.3978, 0.3964, 0.3645, 0.3216, 0.2991, 0.2968, 0.3217, 0.3823, 0.4677, 0.5580, 0.6367]
+
+func chocolate(nm: f64) -> f64:
+    let place = math.clamp((nm - 405.0) / 5.0, 0.0, 59.0)
+    let below = (usize)math.min(math.floor(place), 58.0)
+    let t = place - (f64)below
+    return chocolate_gel[below] * (1.0 - t) + chocolate_gel[below + 1] * t
 
 ## A long-pass edge: 2% below `edge`, 92% above, over about `width` nm.
 func pass_above(nm: f64, edge: f64, width: f64) -> f64:
@@ -328,7 +344,7 @@ pub struct Film:
         let model = &self.model
         # The exposure grid, through the color filter on the lens.
         var filter: f64[81]
-        let chosen = (usize)math.clamp(settings.get(.film_color_filter), 0.0, 5.0)
+        let chosen = (usize)math.clamp(settings.get(.film_color_filter), 0.0, 8.0)
         for at in 0..<spectral.samples:
             filter[at] = transmission(chosen, spectral.wavelength(at))
         model.expose_grid(filter, model.exposure)
@@ -348,7 +364,13 @@ pub struct Film:
         # The bleach bypassed (develop_silver): silver stays where the dye
         # formed, adding its own grain. Only a color negative's silver is extra.
         let retained = settings.get(.develop_silver) / 100.0 if kind == 0 else 0.0
-        let coarse = grown.gain * grown.grain * (1.0 + silver_grain * retained)
+        # Duplication between the negative and the print (the Print stage):
+        # each generation's own grain adds in quadrature, an optical step's
+        # specular light shows it harder (the Callier effect).
+        let generations = settings.get(.print_generations)
+        let optical = settings.get(.print_optical) > 0.5
+        let duplicated = math.sqrt(1.0 + generation_grain * (generations + (1.0 if optical else 0.0))) * (optical_callier if optical else 1.0)
+        let coarse = grown.gain * grown.grain * (1.0 + silver_grain * retained) * duplicated
         for at in 0..<curve_samples:
             let grain = along_model(model.grain, log_h_at(at) + grown.shift)
             self.put(grain_row, at, grain[0] * coarse, grain[1] * coarse, grain[2] * coarse, 1.0)
@@ -429,7 +451,11 @@ pub struct Film:
         # No silver while the scan is set up and its matrix fitted: the lab's scan
         # is set for a bleached negative.
         let fog_density = (fog_scan[0] + fog_scan[1] + fog_scan[2]) / 3.0
-        self.put(values_row, 21, settings.get(.film_flash) / 100.0, 0.0, 0.0, 0.0)
+        let steps = settings.get(.print_generations) + (1.0 if settings.get(.print_optical) > 0.5 else 0.0)
+        # A dye-transfer print's dye spreads from matrix to blank (15–25 µm wide,
+        # an estimate).
+        let spread = dye_spread if settings.get(.print_material) > 0.5 else 0.0
+        self.put(values_row, 21, settings.get(.film_flash) / 100.0, math.sqrt(generation_blur * generation_blur * steps + spread * spread), 0.0, 0.0)
         self.put(values_row, 20, 0.0, fog_density, edge, grown.edge_width)
         let warmth = settings.get(.film_warmth) / 100.0
         let tint = settings.get(.film_tint) / 100.0
@@ -752,6 +778,19 @@ let silver_density: f64 = 0.8
 ## How much coarser the grain is with all the silver kept: the silver image's
 ## grain over the dye clouds' (an estimate, +30–60 % on print film).
 let silver_grain: f64 = 0.4
+
+## What each duplication between negative and print does (an interpositive, an
+## internegative): blur, σ in µm on the negative, from the 2004 SMPTE study
+## (camera negative 2100 lines per picture height, answer print 1400, release
+## print through IP and IN 1000: two steps take 0.71 of the answer print's
+## resolution, about 4.4 µm each on a 35 mm frame); grain, the intermediate's
+## σD (0.004) against a negative's (0.008), squared; an optical step's
+## grain, 1.3 times harder (an estimate from the Callier effect).
+let generation_blur: f64 = 4.4
+let generation_grain: f64 = 0.25
+let optical_callier: f64 = 1.3
+## A dye-transfer print's dye spread, σ in µm (about 20 µm wide at half height).
+let dye_spread: f64 = 8.5
 
 ## The scanner's matrix from its channels to AP1, calibrated on a reference
 ## negative, Kodak Vision3 250D 5207 (today's ECN-2 dye set): `fit_matrix` for it
