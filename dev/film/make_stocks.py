@@ -189,5 +189,68 @@ pub func stock_at(at: usize) -> Stock:
 
 '''
 body = '\n'.join(stock(key, data, exr_500t['d_min']) for key, data in STOCKS)
+
+# The print stock. Release print film's three curves are made to one shape, set
+# apart along log H so a neutral prints neutral; Kodak's raster graph runs them
+# together near D-min, where they cannot be read apart. So: each curve over its
+# own D-min, aligned where it passes density 2.0 over it, averaged where all
+# three were read, and set back at each layer's place and D-min.
+print_data = json.load(open(here / 'kodak_2383.json'))
+char = print_data['characteristic']
+grid = char['log_h']
+def crossing(values, level):
+    for (a, ya), (b, yb) in zip(zip(grid, values), zip(grid[1:], values[1:])):
+        if ya is not None and yb is not None and ya < level <= yb:
+            return a + (level - ya) * (b - a) / (yb - ya)
+    raise ValueError('curve never reaches the level')
+minima = {c: min(v for v in char[c] if v is not None) for c in CHANNELS}
+places = {c: crossing([None if v is None else v - minima[c] for v in char[c]], 2.0) for c in CHANNELS}
+step = grid[1] - grid[0]
+shape_x = [round(-2.5 + step * i, 4) for i in range(int(round(5.0 / step)) + 1)]
+shape = []
+for q in shape_x:
+    readings = [interp(grid, [None if v is None else v - minima[c] for v in char[c]], q + places[c]) for c in CHANNELS]
+    readings = [r for r in readings if r is not None]
+    shape.append(sum(readings) / len(readings) if readings else None)
+known = [i for i, v in enumerate(shape) if v is not None]
+shape = [shape[known[0]] if i < known[0] else (shape[known[-1]] if i > known[-1] else v) for i, v in enumerate(shape)]
+# Below the readings the shape rests at 0 over D-min; density only ever rises
+# with exposure (averaging where the readings start and stop can wobble).
+rising = []
+for v in shape:
+    rising.append(max(0.0, v, rising[-1] if rising else 0.0))
+shape = rising
+print_curves = []
+for c in CHANNELS:
+    print_curves += [minima[c] + interp(shape_x, shape, min(max(q - places[c], shape_x[0]), shape_x[-1])) for q in grid]
+assert len(char['log_h']) <= CURVE_MOST
+print_dyes = sum((spectral(print_data['dyes']['nm'], print_data['dyes'][d], 0.0) for d in ('cyan', 'magenta', 'yellow')), [])
+n = len(char['log_h'])
+body += f'''
+## A color print stock as its datasheet describes it, for printing images held
+## as printing density (film_print.lucb), whose definition is the print's own spectral
+## response: so its spectral sensitivity, though in its data, is not needed.
+pub struct PrintStock:
+    pub var name: str
+    ## Spectral density of the cyan, magenta and yellow dyes, each scaled so the
+    ## three together make a visual neutral of 1.0 under a xenon-arc projector.
+    pub var dyes: f64[243]
+    ## Status A density per layer over log exposure (lux s): `curve_count`
+    ## readings from `curve_first` every `curve_step`.
+    pub var curve_first: f64
+    pub var curve_step: f64
+    pub var curve_count: usize
+    pub var curves: f64[{CURVE_MOST * 3}]
+
+## {print_data['name']}: {print_data['source']}
+pub func kodak_2383() -> PrintStock:
+    return PrintStock(
+        name = "{print_data['name']}",
+        dyes = {block(print_dyes, 243)},
+        curve_first = {number(char['log_h'][0])},
+        curve_step = 0.05,
+        curve_count = {n},
+        curves = {block(sum((print_curves[i * n:(i + 1) * n] + [print_curves[(i + 1) * n - 1]] * (CURVE_MOST - n) for i in range(3)), []), CURVE_MOST * 3)})
+'''
 (here.parents[1] / 'src/film_stocks.lucb').write_text(header + body)
-print('wrote src/film_stocks.lucb:', ', '.join(d['name'] for _, d in STOCKS))
+print('wrote src/film_stocks.lucb:', ', '.join(d['name'] for _, d in STOCKS), '+', print_data['name'])

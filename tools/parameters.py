@@ -60,7 +60,7 @@ add("geometry_scale","Scale","Geometry",50,150,100)
 add("geometry_autocrop","Crop to Fit","Geometry",0,1,1)
 for n,d in [("left",0),("top",0),("right",1),("bottom",1)]:
     add("crop_"+n,"Crop "+n.capitalize(),"Crop",0,1,d,4)
-add("view","View","View",0,2,0,0)
+add("view","View","View",0,3,0,0)
 enum="\n".join(f"    {p[0]} = {i}" for i,p in enumerate(P))
 def num(v): return repr(float(v))
 table=",\n".join(f'    ParameterSpec("{p[0]}", "{p[1]}", "{p[2]}", {num(p[3])}, {num(p[4])}, {num(p[5])}, {p[6]})' for p in P)

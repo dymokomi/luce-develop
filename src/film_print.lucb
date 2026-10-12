@@ -1,0 +1,196 @@
+## Print: scene light printed on Kodak Vision 2383 and projected, as a view. This
+## is the cinema's release print, the classic "film look" of print-emulation LUTs,
+## and it replaces the view's tone scale instead of stacking on it: the print's
+## own toe and shoulder are the tone mapping.
+##
+## 1. Printing density. The graded scene, channel by channel, is held as a
+##    negative's printing density the Cineon way: 0.6 density per decade of
+##    scene light, grey (0.18) at 0.70 over D-min. Printing density is by
+##    definition the density the print stock sees, so each print layer's log
+##    exposure is its printer light less the negative's density.
+## 2. Printer lights put grey on the print's visual neutral of density 1.0: the
+##    amounts of dye Kodak's normalized curves define (each 1.0), so grey shows
+##    at a tenth of the print's white, as a cinema shows it.
+## 3. The print develops each layer through its characteristic curve (Status A,
+##    unmixed into dye amounts as film_model.lucb does for negatives; the layers
+##    of a print do not hold each other back).
+## 4. Projection: the dyes' spectral density under a xenon arc (taken as a 5600 K
+##    black body), white the clear print, 0.2% of white added as projector flare,
+##    and the eye adapted to the screen: the light's white goes to the display's.
+import memory
+import sync
+from luce_std import math
+from luce_color import spectral
+from luce_color import xyz
+from film_stocks import PrintStock, kodak_2383
+import film_stocks
+
+## The printing-density encoding: density per decade of scene light, and grey's.
+let negative_gamma: f64 = 0.6
+let grey_density: f64 = 0.7
+## Projector flare, a share of white; and the projector's light.
+let flare: f64 = 0.002
+let projector_kelvin: f64 = 5600.0
+
+## The print's development over log H: 1024 samples from `log_low` to `log_high`.
+let samples: usize = 1024
+let log_low: f64 = -1.5
+let log_high: f64 = 3.5
+
+struct PrintModel:
+    var stock: PrintStock
+    ## Dye amounts per layer over log H, the layers' printer lights (grey's log H),
+    ## and Status A's bands.
+    var curve: f64[3072]
+    var printer: f64[3]
+    var bands: f64[243]
+    ## The projector's light, the clear print's white under it, and the matrix from
+    ## that white to D65 (Bradford).
+    var light: spectral.Spectrum
+    var white: xyz.XYZ
+    var adapt: xyz.Matrix3
+
+    ## Status A densities of dye `amounts` (cyan, magenta, yellow) over the base.
+    func read(amounts: f64[3]) -> f64[3]:
+        var out: f64[3]
+        for channel in 0..<(usize)3:
+            var sum = 0.0
+            for at in 0..<spectral.samples:
+                let d = amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]
+                sum += math.pow(10.0, -d) * self.bands[channel * 81 + at]
+            out[channel] = -math.log10(math.max(sum, 1.0e-12))
+        return out
+
+    ## Layer `layer`'s dye at log H `log_h`.
+    func amount(layer: usize, log_h: f64) -> f64:
+        let position = math.clamp((log_h - log_low) / (log_high - log_low), 0.0, 1.0) * (f64)(samples - 1)
+        let below = (usize)math.min(math.floor(position), (f64)(samples - 2))
+        let t = position - (f64)below
+        return self.curve[below * 3 + layer] * (1.0 - t) + self.curve[(below + 1) * 3 + layer] * t
+
+## Status A densitometry's bands (blue near 440 nm, green 545, red 610), as
+## Gaussians: the standard's tables are not public.
+func status_a() -> f64[243]:
+    var out: f64[243]
+    let centers: f64[3] = [610.0, 545.0, 440.0]
+    let widths: f64[3] = [12.0, 12.0, 12.0]
+    for channel in 0..<(usize)3:
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            let d = (spectral.wavelength(at) - centers[channel]) / widths[channel]
+            out[channel * 81 + at] = math.exp(-0.5 * d * d)
+            sum += out[channel * 81 + at]
+        for at in 0..<spectral.samples:
+            out[channel * 81 + at] /= sum
+    return out
+
+## Layer `channel`'s Status A density over the print's D-min at `log_h`, held at
+## the ends of what Kodak plots.
+func over_minimum(stock: const PrintStock*, channel: usize, log_h: f64) -> f64:
+    let n = stock.curve_count
+    let curve = stock.curves[channel * film_stocks.curve_most..<channel * film_stocks.curve_most + n]
+    var least = curve[0]
+    for value in curve:
+        least = math.min(least, value)
+    let position = math.clamp((log_h - stock.curve_first) / stock.curve_step, 0.0, (f64)(n - 1))
+    let below = (usize)math.min(math.floor(position), (f64)(n - 2))
+    let t = position - (f64)below
+    return curve[below] + (curve[below + 1] - curve[below]) * t - least
+
+## Fill `out` (its stock, bands and light set): the curves, printer lights and white.
+func build(out: PrintModel*):
+    # The neutral ramp unmixed into dye amounts, by Newton from the last.
+    var a: f64[3] = [0.0, 0.0, 0.0]
+    for at in 0..<samples:
+        let log_h = log_low + (log_high - log_low) * (f64)at / (f64)(samples - 1)
+        let target: f64[3] = [over_minimum(&out.stock, 0, log_h), over_minimum(&out.stock, 1, log_h), over_minimum(&out.stock, 2, log_h)]
+        for _ in 0..<30:
+            let here = out.read(a)
+            let residual: f64[3] = [here[0] - target[0], here[1] - target[1], here[2] - target[2]]
+            if math.abs(residual[0]) + math.abs(residual[1]) + math.abs(residual[2]) < 1.0e-7:
+                break
+            var jacobian: f64[9]
+            for k in 0..<(usize)3:
+                var nudged = a
+                nudged[k] += 1.0e-4
+                let moved = out.read(nudged)
+                for row in 0..<(usize)3:
+                    jacobian[row * 3 + k] = (moved[row] - here[row]) / 1.0e-4
+            let inverse = invert(jacobian) else break
+            for k in 0..<(usize)3:
+                a[k] -= inverse[k * 3] * residual[0] + inverse[k * 3 + 1] * residual[1] + inverse[k * 3 + 2] * residual[2]
+        # A layer's dye only grows with its exposure (unmixing near D-min can
+        # wobble one against another).
+        for k in 0..<(usize)3:
+            let before = out.curve[(at - 1) * 3 + k] if at > 0 else 0.0
+            out.curve[at * 3 + k] = math.max(math.max(a[k], 0.0), before)
+    # Printer lights: each layer's log H where it forms grey's dye (1.0).
+    for layer in 0..<(usize)3:
+        out.printer[layer] = log_high
+        for at in 1..<samples:
+            if out.curve[at * 3 + layer] >= 1.0:
+                let low = out.curve[(at - 1) * 3 + layer]
+                let high = out.curve[at * 3 + layer]
+                let t = (1.0 - low) / math.max(high - low, 1.0e-9)
+                out.printer[layer] = log_low + (log_high - log_low) * ((f64)(at - 1) + t) / (f64)(samples - 1)
+                break
+    out.white = out.light.xyz()
+    let white_point = xyz.Chromaticity(out.white.x / (out.white.x + out.white.y + out.white.z), out.white.y / (out.white.x + out.white.y + out.white.z))
+    out.adapt = xyz.adapt(white_point, xyz.d65)
+
+func invert(m: f64[9]) -> f64[9]?:
+    let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6])
+    if math.abs(det) < 1.0e-14:
+        return none
+    return [(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
+            (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+            (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det]
+
+## Built once, on first use, and kept.
+var built: PrintModel*? = none
+var built_once: sync.Once
+
+func build_model():
+    let made = new PrintModel(stock = kodak_2383(), bands = status_a(), light = spectral.planck(projector_kelvin)) in memory.heap catch failure:
+        trap("the print model could not be allocated")
+    build(made)
+    built = made
+
+## Scene light `rgb` (AP1) printed and projected: XYZ adapted to D65, the print's
+## white at Y = 1.
+pub func projected(rgb: f64[3]) -> xyz.XYZ:
+    built_once.run(build_model)
+    let model = built else trap("the print model was not built")
+    var amounts: f64[3]
+    for layer in 0..<(usize)3:
+        let negative = negative_gamma * math.log10(math.max(rgb[layer], 1.0e-6) / 0.18)
+        amounts[layer] = model.amount(layer, model.printer[layer] - negative)
+    var shown = xyz.XYZ(0.0, 0.0, 0.0)
+    for at in 0..<spectral.samples:
+        let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at]
+        let power = model.light.values[at] * math.pow(10.0, -d)
+        shown.x += power * spectral.observer[at * 3]
+        shown.y += power * spectral.observer[at * 3 + 1]
+        shown.z += power * spectral.observer[at * 3 + 2]
+    # Flare, then white at Y = 1.
+    let scale = 1.0 / (model.white.y * (1.0 + flare))
+    let lit = xyz.XYZ((shown.x + flare * model.white.x) * scale, (shown.y + flare * model.white.y) * scale, (shown.z + flare * model.white.z) * scale)
+    return xyz.apply(model.adapt, lit)
+
+test "grey prints near a tenth of white, neutral; white shows white and black near black":
+    # Kodak's normalized dyes, as read, make a visual density of 0.93, not 1.0.
+    let grey = projected([0.18, 0.18, 0.18])
+    assert(grey.y > 0.09 and grey.y < 0.13)
+    let x = grey.x / (grey.x + grey.y + grey.z)
+    let y = grey.y / (grey.x + grey.y + grey.z)
+    assert(math.abs(x - 0.3127) < 0.01 and math.abs(y - 0.329) < 0.01)
+    let white = projected([20.0, 20.0, 20.0])
+    assert(white.y > 0.8)
+    let black = projected([0.0005, 0.0005, 0.0005])
+    assert(black.y < 0.01)
+    var previous = -1.0
+    for step in 0..<(usize)30:
+        let v = 0.0005 * math.exp2((f64)step * 0.5)
+        let shown = projected([v, v, v]).y
+        assert(shown >= previous - 1.0e-4)
+        previous = shown

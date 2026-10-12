@@ -57,7 +57,8 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
    global wheels, balance, blending); Black & White (hue weights, tint).
 6. The view: ACES 2.0 SDR (luce-color), lifted one stop so photographs land as
    a camera renders them, which is the default; Standard, a neutral filmic curve;
-   or Linear.
+   Linear; or Print, the scene printed on Kodak Vision 2383 and projected
+   (`film_print`, below).
 7. Levels and Curves (all channels, R, G, B, luma) on the display's encoded values.
 8. The vignette and grain.
 
@@ -135,6 +136,18 @@ halation (across, down), the neutral development, the inhibitor's spread
 (across, down), and develop as dye clouds with their grain, and scan. The renderer runs them when the
 photo or the settings change and draws the filmed scene; export runs them at
 full size (about 18 s for a 48-megapixel raw on the CPU, demosaic included).
+
+**Print** (`film_print`, the View's Kodak 2383 Print) is the cinema's release
+print, the other half of the film process, as a view: it replaces the tone
+scale rather than stacking on one. The graded scene is held as a negative's
+printing density the Cineon way (0.6 density per decade, grey at 0.70),
+printer lights put grey on the visual neutral Kodak's dyes are normalized to,
+each layer develops through 2383's characteristic curve (Status A, unmixed
+into dye amounts), and the dyes are projected under a xenon arc with a little
+flare, the eye adapted to the screen. Kodak's 2383 sheet has raster graphs:
+`dev/film/trace_raster_curves.py` follows each curve column by column; release
+print curves are made to one shape, so the three are read as that shape set
+apart, which Kodak's toes (run together on the graph) cannot be read apart for.
 
 Stocks, the tungsten negatives American television shot through the 1990s:
 Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277.

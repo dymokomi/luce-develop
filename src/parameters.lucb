@@ -206,4 +206,4 @@ pub let parameters: ParameterSpec[94] = [
     ParameterSpec("crop_top", "Crop Top", "Crop", 0.0, 1.0, 0.0, 4),
     ParameterSpec("crop_right", "Crop Right", "Crop", 0.0, 1.0, 1.0, 4),
     ParameterSpec("crop_bottom", "Crop Bottom", "Crop", 0.0, 1.0, 1.0, 4),
-    ParameterSpec("view", "View", "View", 0.0, 2.0, 0.0, 0)]
+    ParameterSpec("view", "View", "View", 0.0, 3.0, 0.0, 0)]

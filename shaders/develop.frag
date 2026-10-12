@@ -5,7 +5,7 @@
 //   image 1  the scene: camera RGB balanced as shot (raws) or linear sRGB (other
 //            files), RGBA half floats
 //   image 2  the tables (tables.lucb): row 0 tone, 1 hue bands, 2 curves, 3 values
-//   image 3  the view table, for the ACES view: 64³ display colors, 64 slices of
+//   image 3  the view table, for the ACES and Print views: 64³ display colors, 64 slices of
 //            64×64 side by side, over a log2 shaper of 24 stops about 0.18
 //            (view.lucb), read with tetrahedral interpolation. The Standard and
 //            Linear views are computed here exactly as view.lucb does.
@@ -179,6 +179,7 @@ vec3 standard(vec3 c) {
 }
 
 vec3 through_view(vec3 c) {
+    if (params.color.z > 2.5) return through_table(c);
     if (params.color.z > 1.5) return clamp(to_display * c, 0.0, 1.0);
     if (params.color.z > 0.5) return standard(c);
     return through_table(c);

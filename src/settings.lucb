@@ -44,6 +44,9 @@ pub enum View as i64:
     standard = 1
     ## No tone mapping: scene values clipped to the display, for checking.
     linear = 2
+    ## Printed on Kodak Vision 2383 and projected (film_print.lucb): the print's own
+    ## toe and shoulder are the tone scale.
+    print = 3
 
 ## The tone curves, in text-form order: all channels, red, green, blue, luma.
 pub let curve_count: usize = 5

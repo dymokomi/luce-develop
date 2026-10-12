@@ -12,6 +12,8 @@
 ## its ratios (so hues hold), colors out of the display gamut pulled toward their
 ## luminance, and highlights that run to white as they pass the shoulder.
 ## Linear: the scene clipped to the display, for checking.
+## Print: the scene printed on Kodak Vision 2383 and projected (film_print.lucb), a
+## cinema's release print; its table is read like ACES's.
 ##
 ## Display-referred pictures (JPEG, PNG, TIFF, HEIC) come into the scene through
 ## the ACES view's inverse (`undisplay`, luce-color's inverse output transform,
@@ -28,6 +30,7 @@ from luce_color import aces
 from luce_color import transfer
 from luce_std import parallel
 from settings import View
+import film_print
 
 ## Nodes per side of the baked table, and the shaper's range in stops from 0.18.
 pub let lut_size: usize = 64
@@ -207,6 +210,14 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
             return aces_p3.apply_ap1(lifted)
         aces_once.run(build_aces)
         return aces_sdr.apply_ap1(lifted)
+    if view == View.print:
+        # XYZ (D65, the print's white at 1) into the output's primaries, clipped:
+        # the print's gamut is mostly inside the display's.
+        # Lifted a stop as for ACES: photographs are exposed for cameras.
+        let shown = film_print.projected([rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift])
+        let m = xyz.xyz_to_rgb(primaries_of(output)).m
+        let c = apply(m, shown.x, shown.y, shown.z)
+        return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
