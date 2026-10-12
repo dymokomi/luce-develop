@@ -70,6 +70,43 @@ pub func printing() -> Densitometer:
             out.bands[channel * 81 + at] = printing_responsivity[channel * 81 + at] / sum
     return out
 
+## What a color paper sees of a negative under an enlarger: its layers'
+## spectral sensitivity (`sensitivity`, log10, red first) times a tungsten
+## halogen lamp's light (3200 K, an estimate; the color head's filtration is
+## applied as CC values, film_paper.lucb).
+pub func paper_printing(sensitivity: const f64[243]) -> Densitometer:
+    var out: Densitometer
+    let lamp = spectral.planck(3200.0)
+    for channel in 0..<(usize)3:
+        var peak = -1.0e9
+        for at in 0..<spectral.samples:
+            peak = math.max(peak, sensitivity[channel * 81 + at])
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            let weight = lamp.values[at] * math.pow(10.0, sensitivity[channel * 81 + at] - peak)
+            out.bands[channel * 81 + at] = weight
+            sum += weight
+        for at in 0..<spectral.samples:
+            out.bands[channel * 81 + at] /= sum
+    return out
+
+## The densities `meter` reads of a negative of `model`'s stock over the dye
+## amounts 0..top (33³ × 3, r fastest), over D-min's: what a print material
+## sees of it. The caller frees it.
+pub func printed_by(model: const Model*, meter: const Densitometer*) -> f64[]!:
+    let n = lut_size
+    let out = try new f64[n * n * n * 3] --- in memory.heap
+    let base = meter.read(model.stock.d_min)
+    for b in 0..<n:
+        for g in 0..<n:
+            for r in 0..<n:
+                let amounts: f64[3] = [model.top * (f64)r / (f64)(n - 1), model.top * (f64)g / (f64)(n - 1), model.top * (f64)b / (f64)(n - 1)]
+                let read = meter.read(model.density(amounts))
+                let at = ((b * n + g) * n + r) * 3
+                for k in 0..<(usize)3:
+                    out[at + k] = read[k] - base[k]
+    return out
+
 pub func status_m() -> Densitometer:
     var out: Densitometer
     let centers: f64[3] = [650.0, 546.0, 447.0]
@@ -183,7 +220,7 @@ pub struct Model:
     ## (D-min) and the dyes. Kodak draws its negatives' dyes as they act with
     ## their masking couplers: printing density from them meets Kodak's own
     ## (the test below); taking a modelled mask off them as they form did not.
-    func density(amounts: f64[3]) -> f64[81]:
+    pub func density(amounts: f64[3]) -> f64[81]:
         var out: f64[81]
         for at in 0..<spectral.samples:
             out[at] = self.stock.d_min[at] + amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]

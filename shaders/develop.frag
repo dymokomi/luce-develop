@@ -182,8 +182,94 @@ vec3 standard(vec3 c) {
     return clamp(kept + (vec3(toned) - kept) * whiten, 0.0, 1.0);
 }
 
+// The print and paper views, per pixel (view.lucb's `pack` lays their data in
+// image 3): film_print.lucb's `projected` and film_paper.lucb's `printed`.
+vec4 print_value(int row, int column) {
+    return texelFetch(display_table, ivec2(column, row), 0);
+}
+// Layer `layer`'s dye at log H `log_h` on the print's or paper's curve.
+float print_amount(int layer, float log_h) {
+    vec4 range = print_value(2, 1);
+    float place = clamp((log_h - range.x) / (range.y - range.x), 0.0, 1.0) * 1023.0;
+    float below = min(floor(place), 1022.0);
+    float t = place - below;
+    return mix(print_value(0, int(below))[layer], print_value(0, int(below) + 1)[layer], t);
+}
+// What comes back where the dyes' density is `d`: once through a film; off a
+// paper, by Williams and Clapper's reflection (film_print.lucb's `reflectance`).
+float print_passed(float d, bool reflective) {
+    if (!reflective) return pow(10.0, -d);
+    float place = clamp(d / 6.0, 0.0, 1.0) * 599.0;
+    float below = min(floor(place), 598.0);
+    float t = place - below;
+    return mix(print_value(1, 200 + int(below)).r, print_value(1, 201 + int(below)).r, t);
+}
+// Dye `amounts` (and a neutral density, silver) seen by the print's light: XYZ
+// adapted to D65, white at Y = 1, its flare added (film_print.lucb's `seen`).
+vec3 print_seen(vec3 amounts, float neutral) {
+    bool reflective = print_value(2, 1).w > 0.5;
+    vec3 sum = vec3(0.0);
+    for (int at = 0; at < 81; at++) {
+        float d = dot(amounts, print_value(1, at).rgb) + neutral;
+        sum += print_value(1, 100 + at).rgb * print_passed(d, reflective);
+    }
+    vec4 white = print_value(2, 2);
+    float flare = print_value(2, 1).z;
+    vec3 lit = (sum + flare * white.xyz) * white.w;
+    return vec3(dot(print_value(2, 3).xyz, lit), dot(print_value(2, 4).xyz, lit), dot(print_value(2, 5).xyz, lit));
+}
+// The enlarger's exposure for printing density `d` around `grey_at`
+// (film_paper.lucb's `exposure`): Callier, the exposure set, flare.
+float enlarged(float d, float grey_at, float filter_density) {
+    vec4 e = print_value(2, 10);
+    float log_e = grey_at - e.x * d + e.z - filter_density;
+    return log(pow(10.0, log_e) * (1.0 - e.y) + e.y * pow(10.0, grey_at)) / log(10.0);
+}
+// A black-and-white paper's grade `grade`'s density over its least at `log_e`.
+float paper_density(int grade, float log_e) {
+    vec4 grid = print_value(2, 13);
+    float count = print_value(2, 14).x;
+    float place = clamp((log_e - grid.z) / grid.w, 0.0, count - 1.0);
+    float below = min(floor(place), count - 2.0);
+    float t = place - below;
+    return mix(print_value(3 + grade, int(below)).r, print_value(3 + grade, int(below) + 1).r, t);
+}
+vec3 printed(vec3 c) {
+    vec3 lifted = c * print_value(2, 9).y;
+    vec4 printer = print_value(2, 0);
+    vec3 shown;
+    if (printer.w < 0.5) {
+        // 2383 projected.
+        vec3 negative = 0.6 * log(max(lifted, vec3(1e-6)) / 0.18) / log(10.0);
+        vec3 amounts = vec3(print_amount(0, printer.x - negative.x), print_amount(1, printer.y - negative.y), print_amount(2, printer.z - negative.z));
+        float kept = print_value(2, 9).x * max((amounts.x + amounts.y + amounts.z) / 3.0, 0.0);
+        shown = print_seen(amounts, kept);
+    } else if (printer.w < 1.5) {
+        // A color paper, its filtration per layer.
+        vec3 filters = print_value(2, 11).rgb;
+        vec3 amounts;
+        for (int layer = 0; layer < 3; layer++) {
+            float d = 0.6 * log(max(lifted[layer], 1e-6) / 0.18) / log(10.0);
+            amounts[layer] = print_amount(layer, enlarged(d, printer[layer], filters[layer]));
+        }
+        shown = print_seen(amounts, 0.0);
+    } else {
+        // A black-and-white paper: the grades around the chosen one.
+        float luminance = dot(lifted, vec3(0.272228717, 0.674081766, 0.053689517));
+        float d = 0.6 * log(max(luminance, 1e-6) / 0.18) / log(10.0);
+        vec4 grades = print_value(2, 12);
+        vec4 greys = print_value(2, 13);
+        float low = paper_density(int(grades.x), enlarged(d, greys.x, 0.0));
+        float high = paper_density(int(grades.y), enlarged(d, greys.y, 0.0));
+        float reflectance = pow(10.0, -mix(low, high, grades.z));
+        shown = reflectance * vec3(0.95047, 1.0, 1.08883);
+    }
+    vec3 rgb = vec3(dot(print_value(2, 6).xyz, shown), dot(print_value(2, 7).xyz, shown), dot(print_value(2, 8).xyz, shown));
+    return clamp(rgb, 0.0, 1.0);
+}
+
 vec3 through_view(vec3 c) {
-    if (params.color.z > 2.5) return through_table(c);
+    if (params.color.z > 2.5) return printed(c);
     if (params.color.z > 1.5) return clamp(to_display * c, 0.0, 1.0);
     if (params.color.z > 0.5) return standard(c);
     return through_table(c);

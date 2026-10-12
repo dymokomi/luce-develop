@@ -5,7 +5,7 @@
 ##
 ## 1. Printing density, what the print stock sees of the negative: each print
 ##    layer's log exposure is its printer light less it. A negative printed
-##    straight (film.lucb's `prints_directly`) hands its own, read through
+##    straight (film.lucb's `printing_onto`) hands its own, read through
 ##    SMPTE RP 180 from its dyes (film_model.lucb); a scan, a grade or a film
 ##    recorder in between hands the image the Cineon way, as recorders write
 ##    it: 0.6 density per decade of scene light, grey (0.18) at 0.70 over D-min.
@@ -38,6 +38,8 @@ let projector_kelvin: f64 = 5600.0
 ## A print's development over log H: 1024 samples over its stock's range (2383's
 ## from -1.5 to 3.5).
 let samples: usize = 1024
+## The most dye (in units of a layer's dye at 1.0) unmixing gives a layer.
+let most_dye: f64 = 10.0
 
 ## A print material's model: its stock, its development unmixed into dye
 ## amounts, the light it is seen by, its flare. 2383 projected here; a color
@@ -61,6 +63,13 @@ pub struct PrintModel:
     var light: spectral.Spectrum
     var white: xyz.XYZ
     var adapt: xyz.Matrix3
+    ## A paper seen by reflection (`reflectance`), not a film by transmission.
+    var reflective: bool
+
+    ## What comes back of light at a wavelength where the dyes' density is `d`:
+    ## transmitted once through a film; off a paper, `reflectance`'s.
+    func passed(d: f64) -> f64:
+        return reflectance(d) if self.reflective else math.pow(10.0, -d)
 
     ## Status A densities of dye `amounts` (cyan, magenta, yellow) over the base.
     func read(amounts: f64[3]) -> f64[3]:
@@ -69,7 +78,7 @@ pub struct PrintModel:
             var sum = 0.0
             for at in 0..<spectral.samples:
                 let d = amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]
-                sum += math.pow(10.0, -d) * self.bands[channel * 81 + at]
+                sum += self.passed(d) * self.bands[channel * 81 + at]
             out[channel] = -math.log10(math.max(sum, 1.0e-12))
         return out
 
@@ -129,8 +138,11 @@ func build(out: PrintModel*):
                 for row in 0..<(usize)3:
                     jacobian[row * 3 + k] = (moved[row] - here[row]) / 1.0e-4
             let inverse = invert(jacobian) else break
+            # Steps held short and amounts bounded: near a paper's D-max the
+            # reading flattens and a full step would run away.
             for k in 0..<(usize)3:
-                a[k] -= inverse[k * 3] * residual[0] + inverse[k * 3 + 1] * residual[1] + inverse[k * 3 + 2] * residual[2]
+                let step = inverse[k * 3] * residual[0] + inverse[k * 3 + 1] * residual[1] + inverse[k * 3 + 2] * residual[2]
+                a[k] = math.clamp(a[k] - math.clamp(step, -0.5, 0.5), 0.0, most_dye)
         # A layer's dye only grows with its exposure (unmixing near D-min can
         # wobble one against another).
         for k in 0..<(usize)3:
@@ -200,6 +212,135 @@ func invert(m: f64[9]) -> f64[9]?:
             (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
             (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det]
 
+# mark: Reflection ============================================================
+
+## A paper print's reflectance, relative to its white, where its dye layer has
+## density `d` at normal incidence: Williams and Clapper (1953) in Shore and
+## Spoonhower's general form (Hébert and Hersch, JIST 2004). Light lit at 45°
+## crosses the gelatin once on its way down (refracted to 28°), is scattered
+## by the paper base (reflectance ρ, 0.9, flat: an estimate), and comes up
+## diffusely: what reaches the surface below the critical angle leaves, the
+## rest (about 60 % of diffuse light) reflects back down through the dyes for
+## another pass. So density in reflection is not twice density in
+## transmission, nor proportional to dye: mixtures and dark colors fall short.
+## Glossy surface reflection the 45°/0° geometry still sees bounds the deepest
+## black: 0.1 % of white (an estimate), a limit of 3.0, above the Status A D-max
+## Kodak measures on its glossy Endura papers (2.66–2.76, 2.6 over base).
+## The angular integrals depend only on the transmittance, so the curve is
+## made once over d (`reflection_table`) and read linearly.
+let base_reflectance: f64 = 0.9
+let surface_seen: f64 = 0.001
+let gelatin_index: f64 = 1.5
+let reflection_most: f64 = 6.0
+let reflection_samples: usize = 600
+
+var reflection_table: f64[600]
+var reflection_once: sync.Once
+
+func reflectance(d: f64) -> f64:
+    reflection_once.run(make_reflection)
+    let position = math.clamp(d / reflection_most, 0.0, 1.0) * (f64)(reflection_samples - 1)
+    let below = (usize)math.min(math.floor(position), (f64)(reflection_samples - 2))
+    let t = position - (f64)below
+    return reflection_table[below] * (1.0 - t) + reflection_table[below + 1] * t
+
+func make_reflection():
+    let white = body(1.0)
+    for at in 0..<reflection_samples:
+        let d = reflection_most * (f64)at / (f64)(reflection_samples - 1)
+        reflection_table[at] = (body(math.pow(10.0, -d)) + surface_seen * white) / (white * (1.0 + surface_seen))
+
+## Light returned through a dye layer of transmittance `t` at normal incidence
+## (Shore–Spoonhower: down at 28°, diffuse up with multiple internal reflection).
+func body(t: f64) -> f64:
+    let inward = math.asin(math.sin(math.pi / 4.0) / gelatin_index)
+    var escaping = 0.0
+    var returning = 0.0
+    let steps = 90
+    for at in 0..<steps:
+        let theta = ((f64)at + 0.5) / (f64)steps * math.pi / 2.0
+        let weight = math.sin(2.0 * theta) * (math.pi / 2.0) / (f64)steps
+        let inside = internal(theta)
+        escaping += (1.0 - inside) * math.pow(t, 1.0 / math.cos(theta)) * weight
+        returning += inside * math.pow(t, 2.0 / math.cos(theta)) * weight
+    let down = (1.0 - internal_at_entry()) * math.pow(t, 1.0 / math.cos(inward))
+    return down * base_reflectance * escaping / (1.0 - base_reflectance * returning)
+
+## Fresnel reflectance inside gelatin toward air at `theta` (total beyond the
+## critical angle), unpolarized.
+func internal(theta: f64) -> f64:
+    let outside = gelatin_index * math.sin(theta)
+    if outside >= 1.0:
+        return 1.0
+    let cos_i = math.cos(theta)
+    let cos_t = math.sqrt(1.0 - outside * outside)
+    let rs = (gelatin_index * cos_i - cos_t) / (gelatin_index * cos_i + cos_t)
+    let rp = (gelatin_index * cos_t - cos_i) / (gelatin_index * cos_t + cos_i)
+    return 0.5 * (rs * rs + rp * rp)
+
+## The surface's reflectance for light arriving at 45° from air (what does not
+## enter), unpolarized.
+func internal_at_entry() -> f64:
+    let theta = math.pi / 4.0
+    let sin_t = math.sin(theta) / gelatin_index
+    let cos_i = math.cos(theta)
+    let cos_t = math.sqrt(1.0 - sin_t * sin_t)
+    let rs = (cos_i - gelatin_index * cos_t) / (cos_i + gelatin_index * cos_t)
+    let rp = (cos_t - gelatin_index * cos_i) / (cos_t + gelatin_index * cos_i)
+    return 0.5 * (rs * rs + rp * rp)
+
+# mark: For the GPU =============================================================
+
+## The print view's data for the GPU (view.lucb's `pack`, shaders/develop.frag's
+## `printed`), in single floats, `print_atlas_width` texels a row, RGBA:
+##   row 0     the curves: each layer's dye amount over log H, `samples` of them
+##             from `low` to `high`
+##   row 1     0–80 the dyes (cyan, magenta, yellow) at each wavelength; 100–180
+##             the light times the observer (X, Y, Z); 200–799 `reflectance`
+##   row 2     scalars: 0 the printer lights (grey's log H) and the kind (0 a
+##             print, 1 a color paper, 2 a black-and-white paper); 1 low,
+##             high, flare, reflective; 2 the white (XYZ) and the scale to Y = 1
+##             with flare; 3–5 the adaptation to D65, by rows
+pub let print_atlas_width: usize = 1024
+pub let print_atlas_rows: usize = 19
+
+## Write `model`'s part of the print view's data into `out` (see above), as
+## material `kind`.
+pub func pack(model: const PrintModel*, kind: f64, out: f32[]):
+    for at in 0..<samples:
+        put(out, 0, at, model.curve[at * 3], model.curve[at * 3 + 1], model.curve[at * 3 + 2], 0.0)
+    for at in 0..<spectral.samples:
+        put(out, 1, at, model.stock.dyes[at], model.stock.dyes[81 + at], model.stock.dyes[162 + at], 0.0)
+        let power = model.light.values[at]
+        put(out, 1, 100 + at, power * spectral.observer[at * 3], power * spectral.observer[at * 3 + 1], power * spectral.observer[at * 3 + 2], 0.0)
+    if model.reflective:
+        for at in 0..<reflection_samples:
+            put(out, 1, 200 + at, reflectance(reflection_most * (f64)at / (f64)(reflection_samples - 1)), 0.0, 0.0, 0.0)
+    put(out, 2, 0, model.printer[0], model.printer[1], model.printer[2], kind)
+    put(out, 2, 1, model.low, model.high, model.flare, 1.0 if model.reflective else 0.0)
+    put(out, 2, 2, model.white.x, model.white.y, model.white.z, 1.0 / (model.white.y * (1.0 + model.flare)))
+    for row in 0..<(usize)3:
+        put(out, 2, 3 + row, model.adapt.m[row * 3], model.adapt.m[row * 3 + 1], model.adapt.m[row * 3 + 2], 0.0)
+
+## Write texel `column` of row `row` of the print view's data.
+pub func put(out: f32[], row: usize, column: usize, r: f64, g: f64, b: f64, a: f64):
+    let at = (row * print_atlas_width + column) * 4
+    out[at] = (f32)r
+    out[at + 1] = (f32)g
+    out[at + 2] = (f32)b
+    out[at + 3] = (f32)a
+
+## The projected print's data: the model for `material`, the share of its
+## silver kept (`silver`, as density per unit of the dyes' mean, row 2's 9).
+pub func pack_projection(silver: f64, material: i64, out: f32[]):
+    built_once.run(build_model)
+    var model = built else trap("the print model was not built")
+    if material == 1:
+        dye_transfer_once.run(build_dye_transfer)
+        model = dye_transfer else trap("the dye-transfer model was not built")
+    pack(model, 0.0, out)
+    put(out, 2, 9, silver * print_silver_density, 0.0, 0.0, 0.0)
+
 ## Built once, on first use, and kept.
 var built: PrintModel*? = none
 var built_once: sync.Once
@@ -211,9 +352,9 @@ func build_model():
 ## `low`..`high`, grey at `grey_at` density over base (0: dye 1.0; below 0: a
 ## visual neutral at a tenth of white), with `flare`
 ## (a share of white); kept for the program's life.
-pub func make(stock: PrintStock, kelvin: f64, low: f64, high: f64, grey_at: f64, flare: f64) -> PrintModel*:
+pub func make(stock: PrintStock, kelvin: f64, low: f64, high: f64, grey_at: f64, flare: f64, reflective: bool = false) -> PrintModel*:
     let made = new PrintModel(stock = stock, low = low, high = high, grey_density = grey_at, flare = flare, bands = status_a(),
-                              light = spectral.planck(kelvin)) in memory.heap catch failure:
+                              light = spectral.planck(kelvin), reflective = reflective) in memory.heap catch failure:
         trap("the print model could not be allocated")
     build(made)
     return made
@@ -232,7 +373,7 @@ pub func seen(model: const PrintModel*, amounts: f64[3], neutral: f64 = 0.0) -> 
     var shown = xyz.XYZ(0.0, 0.0, 0.0)
     for at in 0..<spectral.samples:
         let d = amounts[0] * model.stock.dyes[at] + amounts[1] * model.stock.dyes[81 + at] + amounts[2] * model.stock.dyes[162 + at] + neutral
-        let power = model.light.values[at] * math.pow(10.0, -d)
+        let power = model.light.values[at] * model.passed(d)
         shown.x += power * spectral.observer[at * 3]
         shown.y += power * spectral.observer[at * 3 + 1]
         shown.z += power * spectral.observer[at * 3 + 2]

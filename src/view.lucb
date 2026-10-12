@@ -201,8 +201,11 @@ func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
 ## Scene light `rgb` (AP1) shown through `view` on `output`: display-linear in
 ## its primaries, 0..1. `to_display` is `working_to_output(output)`; `silver` the
 ## print view's silver kept (0..1).
+## `clip` false leaves the print's and the paper's colors beyond the display's
+## gamut unclipped (for the GPU's table, which clips after interpolating, so a
+## saturated color is not interpolated across the gamut's edge).
 pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = Output.srgb, silver: f64 = 0.0,
-                 paper: PaperSettings = PaperSettings(), material: i64 = 0) -> f64[3]:
+                 paper: PaperSettings = PaperSettings(), material: i64 = 0, clip: bool = true) -> f64[3]:
     if view == View.aces:
         # AP1 in, a stop brighter: ACES shows scene grey at 10 nits, a stop darker
         # than a camera's rendering, and photographs are exposed for cameras. Out:
@@ -222,6 +225,8 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
         let shown = film_paper.printed(lifted, &paper) if view == View.paper else film_print.projected(lifted, silver, material)
         let m = xyz.xyz_to_rgb(primaries_of(output)).m
         let c = apply(m, shown.x, shown.y, shown.z)
+        if not clip:
+            return c
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
@@ -246,6 +251,25 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
         out[at] = math.clamp(kept + (toned - kept) * whiten, 0.0, 1.0)
     return out
 
+## The print and paper views' data for the GPU, which computes them per pixel
+## (shaders/develop.frag's `printed`) as `display` does: the print's or the
+## paper's model (film_print.lucb, film_paper.lucb), then at row 2: 6–8 the
+## matrix from XYZ (D65) to `output`'s primaries, by rows; 9's second the lift.
+## `out` is `film_print.print_atlas_width` × `print_atlas_rows` RGBA single floats.
+pub func pack(view: View, out: f32[], output: Output = Output.srgb, silver: f64 = 0.0, paper: PaperSettings = PaperSettings(),
+              material: i64 = 0):
+    for at in 0..<out.length:
+        out[at] = 0.0f32
+    if view == View.paper:
+        film_paper.pack(&paper, out)
+    else:
+        film_print.pack_projection(silver, material, out)
+    let m = xyz.xyz_to_rgb(primaries_of(output)).m
+    for row in 0..<(usize)3:
+        film_print.put(out, 2, 6 + row, m[row * 3], m[row * 3 + 1], m[row * 3 + 2], 0.0)
+    let at = (2 * film_print.print_atlas_width + 9) * 4
+    out[at + 1] = (f32)aces_lift
+
 ## Bake `view` into `table`: lut_size³ RGBA half floats laid out as a 2D image
 ## lut_size² wide and lut_size high, red fastest, blue choosing the slice.
 ## `silver`: a print's silver kept (the print view's bleach bypass, 0..1).
@@ -257,7 +281,7 @@ pub func bake(view: View, table: f16[], silver: f64 = 0.0, paper: PaperSettings 
         for g in 0..<n:
             for r in 0..<n:
                 let scene: f64[3] = [unshape((f64)r / (f64)(n - 1)), unshape((f64)g / (f64)(n - 1)), unshape((f64)b / (f64)(n - 1))]
-                let shown = display(view, scene, to_display, silver = silver, paper = paper, material = material)
+                let shown = display(view, scene, to_display, silver = silver, paper = paper, material = material, clip = false)
                 let at = (g * n * n + b * n + r) * 4
                 table[at] = (f16)shown[0]
                 table[at + 1] = (f16)shown[1]

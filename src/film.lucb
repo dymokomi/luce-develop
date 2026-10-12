@@ -184,12 +184,22 @@ pub func camera_settings(settings: const Settings*) -> Settings:
         out.set(.tint, 0.0)
     return out
 
-## Whether the negative is printed straight onto print film: the 2383 print
-## view with no scanner and no film recorder on the way (a lab's photochemical
-## chain), so the print stock sees the negative's dyes themselves.
-pub func prints_directly(settings: const Settings*) -> bool:
-    let direct = not settings.recipe.active((i64)recipe.Stage.scan) and not settings.recipe.active((i64)recipe.Stage.record)
-    return direct and settings.get(.view) == (f64)(i64)View.print
+## What a color negative is printed straight onto, with no scanner and no film
+## recorder on the way (a lab's or a darkroom's photochemical chain): 2383 in
+## the print view, a color paper in the paper view; so the print material sees
+## the negative's dyes themselves.
+pub let no_printing: i64 = 0
+pub let onto_print: i64 = 1
+pub let onto_paper: i64 = 2
+pub func printing_onto(settings: const Settings*) -> i64:
+    if settings.recipe.active((i64)recipe.Stage.scan) or settings.recipe.active((i64)recipe.Stage.record):
+        return no_printing
+    if settings.get(.view) == (f64)(i64)View.print:
+        return onto_print
+    let paper = (usize)math.clamp(settings.get(.paper_stock), 0.0, (f64)(film_stocks.paper_count - 1))
+    if settings.get(.view) == (f64)(i64)View.paper and film_stocks.paper_at(paper).kind == 1:
+        return onto_paper
+    return no_printing
 
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
 ## setting is one more), for building a menu.
@@ -277,11 +287,21 @@ pub struct Film:
     ## Whether the model is the stock cross-processed (film_develop.lucb).
     var cross: bool
     var on: bool
-    ## Whether the negative goes straight to print (`prints_directly`): the
-    ## table then holds what the print stock sees, not what a scanner reads.
-    var printing: bool
+    ## What the negative goes straight onto (`printing_onto`): nothing (a
+    ## scanner reads it), 2383, or a color paper (`paper`, whose table is
+    ## `paper_table`); the table then holds what that material sees.
+    var printing: i64
+    var paper: i64
+    var paper_table: f64[]
+
+    func release_paper_table():
+        if self.paper_table.length > 0:
+            free(self.paper_table) in memory.heap
+        var empty: f64[]
+        self.paper_table = empty
 
     pub func release():
+        self.release_paper_table()
         self.model.release()
         if self.texels.length > 0:
             free(self.texels) in memory.heap
@@ -310,17 +330,22 @@ pub struct Film:
             return
         let chosen = film_stocks.stock_at((usize)(choice - 1))
         let cross = film_develop.crossed(chosen.kind, film_develop.chosen_for(&chosen, settings.get(.develop_process)))
-        let printing = prints_directly(settings) and chosen.kind != 2 and (chosen.kind == 0 or cross)
-        let reprint = printing != self.printing
+        let printing = printing_onto(settings) if chosen.kind == 0 or cross else no_printing
+        let paper = (i64)settings.get(.paper_stock)
+        let reprint = printing != self.printing or (printing == onto_paper and paper != self.paper)
+        if paper != self.paper:
+            self.release_paper_table()
         self.printing = printing
+        self.paper = paper
         if choice != self.stock or cross != self.cross:
+            self.release_paper_table()
             self.model.release()
             self.model = try build_model(film_develop.cross_processed(chosen) if cross else chosen)
             self.stock = choice
             self.cross = cross
-            self.fill_model()
+            try self.fill_model()
         elif reprint:
-            self.fill_table()
+            try self.fill_table()
         self.on = true
         self.fill_settings(settings)
         self.fill_exposure(settings, &input)
@@ -398,17 +423,21 @@ pub struct Film:
         self.texels[at + 2] = (f32)b
         self.texels[at + 3] = (f32)a
 
-    func fill_model():
+    func fill_model() -> !:
         let model = &self.model
-        self.fill_table()
+        try self.fill_table()
         for at in 0..<curve_samples:
             self.put(neutral_row, at, model.neutral[at * 3], model.neutral[at * 3 + 1], model.neutral[at * 3 + 2], 1.0)
 
     ## The table over dye amounts: the scanner's densities, or what the print
-    ## stock sees when the negative prints directly.
-    func fill_table():
+    ## stock or the paper sees when the negative prints directly.
+    func fill_table() -> !:
         let model = &self.model
-        let table = model.printed if self.printing else model.scan
+        if self.printing == onto_paper and self.paper_table.length == 0:
+            let chosen = film_stocks.paper_at((usize)math.clamp((f64)self.paper, 0.0, (f64)(film_stocks.paper_count - 1)))
+            let meter = film_model.paper_printing(chosen.sensitivity)
+            self.paper_table = try film_model.printed_by(model, &meter)
+        let table = model.printed if self.printing == onto_print else (self.paper_table if self.printing == onto_paper else model.scan)
         let n = lut_size
         for b in 0..<n:
             for g in 0..<n:
@@ -579,14 +608,17 @@ pub struct Film:
             self.put(values_row, 64 + k, returned.offsets[k * 2], returned.offsets[k * 2 + 1], 0.0, 0.0)
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, 1.0 if row == 0 else 0.0, 1.0 if row == 1 else 0.0, 1.0 if row == 2 else 0.0, 0.0)
-        if self.printing:
+        if self.printing != no_printing:
             # Printing density goes to the print as it is, at the print view's
-            # 0.6 per decade about the normal negative's grey (film_print.lucb),
-            # where the printer lights put the print's mid-grey: no scanner's
-            # gamma, matrix or timing, only the printer lights (values 10).
+            # 0.6 per decade about the normal negative's grey (film_print.lucb,
+            # film_paper.lucb), where the printer lights or the enlarger's
+            # exposure put the print's mid-grey: no scanner's gamma, matrix or
+            # timing, only the printer lights (values 10). 2383 takes its
+            # layers' balance (`print_balance`); a paper's curves are its own.
             let at_grey = self.scan_of(self.balanced_grey(grey))
+            let balance: f64[3] = print_balance if self.printing == onto_print else [1.0, 1.0, 1.0]
             self.put(values_row, 7, at_grey[0], at_grey[1], at_grey[2], 1.0)
-            self.put(values_row, 8, print_balance[0] / 0.6, print_balance[1] / 0.6, print_balance[2] / 0.6, 0.0)
+            self.put(values_row, 8, balance[0] / 0.6, balance[1] / 0.6, balance[2] / 0.6, 0.0)
             self.put(values_row, 9, 0.0, 0.0, 0.0, 0.0)
             self.put(values_row, 10, lights[0], lights[1], lights[2], 0.0)
             self.put(values_row, 20, retained * silver_density, fog_density, edge, grown.edge_width)
@@ -1447,7 +1479,7 @@ test "2383's layers are balanced to print Vision3 250D's grey scale neutral":
         assert(false)
         return
     defer film.release()
-    assert(film.printing)
+    assert(film.printing == onto_print)
     let fitted = film.print_balance_of()
     var close = true
     for at in 0..<(usize)3:

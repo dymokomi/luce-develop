@@ -94,6 +94,9 @@ struct Developing:
     var view_baked: i64
     var tables_texture: gpu.Texture?
     var view_texture: gpu.Texture?
+    ## The print and paper views' data (view.lucb's `pack`): the GPU computes
+    ## them per pixel, as the CPU does, not through a table.
+    var print_texture: gpu.Texture?
     var film: Film
     var film_texture: gpu.Texture?
     var film_passes: FilmPasses
@@ -108,7 +111,7 @@ struct Developing:
         self.film.release()
         self.film_passes.release()
         self.filmed = none
-        for slot in [&self.tables_texture, &self.view_texture, &self.film_texture]:
+        for slot in [&self.tables_texture, &self.view_texture, &self.print_texture, &self.film_texture]:
             if let held = *slot:
                 var gone = held
                 gone.destroy()
@@ -332,7 +335,9 @@ pub struct Renderer:
             return
         let scene_texture = self.scene_texture else return
         let tables_texture = which.tables_texture else return
-        let view_texture = which.view_texture else return
+        let shown_view = which.settings.get(.view)
+        let printed_view = shown_view == (f64)(i64)View.print or shown_view == (f64)(i64)View.paper
+        let view_texture = (which.print_texture if printed_view else which.view_texture) else return
         let film_texture = which.film_texture else return
         let place = try checked.placement()
         let size = try checked.size()
@@ -465,7 +470,20 @@ pub struct Renderer:
             which.film_stale = true
         # The view and what its table depends on, as one key.
         let baked = view_key(&which.settings)
-        if which.view_texture == none or which.view_baked != baked:
+        let shown_view = (View)(i64)which.settings.get(.view)
+        let printed_view = shown_view == View.print or shown_view == View.paper
+        if printed_view and (which.print_texture == none or which.view_baked != baked):
+            let data = try new f32[film_print.print_atlas_width * film_print.print_atlas_rows * 4] --- in memory.heap
+            defer free(data) in memory.heap
+            view.pack(shown_view, data, silver = film_print.silver_kept(which.settings.get(.print_silver)),
+                      paper = film.paper_settings(&which.settings), material = (i64)which.settings.get(.print_material))
+            if which.print_texture == none:
+                which.print_texture = try gpu.Texture.create(device, (u32)film_print.print_atlas_width, (u32)film_print.print_atlas_rows,
+                                                             gpu.Format.rgba32_float)
+            let held = which.print_texture else return
+            try held.upload(u8[]((u8*)data.data, data.length * 4))
+            which.view_baked = baked
+        elif not printed_view and (which.view_texture == none or which.view_baked != baked):
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap

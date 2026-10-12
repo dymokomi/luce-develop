@@ -102,9 +102,10 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         let share = (f64)outliers / (f64)(shown.length // 4 * 3)
         # Film goes through nine half-float passes on the negative first, grain
         # included, so it may differ by a few levels more.
-        # The view the recipe renders with (a Project stage makes it the print's).
+        # The view the recipe renders with (a Project stage makes it the print's);
+        # only ACES goes through a table, the print and paper are per pixel.
         let view = compile(&settings).get(.view)
-        let tabled = view == 0.0 or view >= 3.0
+        let tabled = view == 0.0
         # A slide's curves are about three times a negative's slope near black,
         # and its development table (interimage-corrected, film.lucb) is
         # steepest in deep blues: the GPU's half-float chemistry fields (eight
@@ -114,12 +115,7 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         let stock = settings.get(.film_stock)
         let slide = stock > 0.0 and film.stock_kind((i64)stock - 1) == 1
         let limit = 40 if tabled else (20 if slide else (8 if stock > 0.0 else 3))
-        # A color paper's curves are the steepest a table follows (Endura's
-        # gamma near 2.6): a few more of its values miss by more than 6. The
-        # print view's 2383 is next (gamma near 3 in its deep shadows): dark,
-        # saturated film colors fall between its table's nodes a little more.
-        let allowed = 0.01 if settings.get(.paper_stock) >= 3.0 else (0.002 if view == 3.0 else 0.001)
-        let good = mean < 1.0 and share < allowed and largest < limit
+        let good = mean < 1.0 and share < 0.001 and largest < limit
         print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [{wanted}]  mean {mean}  over 6: {outliers}  largest {largest}")
         if not good:
             failed += 1

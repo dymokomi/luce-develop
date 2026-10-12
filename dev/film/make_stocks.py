@@ -697,6 +697,9 @@ pub struct PaperStock:
     pub var grades: f64[{PAPER_GRADES_MOST}]
     pub var curves: f64[{PAPER_GRADES_MOST * CURVE_MOST}]
     pub var dyes: f64[243]
+    ## A color paper's log10 spectral sensitivity per layer (red, green, blue):
+    ## what it sees of a negative (film_model.lucb's `paper_printing`).
+    pub var sensitivity: f64[243]
 
 pub let paper_count: usize = {len(PAPERS)}
 """
@@ -711,6 +714,7 @@ for key, kind, graphs in PAPERS:
     flat = sum((c + [c[-1]] * (CURVE_MOST - len(c)) for c in curves), [])
     grades = [g for _, _, g in graphs]
     dyes = sum((spectral(data['dyes']['nm'], data['dyes'][d], 0.0) for d in ('cyan', 'magenta', 'yellow')), []) if kind == 1 else [1.0] * 243
+    paper_sensitivity = sum((log_sensitivity(data['sensitivity']['nm'], data['sensitivity'][c]) for c in CHANNELS), []) if kind == 1 else [0.0] * 243
     body += f"""
 ## {data['name']}: {data['source']}
 pub func {key}() -> PaperStock:
@@ -723,7 +727,8 @@ pub func {key}() -> PaperStock:
         grade_count = {len(grades)},
         grades = {block(grades, PAPER_GRADES_MOST)},
         curves = {block(flat, PAPER_GRADES_MOST * CURVE_MOST)},
-        dyes = {block(dyes, 243)})
+        dyes = {block(dyes, 243)},
+        sensitivity = {block(paper_sensitivity, 243)})
 """
 body += f"""
 ## Paper `at` (0-based in the Paper menu's order).
