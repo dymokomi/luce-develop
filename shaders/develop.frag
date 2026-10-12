@@ -234,6 +234,54 @@ float paper_density(int grade, float log_e) {
     float t = place - below;
     return mix(print_value(3 + grade, int(below)).r, print_value(3 + grade, int(below) + 1).r, t);
 }
+// CAM16 (luce_color.cam16, as view.lucb's `as_displayed`): `xyz` (white at
+// Y = 1) as it looks where the print is seen (row 2, 15–17), shown as the color
+// that looks the same on the display (18–20): the same lightness, hue and
+// chroma (so the same alpha, J being the same).
+const vec3 m16_x = vec3(0.401288, 0.650173, -0.051461);
+const vec3 m16_y = vec3(-0.250268, 1.204414, 0.045854);
+const vec3 m16_z = vec3(-0.002079, 0.048952, 0.953127);
+const vec3 m16_inverse_x = vec3(1.862067855, -1.011254631, 0.149186775);
+const vec3 m16_inverse_y = vec3(0.387526543, 0.621447442, -0.008973985);
+const vec3 m16_inverse_z = vec3(-0.015841499, -0.034122938, 1.049964437);
+vec3 cam_response(vec3 v) {
+    vec3 m = pow(abs(v), vec3(0.42));
+    return sign(v) * 400.0 * m / (m + 27.13);
+}
+vec3 cam_unresponse(vec3 adapted, float fl) {
+    vec3 m = min(abs(adapted), vec3(399.99));
+    return sign(adapted) * 100.0 / fl * pow(27.13 * m / (400.0 - m), vec3(1.0 / 0.42));
+}
+vec3 as_displayed(vec3 xyz) {
+    vec4 s0 = print_value(2, 15), s1 = print_value(2, 16), s2 = print_value(2, 17);
+    vec4 t0 = print_value(2, 18), t1 = print_value(2, 19), t2 = print_value(2, 20);
+    vec3 v = xyz * 100.0;
+    vec3 cone = vec3(dot(m16_x, v), dot(m16_y, v), dot(m16_z, v));
+    vec3 adapted = cam_response(s0.w * s0.xyz * cone / 100.0);
+    float a = adapted.x + (-12.0 * adapted.y + adapted.z) / 11.0;
+    float b = (adapted.x + adapted.y - 2.0 * adapted.z) / 9.0;
+    float u = (20.0 * adapted.x + 20.0 * adapted.y + 21.0 * adapted.z) / 20.0;
+    float p2 = (40.0 * adapted.x + 20.0 * adapted.y + adapted.z) / 20.0;
+    float hue = atan(b, a);
+    float e_hue = 0.25 * (cos(hue + 2.0) + 3.8);
+    // J / 100 under the print's viewing; alpha (C over √(J/100)).
+    float j = pow(max(p2 * s1.x / s2.x, 0.0), s1.y * s1.z);
+    if (j <= 0.0) return vec3(0.0);
+    float t = 50000.0 / 13.0 * s1.w * s1.x * e_hue * length(vec2(a, b)) / (u + 0.305);
+    float alpha = pow(t, 0.9) * s2.y;
+    // Back under the display's.
+    float t_back = pow(alpha / t2.y, 1.0 / 0.9);
+    float p2_back = t2.x * pow(j, 1.0 / (t1.y * t1.z)) / t1.x;
+    float p1 = e_hue * (50000.0 / 13.0) * t1.w * t1.x;
+    float h_cos = cos(hue), h_sin = sin(hue);
+    float gamma = 23.0 * (p2_back + 0.305) * t_back / (23.0 * p1 + 11.0 * t_back * h_cos + 108.0 * t_back * h_sin);
+    float a_back = gamma * h_cos, b_back = gamma * h_sin;
+    vec3 back = vec3(460.0 * p2_back + 451.0 * a_back + 288.0 * b_back,
+                     460.0 * p2_back - 891.0 * a_back - 261.0 * b_back,
+                     460.0 * p2_back - 220.0 * a_back - 6300.0 * b_back) / 1403.0;
+    vec3 cone_back = cam_unresponse(back, t0.w) / t0.xyz;
+    return vec3(dot(m16_inverse_x, cone_back), dot(m16_inverse_y, cone_back), dot(m16_inverse_z, cone_back)) / 100.0;
+}
 vec3 printed(vec3 c) {
     vec3 lifted = c * print_value(2, 9).y;
     vec4 printer = print_value(2, 0);
@@ -264,6 +312,7 @@ vec3 printed(vec3 c) {
         float reflectance = pow(10.0, -mix(low, high, grades.z));
         shown = reflectance * vec3(0.95047, 1.0, 1.08883);
     }
+    shown = as_displayed(shown);
     vec3 rgb = vec3(dot(print_value(2, 6).xyz, shown), dot(print_value(2, 7).xyz, shown), dot(print_value(2, 8).xyz, shown));
     return clamp(rgb, 0.0, 1.0);
 }

@@ -117,8 +117,8 @@ struct Developing:
                 gone.destroy()
             *slot = none
 
-## What a view's table depends on, as one number: the view; the print's silver;
-## the paper's choices.
+## What a view's table or packed data depends on, as one number: the view;
+## the print's silver and material; the paper's choices.
 func view_key(settings: const Settings*) -> i64:
     var key = (i64)settings.get(.view)
     for parameter in [Parameter.print_silver, Parameter.paper_stock, Parameter.paper_grade, Parameter.paper_enlarger, Parameter.paper_exposure,
@@ -487,8 +487,7 @@ pub struct Renderer:
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
-            view.bake((View)(i64)which.settings.get(.view), table, film_print.silver_kept(which.settings.get(.print_silver)),
-                      film.paper_settings(&which.settings), (i64)which.settings.get(.print_material))
+            view.bake((View)(i64)which.settings.get(.view), table)
             if which.view_texture == none:
                 which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
             let held = which.view_texture else return

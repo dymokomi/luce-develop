@@ -53,8 +53,9 @@ pixel size only decides how finely the film is sampled.
    (±40 s around 3:15); D-76 time series for Acros, Tri-X and HP5; E-6 push
    speeds of EI 320/640/1000 at 8/11/14 min.
 
-3. **Spectral print chain** (done for 2383 printed straight from the
-   negative; paper prints come with part 8). The print exposure comes from the simulated
+3. **Spectral print chain** (done: 2383 printed straight from the negative
+   through printing density; color paper through its own layers' sensitivity
+   under a 3200 K enlarger lamp, part 8). The print exposure comes from the simulated
    negative's spectral density: lamp × printer filters × print-stock (or paper)
    sensitivity × 10^(−D_neg(λ)), with printer points of 0.025 log E. This
    replaces the Cineon-encoded scene. Exit tests: 2383 LAD aim of Status A
@@ -134,9 +135,21 @@ pixel size only decides how finely the film is sampled.
    shutter time (EXIF), calibrated to Kodak E-31 and Fujifilm tables; Velvia
    goes green past 4 s and Vision3 cyan past 1 s, as their filters say.
 
-8. **Viewing and paper.** Reflection prints computed spectrally with
-   Williams–Clapper/Shore–Spoonhower multiple internal reflection; projection
-   seen in a dark surround (CAM16 dark to dim).
+8. **Viewing and paper** (done). Reflection prints computed spectrally with
+   Williams–Clapper/Shore–Spoonhower multiple internal reflection (down at
+   28°, diffuse up, about 60 % turned back by the surface; base 0.9, an
+   estimate) and a 0.1 % surface reflection bounding D-max at 3.0, above
+   Endura's measured 2.66–2.76. Unmixing a paper's curves near D-max is
+   step-bounded (an unbounded Newton ran a layer's dye to thousands there).
+   Projection is seen at 48 cd/m² in a dark surround, a paper under 500 lux in
+   an average one, each carried to a 100 cd/m² display in a dim room by CAM16
+   with lightness, chroma and hue matched (luce_color.cam16.corresponding;
+   checked against colour-science): the print shows flatter (mid grey
+   18 → 21.7), the paper harder (18 → 13.5). The print and paper views run
+   per pixel on the GPU (no 64³ table), within the film's parity limits.
+   Still open: viewing flare in the room, the paper's own surface texture
+   (gloss, lustre, matte), and the observer's Hunt and Stevens effects,
+   which a relative match leaves out.
 
 ## Rendering: progressive and stochastic
 

@@ -28,6 +28,7 @@ from luce_std import math
 from luce_color import xyz
 from luce_color import aces
 from luce_color import transfer
+from luce_color import cam16
 from luce_std import parallel
 from settings import View
 import film_print
@@ -201,11 +202,8 @@ func apply(m: f64[9], r: f64, g: f64, b: f64) -> f64[3]:
 ## Scene light `rgb` (AP1) shown through `view` on `output`: display-linear in
 ## its primaries, 0..1. `to_display` is `working_to_output(output)`; `silver` the
 ## print view's silver kept (0..1).
-## `clip` false leaves the print's and the paper's colors beyond the display's
-## gamut unclipped (for the GPU's table, which clips after interpolating, so a
-## saturated color is not interpolated across the gamut's edge).
 pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = Output.srgb, silver: f64 = 0.0,
-                 paper: PaperSettings = PaperSettings(), material: i64 = 0, clip: bool = true) -> f64[3]:
+                 paper: PaperSettings = PaperSettings(), material: i64 = 0) -> f64[3]:
     if view == View.aces:
         # AP1 in, a stop brighter: ACES shows scene grey at 10 nits, a stop darker
         # than a camera's rendering, and photographs are exposed for cameras. Out:
@@ -222,11 +220,10 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
         # the print's gamut is mostly inside the display's.
         # Lifted a stop as for ACES: photographs are exposed for cameras.
         let lifted: f64[3] = [rgb[0] * aces_lift, rgb[1] * aces_lift, rgb[2] * aces_lift]
-        let shown = film_paper.printed(lifted, &paper) if view == View.paper else film_print.projected(lifted, silver, material)
+        let made = film_paper.printed(lifted, &paper) if view == View.paper else film_print.projected(lifted, silver, material)
+        let shown = as_displayed(made, viewing_of(view))
         let m = xyz.xyz_to_rgb(primaries_of(output)).m
         let c = apply(m, shown.x, shown.y, shown.z)
-        if not clip:
-            return c
         return [math.clamp(c[0], 0.0, 1.0), math.clamp(c[1], 0.0, 1.0), math.clamp(c[2], 0.0, 1.0)]
     var c = apply(to_display, rgb[0], rgb[1], rgb[2])
     if view == View.linear:
@@ -251,10 +248,50 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
         out[at] = math.clamp(kept + (toned - kept) * whiten, 0.0, 1.0)
     return out
 
+# mark: Viewing =================================================================
+
+## Where a print is seen, and the display that shows it, for CAM16
+## (luce_color.cam16): a print appears as its viewing makes it appear, and the
+## display shows the color that looks the same in its own (the same lightness,
+## chroma and hue, each relative to its white). A cinema's screen white is
+## SMPTE's 48 cd/m² (14 fL), in a dark surround: images look
+## flatter there (Bartleson and Breneman), which release prints' contrast
+## makes up for, so a display in a dim room shows them a little flatter. A
+## paper print on a wall under 500 lux (white about 143 cd/m²: 90 % reflected,
+## over π) is in an average surround: it looks more contrasty than on a
+## display, which shows it a little harder. The display: 100 cd/m² white (the
+## ACES view's), a dim room. Adapting luminance is a fifth of white (a grey
+## world), the background 20 %. Matching relative attributes, the levels
+## themselves matter little (only through the degree of adaptation); the
+## surround is what changes the picture.
+let screen_white: f64 = 48.0
+let room_lux: f64 = 500.0
+let display_white: f64 = 100.0
+let paper_white_reflectance: f64 = 0.9
+
+## The print's viewing conditions and the display's.
+pub struct Viewings:
+    pub var print: cam16.Viewing
+    pub var display: cam16.Viewing
+
+pub func viewing_of(view: View) -> Viewings:
+    let white = xyz.XYZ(95.047, 100.0, 108.883)
+    let projected = view == View.print
+    let luminance = screen_white if projected else room_lux * paper_white_reflectance / math.pi
+    return Viewings(print = cam16.viewing(white, 0.2 * luminance, 20.0, 0.0 if projected else 2.0),
+                    display = cam16.viewing(white, 0.2 * display_white, 20.0, 1.0))
+
+## `shown` (XYZ, the print's white at Y = 1, adapted to D65) as the display
+## shows it.
+func as_displayed(shown: xyz.XYZ, seen: Viewings) -> xyz.XYZ:
+    let matched = cam16.corresponding(xyz.XYZ(shown.x * 100.0, shown.y * 100.0, shown.z * 100.0), seen.print, seen.display)
+    return xyz.XYZ(matched.x / 100.0, matched.y / 100.0, matched.z / 100.0)
+
 ## The print and paper views' data for the GPU, which computes them per pixel
 ## (shaders/develop.frag's `printed`) as `display` does: the print's or the
 ## paper's model (film_print.lucb, film_paper.lucb), then at row 2: 6–8 the
-## matrix from XYZ (D65) to `output`'s primaries, by rows; 9's second the lift.
+## matrix from XYZ (D65) to `output`'s primaries, by rows; 9's second the lift;
+## 15–17 the print's viewing and 18–20 the display's (`put_viewing`).
 ## `out` is `film_print.print_atlas_width` × `print_atlas_rows` RGBA single floats.
 pub func pack(view: View, out: f32[], output: Output = Output.srgb, silver: f64 = 0.0, paper: PaperSettings = PaperSettings(),
               material: i64 = 0):
@@ -269,19 +306,28 @@ pub func pack(view: View, out: f32[], output: Output = Output.srgb, silver: f64 
         film_print.put(out, 2, 6 + row, m[row * 3], m[row * 3 + 1], m[row * 3 + 2], 0.0)
     let at = (2 * film_print.print_atlas_width + 9) * 4
     out[at + 1] = (f32)aces_lift
+    let seen = viewing_of(view)
+    put_viewing(out, 15, &seen.print)
+    put_viewing(out, 18, &seen.display)
+
+## CAM16 viewing conditions `v` at row 2 from `column`: the adaptation gains and
+## F_L; Nbb (= Ncb), c, z, Nc; A_w and (1.64 − 0.29ⁿ)^0.73.
+func put_viewing(out: f32[], column: usize, v: const cam16.Viewing*):
+    film_print.put(out, 2, column, v.rgb_d.x, v.rgb_d.y, v.rgb_d.z, v.fl)
+    film_print.put(out, 2, column + 1, v.nbb, v.c, v.z, v.nc)
+    film_print.put(out, 2, column + 2, v.aw, math.pow(1.64 - math.pow(0.29, v.n), 0.73), 0.0, 0.0)
 
 ## Bake `view` into `table`: lut_size³ RGBA half floats laid out as a 2D image
 ## lut_size² wide and lut_size high, red fastest, blue choosing the slice.
-## `silver`: a print's silver kept (the print view's bleach bypass, 0..1).
-## `paper`: how a paper print is made (the paper view).
-pub func bake(view: View, table: f16[], silver: f64 = 0.0, paper: PaperSettings = PaperSettings(), material: i64 = 0):
+## For the ACES, Standard and Linear views (the print and paper go per pixel).
+pub func bake(view: View, table: f16[]):
     let n = lut_size
     let to_display = working_to_display()
     for b in 0..<n:
         for g in 0..<n:
             for r in 0..<n:
                 let scene: f64[3] = [unshape((f64)r / (f64)(n - 1)), unshape((f64)g / (f64)(n - 1)), unshape((f64)b / (f64)(n - 1))]
-                let shown = display(view, scene, to_display, silver = silver, paper = paper, material = material, clip = false)
+                let shown = display(view, scene, to_display)
                 let at = (g * n * n + b * n + r) * 4
                 table[at] = (f16)shown[0]
                 table[at + 1] = (f16)shown[1]
@@ -347,3 +393,17 @@ test "display pictures come back unchanged through the ACES view":
                     worst = math.max(worst, math.abs(transfer.srgb_encode(shown[at]) - encoded[at]) * 255.0)
     print(f"ACES inverse round trip: worst {worst} levels")
     assert(worst < 0.5)
+
+test "a projected print shows a little lighter on a display, a print on a wall a little darker":
+    let to_display = working_to_display()
+    let grey: f64[3] = [0.18, 0.18, 0.18]
+    let lifted: f64[3] = [0.18 * aces_lift, 0.18 * aces_lift, 0.18 * aces_lift]
+    let projected = film_print.projected(lifted)
+    let shown = display(View.print, grey, to_display)
+    let shown_y = 0.2126 * shown[0] + 0.7152 * shown[1] + 0.0722 * shown[2]
+    assert(shown_y > projected.y * 1.05 and shown_y < projected.y * 1.4)
+    let paper = PaperSettings()
+    let on_wall = film_paper.printed(lifted, &paper)
+    let seen = display(View.paper, grey, to_display, paper = paper)
+    let seen_y = 0.2126 * seen[0] + 0.7152 * seen[1] + 0.0722 * seen[2]
+    assert(seen_y < on_wall.y * 0.95 and seen_y > on_wall.y * 0.6)

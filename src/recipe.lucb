@@ -64,7 +64,7 @@ let descriptions: str[16] = [
     "A scanner or telecine reads the film back to light: timing, contrast and black.",
     "The colorist's tools: tone, levels, curves, color, the mixer, wheels and black and white.",
     "The negative printed on Kodak Vision 2383 print film, timed with printer lights.",
-    "The print projected: a xenon arc, a little flare.",
+    "The print projected: a xenon arc, a little flare, a dark cinema.",
     "A slide on a D50 light table.",
     "The scan shown on a display: ACES 2.0, Standard or Linear.",
     "The frame: perspective, crop and a vignette.",
