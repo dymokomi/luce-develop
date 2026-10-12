@@ -319,13 +319,31 @@ void main() {
                     vec3 place_amounts;
                     vec3 place_effective;
                     developed(ivec2(floor((centre - 1.0) * cell / pitch)), place_amounts, place_effective);
-                    vec3 strength = vec3(hashed(k + uvec2(0u, 0x85ebca6bu)), hashed(k + uvec2(7919u, 0x85ebca6bu + 104729u)),
-                                         hashed(k + uvec2(15838u, 0x85ebca6bu + 209458u))) * 2.0 - 1.0;
-                    // Black and white: one grain of silver for all three.
-                    if (kind > 1.5) strength = vec3(strength.r);
-                    vec3 amplitude = film_curve(35.0, place_effective) * scale;
-                    sum += w * (place_amounts + strength * amplitude);
-                    spread += w * amplitude;
+                    // The cloud's grains, many per population: the share
+                    // developed spreads binomially about P, by a deviate fixed
+                    // for the site (film.lucb's `clouded`); black and white:
+                    // one realization of silver for all three layers.
+                    vec3 noise = vec3(0.0);
+                    vec3 variance = vec3(0.0);
+                    for (int layer = 0; layer < 3; layer++) {
+                        uint grain_layer = kind > 1.5 ? 0u : uint(layer);
+                        for (int pop = 0; pop < 3; pop++) {
+                            vec4 v = film_value(320.0 + float(layer * 3 + pop));
+                            float share = 1.0 / (1.0 + exp(-(place_effective[layer] - v.x) / v.y));
+                            uint index = grain_layer * 3u + uint(pop);
+                            float first = hashed(k + uvec2(index * 7919u, 0x85ebca6bu + index * 104729u));
+                            float second = hashed(k + uvec2(index * 7919u + 0x632be5abu, 0x85ebca6bu + index * 104729u));
+                            float deviate = sqrt(-2.0 * log(max(first, 1e-7))) * cos(6.283185307179586 * second);
+                            float spread = share * (1.0 - share);
+                            noise[layer] += v.z * sqrt(spread) * deviate;
+                            variance[layer] += v.z * v.z * spread;
+                        }
+                    }
+                    // A slide's developed grains take dye away (the first developer's).
+                    float sign_of = kind > 0.5 && kind < 1.5 ? -1.0 : 1.0;
+                    vec3 corrected = film_curve(35.0, place_effective) * scale;
+                    sum += w * (place_amounts + sign_of * noise * corrected);
+                    spread += w * sqrt(3.0 * variance) * corrected;
                     total += w;
                 }
             }

@@ -102,7 +102,14 @@ pixel size only decides how finely the film is sampled.
    dye actually formed (not the uninhibited curve), and single-float compute
    for the fields (half floats limit the GPU to eight steps).
 
-5. **Grain populations.** Each colour record holds two or three emulsion
+5. **Grain populations** (done in a first form: three populations per layer
+   fitted to the curve, their strengths to the published RMS, an exact
+   correction per log H; each dye-cloud site holds many grains of each, the
+   share developed spreading binomially about P by a deviate fixed for the
+   site, so the emulsion is one realization across exposure and development.
+   Still open: explicit grains when a pixel is finer than a grain, coupler
+   saturation at high density, two-scale cloud clusters, and single-float
+   compute shared with part 4). Each colour record holds two or three emulsion
    populations (fast, mid, slow) as a persistent marked point process in
    µm: positions, sizes (T-grain plates or cubic), sensitivity class. Exposure
    makes Poisson photon catches; a grain is developable past its threshold

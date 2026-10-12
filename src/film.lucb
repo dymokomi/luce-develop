@@ -55,7 +55,8 @@
 ##          columns b·33.., red (cyan) along a slice, green (magenta) by row
 ##   33     neutral development: dye amounts over log H (−4.5..2.5), 1024 samples
 ##   34     development under inhibition: amounts over the effective log H
-##   35     rms granularity (48 µm) over log H
+##   35     the grain populations' correction to the rms granularity (48 µm)
+##          over log H
 ##   36     values: 0–2 the matrix from AP1 back to the camera's values, by
 ##          rows; 3–5 the inhibition matrix; 6 grey's log H, top, the frame
 ##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
@@ -75,7 +76,10 @@
 ##          misses, so the two together hold it to about 22 bits (the weights
 ##          partly cancel, and grey must land exactly); 48–50 reciprocity
 ##          failure's q, p, t0 for the red, green and blue layers; 51 the
-##          exposure time (s); 64–319 the halation's samples, offsets in µm
+##          exposure time (s); 52–54 the development's kinetics; 64–319 the
+##          halation's samples, offsets in µm; 320–328 the grain populations,
+##          per layer three: where half develop (log H), how gradually, and
+##          their strength
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -89,6 +93,7 @@ import film_stocks
 import film_develop
 import film_paper
 from film_develop import Development
+import film_model
 from film_model import Model, build_model, invert3, log_h_at, lut_size, curve_samples, log_low, log_high
 import film_exposure
 import film_halation
@@ -450,6 +455,24 @@ pub struct Film:
                 for layer in 0..<(usize)3:
                     grows[layer] = grown.factor(layer, x)
             self.put(grain_row, at, grain[0] * coarse * grows[0], grain[1] * coarse * grows[1], grain[2] * coarse * grows[2], 1.0)
+        # The grain populations' strengths, fitted to that granularity; then
+        # the grain row becomes what still corrects them to it exactly at each
+        # log H (three populations of fixed shape come within a few percent).
+        let strengths = population_amplitudes(model, self.texels)
+        for layer in 0..<(usize)3:
+            for p in 0..<(usize)3:
+                let at = layer * 3 + p
+                self.put(values_row, 320 + at, model.populations[layer * 6 + p * 2], model.populations[layer * 6 + p * 2 + 1], strengths[at], 0.0)
+        for at in 0..<curve_samples:
+            var correction: f64[3]
+            for layer in 0..<(usize)3:
+                let amplitude = (f64)self.texels[(grain_row * atlas_width + at) * 4 + layer]
+                var variance = 0.0
+                for p in 0..<(usize)3:
+                    let share = film_model.developed_share(model.populations, layer, p, log_h_at(at))
+                    variance += strengths[layer * 3 + p] * strengths[layer * 3 + p] * share * (1.0 - share)
+                correction[layer] = math.clamp(math.sqrt(amplitude * amplitude / 3.0 / math.max(variance, 1.0e-12)), 0.0, 8.0) if amplitude > 0.0 else 0.0
+            self.put(grain_row, at, correction[0], correction[1], correction[2], 1.0)
         # Inhibition, and the development corrected for it: a neutral at log H x
         # develops at x − D·a(x); tabulate the inverse so it still reaches a(x).
         let strength = settings.get(.film_interimage) / 100.0
@@ -714,6 +737,73 @@ pub struct Film:
         return [near_slice[0] + (far_slice[0] - near_slice[0]) * t, near_slice[1] + (far_slice[1] - near_slice[1]) * t, near_slice[2] + (far_slice[2] - near_slice[2]) * t]
 
 ## Layer `layer`'s effective log H for neutral sample `at` under interimage `dir`.
+## The strength of each layer's three grain populations (film_model.lucb's
+## `fit_populations`): fitted (least squares, none negative) so the spread of
+## their grains developing, A²·P·(1 − P) summed, has the variance the
+## granularity table (`texels`' grain row: the published rms granularity, as
+## development and the process change it) gives a cloud of uniform random
+## strength, amplitude²/3, at every log H of the layer's curve.
+func population_amplitudes(model: const Model*, texels: const f32[]) -> f64[9]:
+    var out: f64[9]
+    for layer in 0..<(usize)3:
+        var normal: f64[9]
+        var right: f64[3]
+        for k in 0..<(usize)9:
+            normal[k] = 0.0
+        for k in 0..<(usize)3:
+            right[k] = 0.0
+        var at: usize = 0
+        while at < curve_samples:
+            let log_h = log_h_at(at)
+            let amplitude = (f64)texels[(grain_row * atlas_width + at) * 4 + layer]
+            let target = amplitude * amplitude / 3.0
+            var basis: f64[3]
+            for p in 0..<(usize)3:
+                let share = film_model.developed_share(model.populations, layer, p, log_h)
+                basis[p] = share * (1.0 - share)
+            for a in 0..<(usize)3:
+                for b in 0..<(usize)3:
+                    normal[a * 3 + b] += basis[a] * basis[b]
+                right[a] += basis[a] * target
+            at += 8
+        let squares = nonnegative3(normal, right)
+        for p in 0..<(usize)3:
+            out[layer * 3 + p] = math.sqrt(squares[p])
+    return out
+
+## The least-squares solution of the 3 × 3 normal equations with none negative:
+## of every subset of the three left free (the rest zero), the best.
+func nonnegative3(normal: f64[9], right: f64[3]) -> f64[3]:
+    var best: f64[3] = [0.0, 0.0, 0.0]
+    var best_cost = 1.0e300
+    for mask in 1..<8:
+        var m: f64[9]
+        var v: f64[3]
+        for a in 0..<(usize)3:
+            let free_a = ((mask >> (i64)a) & 1) == 1
+            v[a] = right[a] if free_a else 0.0
+            for b in 0..<(usize)3:
+                let free_b = ((mask >> (i64)b) & 1) == 1
+                m[a * 3 + b] = normal[a * 3 + b] if free_a and free_b else (1.0 if a == b else 0.0)
+        let solved = invert3(m) else continue
+        var x: f64[3]
+        var fine = true
+        for a in 0..<(usize)3:
+            x[a] = solved[a * 3] * v[0] + solved[a * 3 + 1] * v[1] + solved[a * 3 + 2] * v[2]
+            fine = fine and x[a] >= 0.0
+        if not fine:
+            continue
+        # The cost up to a constant: x·N·x − 2·x·r.
+        var cost = 0.0
+        for a in 0..<(usize)3:
+            for b in 0..<(usize)3:
+                cost += x[a] * normal[a * 3 + b] * x[b]
+            cost -= 2.0 * x[a] * right[a]
+        if cost < best_cost:
+            best_cost = cost
+            best = x
+    return best
+
 ## How many steps development runs in (film_passes.lucb, film.frag): enough
 ## for the release's smooth course over time; more would let the GPU's half
 ## floats drift from the CPU (each step rounds the fields three times).
@@ -930,8 +1020,8 @@ pub func release(film: const Film*, e: f64[3], begun: f64, reached: f64, keep: f
 ## The negative as dye clouds, at (`x`, `y`) µm on it: one cloud per cell (the
 ## stock's spacing, or a pixel of `pitch` µm when that is wider) at a random place in it, each
 ## taking the developed film at its own centre (`field`, from `context`) plus
-## its grain, a random strength (−1..1, per layer) times the stock's granularity
-## there; the point is the clouds around it blended by Gaussians half a cell
+## its grain, the spread in how many of its grains developed (per population,
+## `population_amplitudes`); the point is the clouds around it blended by Gaussians half a cell
 ## wide (the stock's width: Acros's are narrow, crisp). So the image is made of the clouds: nothing finer than them survives,
 ## and the grain follows what is on the negative. The second result is what
 ## inverting the grain would add on average, which the scan takes back off (the
@@ -966,10 +1056,28 @@ pub func clouded(film: const Film*, x: f64, y: f64, pitch: f64, field: func(void
             for k in 0..<(usize)3:
                 # Black and white has one layer of silver: one grain for all three.
                 let layer = (u32)k if not monochrome else 0
-                let strength = hashed(kx +% layer *% 7919, ky +% 0x85ebca6b +% layer *% 104729) * 2.0 - 1.0
-                let amplitude = film.curve(grain_row, k, place.effective[k]) * scale
-                sum[k] += w * (place.amounts[k] + strength * amplitude)
-                spread[k] += w * amplitude
+                # The cloud's grains, many per population: the share of them
+                # developed at this exposure, P, is P plus the binomial spread
+                # √(P(1 − P)) times a deviate fixed for the site and population
+                # (the emulsion is one realization: more exposure or development
+                # develops more of the same grains).
+                var noise = 0.0
+                var variance = 0.0
+                for p in 0..<(usize)3:
+                    let population = film.value(320 + k * 3 + p)
+                    let share = 1.0 / (1.0 + math.exp(-(place.effective[k] - population[0]) / population[1]))
+                    let index = layer *% 3 +% (u32)p
+                    let first = hashed(kx +% index *% 7919, ky +% 0x85ebca6b +% index *% 104729)
+                    let second = hashed(kx +% index *% 7919 +% 0x632be5ab, ky +% 0x85ebca6b +% index *% 104729)
+                    let deviate = math.sqrt(-2.0 * math.log(math.max(first, 1.0e-7))) * math.cos(2.0 * math.pi * second)
+                    let binomial = share * (1.0 - share)
+                    noise += population[2] * math.sqrt(binomial) * deviate
+                    variance += population[2] * population[2] * binomial
+                # A slide's developed grains take dye away (the first developer's).
+                let sign = -1.0 if kind == 1 else 1.0
+                let corrected = film.curve(grain_row, k, place.effective[k]) * scale
+                sum[k] += w * (place.amounts[k] + sign * noise * corrected)
+                spread[k] += w * math.sqrt(3.0 * variance) * corrected
             total += w
     var amounts: f64[3]
     var unbias: f64[3]
@@ -1245,7 +1353,8 @@ test "grain through a 48 µm aperture reads its granularity, soft clouds or cris
         let e = expose(&film, [0.18, 0.18, 0.18])
         let held = neutral(&film, e)
         var here = developed(&film, e, held, exhaustion(&film, held))
-        let wanted = film.curve(grain_row, 1, here.effective[1])
+        # The published rms granularity there (normal development, as here).
+        let wanted = along_model(film.model.grain, here.effective[1])[1]
         var sum = 0.0
         var squares = 0.0
         let blocks = 30
@@ -1352,3 +1461,31 @@ test "2383's layers are balanced to print Vision3 250D's grey scale neutral":
         let v = 0.18 * math.exp2(k)
         let out = develop(&film, [v, v, v], 0.5, 0.5, 20.0)
         assert(math.abs(math.log2(out[0] / out[1])) < 0.08 and math.abs(math.log2(out[2] / out[1])) < 0.08)
+
+test "a push develops more of the same grains: its grain follows the normal one's":
+    var noises: f64[800]
+    for (index, minutes) in [0.0, 5.0].indexed():
+        var settings = defaults_with_film()
+        settings.set(.film_stock, 3.0)
+        settings.set(.develop_time, minutes)
+        var film = Film()
+        film.prepare(&settings) catch failure:
+            assert(false)
+            return
+        defer film.release()
+        let e = expose(&film, [0.09, 0.09, 0.09])
+        let held = neutral(&film, e)
+        var here = developed(&film, e, held, exhaustion(&film, held) * film.value(54)[3])
+        for at in 0..<400:
+            let (amounts, _) = clouded(&film, (f64)(at % 20) * 3.0, (f64)(at // 20) * 3.0, 3.0, same_everywhere, (void*)&here)
+            noises[(usize)index * 400 + (usize)at] = amounts[1] - here.amounts[1]
+    var ab = 0.0
+    var aa = 0.0
+    var bb = 0.0
+    for at in 0..<400:
+        ab += noises[at] * noises[400 + at]
+        aa += noises[at] * noises[at]
+        bb += noises[400 + at] * noises[400 + at]
+    let correlation = ab / math.sqrt(aa * bb)
+    print(f"grain normal against pushed: correlation {correlation}")
+    assert(correlation > 0.7)

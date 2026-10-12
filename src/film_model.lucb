@@ -102,6 +102,10 @@ pub struct Model:
     ## Neutral dye amounts over log H (1024 × 3), and rms granularity.
     pub var neutral: f64[]
     pub var grain: f64[]
+    ## The emulsion's grain populations (`fit_populations`): per layer, three
+    ## (fast, mid, slow), each the log H where half its grains develop and how
+    ## gradually (a logistic's width), six numbers a layer.
+    pub var populations: f64[18]
     ## The scan: densities over dye amounts 0..top (33³ × 3), r fastest; and the
     ## printing densities a print stock sees, the same way.
     pub var scan: f64[]
@@ -397,7 +401,47 @@ pub func build_model(stock: Stock) -> Model!:
                 out.printed[at + 1] = printed[1]
                 out.printed[at + 2] = printed[2]
     fit_sharpness(&out)
+    fit_populations(&out)
     return out
+
+# mark: Grain populations ======================================================
+
+## Each layer's emulsion as three populations of grains, as Kodak coats each
+## color record in fast, mid and slow layers ("the highest speed emulsion layer
+## creates the portion of the characteristic curve just above the minimum
+## density", US 6,686,136): the fast population's grains develop first, in the
+## toe, the slow one's last. Each population develops over log H as a
+## logistic, placed where the layer's curve has come a sixth, a half and five
+## sixths of the way, as wide as the curve takes over its third. A dye cloud's
+## site holds many grains of each; how many develop spreads binomially, so
+## grain is largest where a population is half developed;
+## its strength per population is fitted to the published granularity
+## (film.lucb's `population_amplitudes`).
+func fit_populations(model: Model*):
+    for layer in 0..<(usize)3:
+        let low = model.neutral[layer]
+        let high = model.neutral[(curve_samples - 1) * 3 + layer]
+        let span = high - low
+        var crossings: f64[7]
+        for c in 0..<(usize)7:
+            let level = (f64)c / 6.0
+            var found = log_low if span >= 0.0 else log_high
+            for at in 1..<curve_samples:
+                let a = (model.neutral[(at - 1) * 3 + layer] - low) / (span if math.abs(span) > 1.0e-9 else 1.0)
+                let b = (model.neutral[at * 3 + layer] - low) / (span if math.abs(span) > 1.0e-9 else 1.0)
+                if a < level and b >= level:
+                    found = log_h_at(at - 1) + (level - a) / math.max(b - a, 1.0e-12) * (log_h_at(at) - log_h_at(at - 1))
+                    break
+            crossings[c] = found
+        for p in 0..<(usize)3:
+            model.populations[layer * 6 + p * 2] = crossings[2 * p + 1]
+            model.populations[layer * 6 + p * 2 + 1] = math.max((crossings[2 * p + 2] - crossings[2 * p]) / 4.4, 0.03)
+
+## How much of population `p` of layer `layer` has developed at log H `log_h`.
+pub func developed_share(populations: const f64[18], layer: usize, p: usize, log_h: f64) -> f64:
+    let middle = populations[layer * 6 + p * 2]
+    let width = populations[layer * 6 + p * 2 + 1]
+    return 1.0 / (1.0 + math.exp(-(log_h - middle) / width))
 
 # mark: Sharpness ===============================================================
 
