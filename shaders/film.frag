@@ -71,13 +71,25 @@ float hashed(uvec2 p) {
     x ^= x >> 16; x *= 0x7feb352du; x ^= x >> 15; x *= 0x846ca68bu; x ^= x >> 16;
     return float(x >> 8) / 16777216.0;
 }
-float film_noise(vec2 p, uint seed) {
-    uvec2 cell = uvec2(floor(p)) + seed * uvec2(7919u, 104729u);
-    vec2 f = p - floor(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float top = mix(hashed(cell), hashed(cell + uvec2(1u, 0u)), f.x);
-    float bottom = mix(hashed(cell + uvec2(0u, 1u)), hashed(cell + uvec2(1u, 1u)), f.x);
-    return mix(top, bottom, f.y) * 2.0 - 1.0;
+// Grain: one dye cloud per cell (film.lucb's `noise`).
+float film_noise(vec2 at_p, uint seed) {
+    vec2 p = at_p + 1.0;
+    ivec2 c = ivec2(floor(p));
+    float sum = 0.0;
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            uvec2 k = uvec2(c + ivec2(dx, dy)) + seed * uvec2(7919u, 104729u);
+            vec2 at = vec2(c + ivec2(dx, dy)) + vec2(hashed(k), hashed(k + uvec2(0x9e3779b9u, 0u)));
+            float strength = hashed(k + uvec2(0u, 0x85ebca6bu)) * 2.0 - 1.0;
+            vec2 d = p - at;
+            sum += strength * exp(-2.0 * dot(d, d));
+        }
+    }
+    return sum;
+}
+float grain_gain(float cell) {
+    float side = 42.5 / cell;
+    return side / (0.86 * (1.0 - exp(-max(side, 1.0) / 1.55)));
 }
 
 vec3 fetch(sampler2D image, ivec2 at) {
@@ -156,9 +168,9 @@ void main() {
             float pitch = params.halo.w;
             float cell = max(16.0, pitch);
             vec2 p = (vec2(at) + 0.5) * pitch / cell;
-            vec3 amplitude = film_curve(83.0, effective) * (v6.w * 80.0 / cell);
+            vec3 amplitude = film_curve(83.0, effective) * (v6.w * grain_gain(cell));
             amounts += vec3(film_noise(p, 0u), film_noise(p, 1u), film_noise(p, 2u)) * amplitude;
-            vec3 sigma = 0.428 * amplitude;
+            vec3 sigma = 0.509 * amplitude;
             unbias = 0.5 * 2.302585092994046 * v8.rgb * sigma * sigma;
         }
         vec3 d = film_scan(amounts, v6.y);

@@ -94,8 +94,8 @@ let halation_spread: f64 = 70.0
 
 ## Grain cells are at least this big on the negative (µm): the dye clouds of a
 ## fast negative, so finer pixels see clumps of grain, not pixel noise. The
-## grain's amplitude is calibrated so a 48 µm aperture reads the stock's rms
-## granularity whatever the cell (an estimate of their size).
+## grain's strength is calibrated so a 48 µm aperture reads the stock's rms
+## granularity whatever the cell (`grain_gain`; the size is an estimate).
 let grain_cell: f64 = 16.0
 
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
@@ -369,17 +369,37 @@ func hashed(px: u32, py: u32) -> f64:
     x = x ^ (x >> 16)
     return (f64)(x >> 8) / 16777216.0
 
-## Smooth value noise, about −1..1, at (`x`, `y`) cells; `seed` picks a layer.
-func noise(x: f64, y: f64, seed: u32) -> f64:
-    let cx = (u32)math.floor(x) +% seed *% 7919
-    let cy = (u32)math.floor(y) +% seed *% 104729
-    var fx = x - math.floor(x)
-    var fy = y - math.floor(y)
-    fx = fx * fx * (3.0 - 2.0 * fx)
-    fy = fy * fy * (3.0 - 2.0 * fy)
-    let top = hashed(cx, cy) + (hashed(cx + 1, cy) - hashed(cx, cy)) * fx
-    let bottom = hashed(cx, cy + 1) + (hashed(cx + 1, cy + 1) - hashed(cx, cy + 1)) * fx
-    return (top + (bottom - top) * fy) * 2.0 - 1.0
+## Grain at (`x`, `y`) in cells, for layer `seed`: one dye cloud per cell, at a
+## random place in it with a random strength (−1..1), each a Gaussian half a
+## cell wide, summed over the neighbouring cells. Round clumps, the same from
+## any direction. Its spread at a point is 0.509 of the strength's.
+func noise(at_x: f64, at_y: f64, seed: u32) -> f64:
+    # One cell in, so the neighbours of the first cells are not negative.
+    let x = at_x + 1.0
+    let y = at_y + 1.0
+    let cx = (i64)math.floor(x)
+    let cy = (i64)math.floor(y)
+    var sum = 0.0
+    for dy in -1..=1:
+        for dx in -1..=1:
+            let kx = (u32)(cx + dx) +% seed *% 7919
+            let ky = (u32)(cy + dy) +% seed *% 104729
+            let px = (f64)(cx + dx) + hashed(kx, ky)
+            let py = (f64)(cy + dy) + hashed(kx +% 0x9e3779b9, ky)
+            let strength = hashed(kx, ky +% 0x85ebca6b) * 2.0 - 1.0
+            let r2 = (x - px) * (x - px) + (y - py) * (y - py)
+            sum += strength * math.exp(-2.0 * r2)
+    return sum
+
+## How strong grain cells of `cell` µm must be for a 48 µm aperture (a 42.5 µm
+## square of the same area) over them to read a granularity of 1: measured on
+## `noise`, 0.86·(1 − e^(−s/1.55))/s for an aperture s cells wide, within 7%;
+## cells wider than the aperture are pixels, whose own spread then follows it.
+func grain_gain(cell: f64) -> f64:
+    let side = 42.5 / cell
+    if side >= 1.0:
+        return side / (0.86 * (1.0 - math.exp(-side / 1.55)))
+    return side / (0.86 * (1.0 - math.exp(-1.0 / 1.55)))
 
 ## The three layers' exposure to scene light `c` (AP1): relative, 0.18 for a
 ## grey card at normal exposure (film.frag's `expose`).
@@ -424,16 +444,16 @@ pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch:
     # Grain, and what it would add on average once inverted: the scan inverts
     # density exponentially, so even noise would brighten each channel by
     # exp((ln 10·γ⁻¹·σ)² / 2), which a scanner averaging light over the grain
-    # does not do. The density makes up for it (σ the noise's own spread: the
-    # value noise's 0.428 of its amplitude).
+    # does not do. The density makes up for it (σ the noise's own spread at a
+    # point, 0.509 of its strength).
     var unbias: f64[3] = [0.0, 0.0, 0.0]
     if v6[3] > 0.0 and matrix:
         let cell = math.max(grain_cell, pitch)
-        let scale = v6[3] * 80.0 / cell
+        let scale = v6[3] * grain_gain(cell)
         for k in 0..<(usize)3:
             let amplitude = film.curve(grain_row, k, effective_h[k]) * scale
             amounts[k] += noise(x * pitch / cell, y * pitch / cell, (u32)k) * amplitude
-            let sigma = 0.428 * amplitude
+            let sigma = 0.509 * amplitude
             unbias[k] = 0.5 * 2.302585092994046 * v8[k] * sigma * sigma
     let d = film.scanned_lut(amounts, v6[1])
     let v7 = film.value(7)
@@ -568,6 +588,26 @@ test "grain leaves a patch's average color where it was":
             means[index * 3 + k] = sum[k]
     for k in 0..<(usize)3:
         assert(math.abs(means[3 + k] / means[k] - 1.0) < 0.04)
+
+test "grain through a 48 µm aperture reads its granularity":
+    # 16 µm cells sampled every 2 µm, averaged over 21 × 21 samples (42 µm).
+    var sum = 0.0
+    var squares = 0.0
+    let blocks = 40
+    for by in 0..<blocks:
+        for bx in 0..<blocks:
+            var mean = 0.0
+            for y in 0..<21:
+                for x in 0..<21:
+                    let px = (f64)(bx * 21 + x) * 2.0 / 16.0
+                    let py = (f64)(by * 21 + y) * 2.0 / 16.0
+                    mean += noise(px, py, 1) * grain_gain(16.0) / 441.0
+            sum += mean
+            squares += mean * mean
+    let count = (f64)(blocks * blocks)
+    let deviation = math.sqrt(squares / count - (sum / count) * (sum / count))
+    print(f"grain through 42 µm: {deviation}")
+    assert(math.abs(deviation - 1.0) < 0.12)
 
 func defaults_with_film() -> Settings:
     var out = defaults()
