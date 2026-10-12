@@ -1,6 +1,6 @@
-## Film on the negative, on the CPU: shaders/film.frag's passes step for step, at
-## the scene's own size, each pass's output rounded to half floats as the GPU's
-## textures hold it. `filmed` turns a scene into the filmed one, which the
+## Film on the negative, on the CPU: shaders/film_stages.glsl's passes step for
+## step, at the scene's own size, each pass's output in single floats as the
+## GPU's textures hold it. `filmed` turns a scene into the filmed one, which the
 ## develop then draws with the identity for its matrix and no lens vignetting
 ## (film did both). `plan_for` sizes the blurs for both paths.
 ##
@@ -121,9 +121,9 @@ struct Pass:
     var film: const Film*
     var width: usize
     var height: usize
-    var first: const f16[]
-    var second: const f16[]
-    var out: f16[]
+    var first: const f32[]
+    var second: const f32[]
+    var out: f32[]
     ## Stage 0: the scene, its matrix into AP1, the tables (lens vignetting) and
     ## the output's aspect.
     var source: const Scene*
@@ -157,11 +157,11 @@ struct Pass:
     ## Fewer developed clouds a pixel than this: traced (tests trace all).
     var traced_below: f64 = film_grains.gaussian_from
 
-func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
+func texel(image: const f32[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
     let at = place(width, height, x, y)
     return [(f64)image[at], (f64)image[at + 1], (f64)image[at + 2]]
 
-func alpha(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64:
+func alpha(image: const f32[], width: usize, height: usize, x: i64, y: i64) -> f64:
     return (f64)image[place(width, height, x, y) + 3]
 
 ## Texel (`x`, `y`)'s first value, held at the edges.
@@ -170,7 +170,7 @@ func place(width: usize, height: usize, x: i64, y: i64) -> usize:
     let cy = (usize)(0 if y < 0 else (y if y < (i64)height else (i64)height - 1))
     return (cy * width + cx) * 4
 
-func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[4]:
+func blurred(pass: const Pass*, image: const f32[], x: i64, y: i64) -> f64[4]:
     var sum: f64[4] = [0.0, 0.0, 0.0, 0.0]
     var weights: f64[4] = [0.0, 0.0, 0.0, 0.0]
     let r = (i64)pass.blur.radius
@@ -187,8 +187,8 @@ func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[4]:
     return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2], sum[3] / weights[3]]
 
 ## `image` (`width` × `height`) at (`x`, `y`) in texels, bilinear between texel
-## centres, held at the edges (film.frag's `bilinear`).
-func bilinear(image: const f16[], width: usize, height: usize, x: f64, y: f64) -> f64[3]:
+## centres, held at the edges (film_stages.glsl's `bilinear`).
+func bilinear(image: const f32[], width: usize, height: usize, x: f64, y: f64) -> f64[3]:
     let bx = math.floor(x)
     let by = math.floor(y)
     let fx = x - bx
@@ -298,10 +298,10 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
                 out = film.scan(pass.film, e, held, alpha(pass.second, pass.width, pass.height, x, y), (f64)column + 0.5, (f64)row + 0.5, pass.pitch,
                                 share = pass.share)
         let at = (row * pass.width + column) * 4
-        pass.out[at] = (f16)out[0]
-        pass.out[at + 1] = (f16)out[1]
-        pass.out[at + 2] = (f16)out[2]
-        pass.out[at + 3] = (f16)spent
+        pass.out[at] = (f32)out[0]
+        pass.out[at + 1] = (f32)out[1]
+        pass.out[at + 2] = (f32)out[2]
+        pass.out[at + 3] = (f32)spent
 
 ## What the film says at a grain's centre (`x`, `y` µm) for layer `layer`
 ## (film_grains.lucb's `clouds`): its populations' shares developed and the
@@ -369,7 +369,7 @@ func stochastic_reading(pass: const Pass*, column: usize, row: usize) -> (f64[3]
             let x = ((f64)column + ox) * pass.pitch
             let y = ((f64)row + oy) * pass.pitch
             let clouds = film_grains.dye_at(gathered, count, x, y)
-            # Light over the developed film's (film.frag keeps it near 1, in half floats).
+            # Light over the developed film's (near 1).
             for c in 0..<(usize)3:
                 var d = 0.0
                 for layer in 0..<(usize)3:
@@ -473,13 +473,13 @@ pub func filmed(source: Film*, scene: const Scene*, matrix: f64[9], tables: cons
     let height = (usize)scene.height()
     let size = width * height * 4
     let plan = plan_for(source, width)
-    let exposed = try new f16[size] --- in memory.heap
+    let exposed = try new f32[size] --- in memory.heap
     defer free(exposed) in memory.heap
-    let one = try new f16[size] --- in memory.heap
+    let one = try new f32[size] --- in memory.heap
     defer free(one) in memory.heap
-    let two = try new f16[size] --- in memory.heap
+    let two = try new f32[size] --- in memory.heap
     defer free(two) in memory.heap
-    let out = try new f16[size] --- in memory.heap
+    let out = try new f32[size] --- in memory.heap
     errdefer free(out) in memory.heap
     var pass = Pass(stage = 0, film = source, width = width, height = height, first = exposed, second = exposed, out = exposed,
                     source = scene, matrix = matrix, tables = tables, aspect = aspect, veil = veil, pitch = (f64)plan.pitch)
@@ -492,9 +492,9 @@ pub func filmed(source: Film*, scene: const Scene*, matrix: f64[9], tables: cons
         let block = (i64)plan.halation_block
         let low_width = blocks(width, plan.halation_block)
         let low_height = blocks(height, plan.halation_block)
-        let low = try new f16[low_width * low_height * 4] --- in memory.heap
+        let low = try new f32[low_width * low_height * 4] --- in memory.heap
         defer free(low) in memory.heap
-        let gathered = try new f16[low_width * low_height * 4] --- in memory.heap
+        let gathered = try new f32[low_width * low_height * 4] --- in memory.heap
         defer free(gathered) in memory.heap
         pass.block = block
         pass.first_width = width
@@ -534,12 +534,16 @@ pub func filmed(source: Film*, scene: const Scene*, matrix: f64[9], tables: cons
     if plan.duplicated.radius > 0:
         try run_blur(&pass, out, out, one, 1, 1, 0, plan.duplicated)
         try run_blur(&pass, one, one, out, 1, 0, 1, plan.duplicated)
-    return Scene.from_pixels(width, height, out)
+    let pixels = try new f16[size] --- in memory.heap
+    for at in 0..<size:
+        pixels[at] = (f16)out[at]
+    free(out) in memory.heap
+    return Scene.from_pixels(width, height, pixels)
 
 ## Development's steps on the exposure `exposed`: each step's release, spread
 ## across into `spare` and down while adding into `field`, which ends holding
 ## the inhibitor and used developer (`scratch` for the release).
-func develop_steps(pass: Pass*, exposed: const f16[], field: f16[], spare: f16[], scratch: f16[], plan: const Plan*) -> !:
+func develop_steps(pass: Pass*, exposed: const f32[], field: f32[], spare: f32[], scratch: f32[], plan: const Plan*) -> !:
     let n = film.chemistry_steps
     for step in 1..=n:
         pass.stage = 8
@@ -559,7 +563,7 @@ func develop_steps(pass: Pass*, exposed: const f16[], field: f16[], spare: f16[]
 
 ## Stage `stage` into `out` of `width` × `height` (the halation's sizes), the
 ## pass's size put back after.
-func run_sized(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, width: usize, height: usize) -> !:
+func run_sized(pass: Pass*, first: const f32[], second: const f32[], out: f32[], stage: i64, width: usize, height: usize) -> !:
     let full_width = pass.width
     let full_height = pass.height
     pass.stage = stage
@@ -573,7 +577,7 @@ func run_sized(pass: Pass*, first: const f16[], second: const f16[], out: f16[],
         pass.height = full_height
     try parallel.for_each(height, (void*)pass, run_row)
 
-func run_blur(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, dx: i64, dy: i64, blur: Blur) -> !:
+func run_blur(pass: Pass*, first: const f32[], second: const f32[], out: f32[], stage: i64, dx: i64, dy: i64, blur: Blur) -> !:
     pass.stage = stage
     pass.first = first
     pass.second = second
@@ -685,13 +689,13 @@ func even_effective(source: const Film*, light: f64 = 0.18) -> f64[3]:
 ## the readings' mean light, the grainless reading, and the readings' rms.
 func even_reading(source: Film*, size: usize, pitch: f64, samples: usize, level: f64 = 0.18) -> (f64[3], f64[3], f64[3])!:
     try source.fit_grains()
-    let field = try new f16[size * size * 4] --- in memory.heap
+    let field = try new f32[size * size * 4] --- in memory.heap
     defer free(field) in memory.heap
     let grey = even_effective(source, level)
     for at in 0..<size * size:
         for k in 0..<(usize)3:
-            field[at * 4 + k] = (f16)grey[k]
-        field[at * 4 + 3] = (f16)1.0
+            field[at * 4 + k] = (f32)grey[k]
+        field[at * 4 + 3] = (f32)1.0
     var nothing = Scene()
     var settings = settings_text("")
     let built = build_tables(&settings)
@@ -750,13 +754,13 @@ test "the stochastic render reads grey as the curve and the stock's granularity"
 ## correlation of each pixel with the one beside it.
 func patch_statistics(source: Film*, size: usize, pitch: f64, samples: usize, traced_below: f64, level: f64) -> (f64, f64)!:
     try source.fit_grains()
-    let field = try new f16[size * size * 4] --- in memory.heap
+    let field = try new f32[size * size * 4] --- in memory.heap
     defer free(field) in memory.heap
     let grey = even_effective(source, level)
     for at in 0..<size * size:
         for k in 0..<(usize)3:
-            field[at * 4 + k] = (f16)grey[k]
-        field[at * 4 + 3] = (f16)1.0
+            field[at * 4 + k] = (f32)grey[k]
+        field[at * 4 + 3] = (f32)1.0
     var nothing = Scene()
     var settings = settings_text("")
     let built = build_tables(&settings)

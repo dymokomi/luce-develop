@@ -1,4 +1,4 @@
-// Film, on the negative: the passes film_passes.lucb runs on the CPU, step for
+// Film, on the negative (film.comp runs these stages): the passes film_passes.lucb runs on the CPU, step for
 // step, at the scene's own size before the develop draws it (the develop then
 // reads the filmed scene in place of the camera's). One shader, a stage per
 // draw, reading texels exactly (no filtering) so the CPU can follow it:
@@ -31,24 +31,9 @@
 //   image 1, 2  the stage's inputs, RGBA half floats at the scene's size
 //   image 3     the develop's tables (tables.lucb), for the lens vignetting
 //   image 4     the film atlas (film.lucb)
-#version 450
-layout(location = 0) in vec4 vertex_color;
-layout(location = 0) out vec4 fragment_color;
-layout(push_constant) uniform Params {
-    vec4 rect;      // the whole target: 0, 0, width, height
-    vec4 stage;     // the stage, the blur's dx, dy, its radius in px
-    vec4 sigma;     // the blur's size per channel, px; 1 for an exponential, 0 a Gaussian
-    vec4 halo;      // halation's weight per layer; µm per scene pixel
-    vec4 row0;      // stage 0: the matrix from the scene texture to AP1, by rows
-    vec4 row1;
-    vec4 row2;
-    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it); alpha's blur σ, px; the lens's veil
-} params;
-layout(set = 0, binding = 1) uniform sampler2D first_image;
-layout(set = 0, binding = 2) uniform sampler2D second_image;
-layout(set = 0, binding = 3) uniform sampler2D tables;
-layout(set = 0, binding = 4) uniform sampler2D film;
-
+//
+// Included by film.comp, which declares the push constants (`params`), the
+// sampled images (first_image, second_image, tables, film) and the target.
 const float table_width = 1024.0;
 const float film_width = 1089.0;
 const float film_rows = 41.0;
@@ -528,8 +513,7 @@ vec3 finish_density(vec3 d) {
     return max(scene * film_value(10.0).rgb, 0.0);
 }
 
-void main() {
-    ivec2 at = ivec2(floor(gl_FragCoord.xy - params.rect.xy));
+vec4 film_stage(ivec2 at) {
     int stage = int(params.stage.x + 0.5);
     ivec2 step = ivec2(params.stage.yz);
     int radius = int(params.stage.w + 0.5);
@@ -540,7 +524,7 @@ void main() {
         vec3 c = max(vec3(dot(params.row0.xyz, camera), dot(params.row1.xyz, camera), dot(params.row2.xyz, camera)), vec3(0.0));
         vec4 v = value(5.0);
         if (v.y > 0.0) {
-            vec2 uv = (vec2(at) + 0.5) / params.rect.zw;
+            vec2 uv = (vec2(at) + 0.5) / vec2(textureSize(first_image, 0));
             float start = v.z * 0.6;
             float t = clamp((lens_radius(uv, params.lens.x) - start) / (1.0 - start), 0.0, 1.0);
             c *= 1.0 + v.y * 2.0 * t * t;
@@ -635,8 +619,7 @@ void main() {
             int count = any(traced) ? gather(vec2(at) * pitch, vec2(at + 1) * pitch, layers, traced, bounds, share,
                                              film_value(17.0).w > 0.5 && film_value(17.0).w < 1.5) : 0;
             if (!any(traced) || count > 128) {
-                fragment_color = vec4(1.0, 1.0, 1.0, 0.0);
-                return;
+                return vec4(1.0, 1.0, 1.0, 0.0);
             }
             uint samples = uint(params.row0.z + 0.5);
             vec3 mask = layers == 1 ? vec3(traced.x ? 1.0 : 0.0) : vec3(traced);
@@ -647,13 +630,11 @@ void main() {
                 vec3 amounts = mask * (base.rgb + (layers == 1 ? vec3(dye.r) : dye) - developed_now);
                 light += pow(vec3(10.0), -clamp(slopes * amounts, -4.0, 4.0));
             }
-            fragment_color = vec4(light / float(samples), 1.0);
-            return;
+            return vec4(light / float(samples), 1.0);
         }
         if (stage == 15) {
             // No grains traced yet: the developed film's light.
-            fragment_color = vec4(1.0, 1.0, 1.0, 0.0);
-            return;
+            return vec4(1.0, 1.0, 1.0, 0.0);
         }
         // Alpha 0: not traced after all (too many grains), or not yet.
         if (sums.a < 0.5) traced = bvec3(false);
@@ -746,8 +727,7 @@ void main() {
             // A slide: scene light (asinh-encoded), Contrast a power about grey; the timing.
             vec3 grown = exp(d);
             vec3 light_out = 0.5 * (grown - 1.0 / grown) / 256.0;
-            fragment_color = vec4(0.18 * pow(max(light_out, 0.0) / 0.18, v8.rgb) * film_value(10.0).rgb, 1.0);
-            return;
+            return vec4(0.18 * pow(max(light_out, 0.0) / 0.18, v8.rgb) * film_value(10.0).rgb, 1.0);
         }
         vec4 v7 = film_value(7.0);
         vec3 floors = film_value(9.0).rgb;
@@ -756,5 +736,5 @@ void main() {
         vec3 scene = vec3(dot(film_value(11.0).rgb, linear_light), dot(film_value(12.0).rgb, linear_light), dot(film_value(13.0).rgb, linear_light));
         out_color = max(scene * film_value(10.0).rgb, 0.0);
     }
-    fragment_color = vec4(out_color, spent);
+    return vec4(out_color, spent);
 }

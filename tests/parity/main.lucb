@@ -100,21 +100,11 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         # Interpolating the view's table across a sharp corner (the Linear
         # view's clip, the gamut's edge) misses by a few levels, rarely.
         let share = (f64)outliers / (f64)(shown.length // 4 * 3)
-        # Film goes through nine half-float passes on the negative first, grain
-        # included, so it may differ by a few levels more.
         # The view the recipe renders with (a Project stage makes it the print's);
         # only ACES goes through a table, the print and paper are per pixel.
         let view = compile(&settings).get(.view)
         let tabled = view == 0.0
-        # A slide's curves are about three times a negative's slope near black,
-        # and its development table (interimage-corrected, film.lucb) is
-        # steepest in deep blues: the GPU's half-float chemistry fields (eight
-        # steps' releases rounded and summed) move a few of those pixels by up
-        # to about 20 levels. To come back down to a negative's when the
-        # chemistry moves to single-float compute (docs/PHYSICAL-FILM.md, 5).
-        let stock = settings.get(.film_stock)
-        let slide = stock > 0.0 and film.stock_kind((i64)stock - 1) == 1
-        let limit = 40 if tabled else (20 if slide else (8 if stock > 0.0 else 3))
+        let limit = 40 if tabled else 3
         let good = mean < 1.0 and share < 0.001 and largest < limit
         print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [{wanted}]  mean {mean}  over 6: {outliers}  largest {largest}")
         if not good:

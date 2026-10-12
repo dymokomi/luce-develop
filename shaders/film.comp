@@ -1,0 +1,29 @@
+// Film, on the negative, in single floats: film_stages.glsl's stages as a
+// compute kernel. Each invocation computes one texel of the region `rect`
+// (left, top, right, bottom) of the target, a single-float storage image.
+#version 450
+#extension GL_GOOGLE_include_directive : require
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(push_constant) uniform Params {
+    vec4 rect;      // the region written: left, top, right, bottom
+    vec4 stage;     // the stage, the blur's dx, dy, its radius in px
+    vec4 sigma;     // the blur's size per channel, px; 1 for an exponential, 0 a Gaussian
+    vec4 halo;      // halation's weight per layer; µm per scene pixel
+    vec4 row0;      // stage 0: the matrix from the scene texture to AP1, by rows
+    vec4 row1;
+    vec4 row2;
+    vec4 lens;      // the output's aspect (for lens vignetting, as the develop has it); alpha's blur σ, px; the lens's veil
+} params;
+layout(set = 0, binding = 1) uniform sampler2D first_image;
+layout(set = 0, binding = 2) uniform sampler2D second_image;
+layout(set = 0, binding = 3) uniform sampler2D tables;
+layout(set = 0, binding = 4) uniform sampler2D film;
+layout(set = 0, binding = 5, rgba32f) writeonly uniform image2D target;
+
+#include "film_stages.glsl"
+
+void main() {
+    ivec2 at = ivec2(gl_GlobalInvocationID.xy) + ivec2(params.rect.xy);
+    if (at.x >= int(params.rect.z) || at.y >= int(params.rect.w)) return;
+    imageStore(target, at, film_stage(at));
+}

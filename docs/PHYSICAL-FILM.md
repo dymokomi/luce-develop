@@ -90,7 +90,8 @@ pixel size only decides how finely the film is sampled.
    reproduce the closed form of part 2 (its constants are fitted so), so
    edges, interimage and agitation come out as differences from it.
 
-   *As built.* Eight steps. Each step releases inhibitor and uses developer in
+   *As built.* Sixteen steps, in single floats (a compute kernel, film.comp).
+   Each step releases inhibitor and uses developer in
    proportion to how far each layer develops in it (part 2's kinetics, which
    depend on exposure). The release spreads by the distance it will have
    travelled by the end and is added to the earlier steps' (diffusion being
@@ -100,17 +101,16 @@ pixel size only decides how finely the film is sampled.
    so even areas keep the published curve exactly. Watching development
    shows the image part-way (the kinetics' progress) over 2.5 s. Still open:
    halide (bromide) as its own field, the inhibitor's release proportional to
-   dye actually formed (not the uninhibited curve), and single-float compute
-   for the fields (half floats limit the GPU to eight steps).
+   dye actually formed (not the uninhibited curve).
 
 5. **Grain populations** (done in a first form: three populations per layer
    fitted to the curve, their strengths to the published RMS, an exact
    correction per log H; each dye-cloud site holds many grains of each, the
    share developed spreading binomially about P by a deviate fixed for the
    site, so the emulsion is one realization across exposure and development.
-   Still open: explicit grains when a pixel is finer than a grain, coupler
-   saturation at high density, two-scale cloud clusters, and single-float
-   compute shared with part 4). Each colour record holds two or three emulsion
+   The stochastic render (see "Rendering" below) now traces explicit grains
+   where few develop in a pixel. Still open: coupler saturation at high
+   density, two-scale cloud clusters). Each colour record holds two or three emulsion
    populations (fast, mid, slow) as a persistent marked point process in
    µm: positions, sizes (T-grain plates or cubic), sensitivity class. Exposure
    makes Poisson photon catches; a grain is developable past its threshold
@@ -173,7 +173,7 @@ average. Only the sampling of light paths and apertures averages away.
 Interactive views may start from the statistical tables (the current engine)
 and refine toward the stochastic answer.
 
-*As built* (film_grains.lucb, film_passes.lucb, film.frag stages 10–15,
+*As built* (film_grains.lucb, film_passes.lucb, film_stages.glsl stages 10–15,
 film_gpu.lucb). Each layer's three populations are Poisson grains on the film
 plane, made per cell from a hash (fixed across passes and settings), each with
 a place, a size (0.6–1.4 of its population's) and a rank; a grain develops

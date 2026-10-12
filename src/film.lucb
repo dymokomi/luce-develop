@@ -48,7 +48,7 @@
 ##    bleached negative, reads as more exposure and less color.
 ##
 ## The GPU and the CPU read the same tables: one atlas texture (`Film.texels`,
-## half floats), sampled the same way by shaders/film.frag and the functions
+## half floats), sampled the same way by shaders/film_stages.glsl and the functions
 ## here. Rows:
 ##
 ##   0–32   scan: 33³ densities over dye amounts 0..top, slice b (yellow) at
@@ -483,7 +483,7 @@ pub struct Film:
         let process = film_develop.chosen_for(&published, settings.get(.develop_process))
         let grown = film_develop.developing(&published, process, settings.get(.develop_time), settings.get(.develop_temperature),
                                             (i64)settings.get(.develop_agitation))
-        # The development's kinetics, for its steps on the GPU (film.frag's
+        # The development's kinetics, for its steps on the GPU (film_stages.glsl's
         # `progress`): saturation and induction, rate slope and grey, the
         # time against normal, the minutes and the bath's renewal.
         self.put(values_row, 52, grown.saturation[0], grown.saturation[1], grown.saturation[2], grown.induction)
@@ -572,7 +572,7 @@ pub struct Film:
         # The standard process's, kept unrenewed as this agitation keeps it.
         let standard_per_unit = grown.standard_edge / kept
         # Per unit of developer missing beyond what an even field of the same
-        # exposure misses (film.frag's `developed`): nothing in an even area.
+        # exposure misses (film_stages.glsl's `developed`): nothing in an even area.
         let edge = edge_gain * (used_per_unit - standard_per_unit)
         # A large even patch is held back by its own inhibitor: correct for it.
         let held_back = dir
@@ -868,7 +868,7 @@ pub struct Film:
         return out
 
     ## Layer `layer`'s grain table at effective log H `log_h`: its populations'
-    ## shares developed and the clouds' strength (film.frag's `grain_table`).
+    ## shares developed and the clouds' strength (film_stages.glsl's `grain_table`).
     pub func grain_table(layer: usize, log_h: f64) -> f64[4]:
         let x = math.clamp((log_h - log_low) / (log_high - log_low), 0.0, 1.0) * (f64)(curve_samples - 1)
         let below = (usize)math.min(math.floor(x), (f64)(curve_samples - 2))
@@ -910,7 +910,7 @@ pub struct Film:
     ## channel sees them fainter, and faint clouds lose less to the averaging
     ## of light, so they read denser there than their share of the mean. The
     ## published curves are read through every channel at once, so the
-    ## stochastic render takes this off (film.frag's `grain_bias`).
+    ## stochastic render takes this off (film_stages.glsl's `grain_bias`).
     pub func grain_bias(log_h: f64[3], slopes: f64[9], traced: bool[3]) -> f64[3]:
         let base = self.value(338)
         let layers = (usize)base[3]
@@ -1012,10 +1012,9 @@ func population_amplitudes(model: const Model*, texels: const f32[]) -> f64[9]:
             out[layer * 3 + p] = math.sqrt(squares[p])
     return out
 
-## How many steps development runs in (film_passes.lucb, film.frag): enough
-## for the release's smooth course over time; more would let the GPU's half
-## floats drift from the CPU (each step rounds the fields three times).
-pub let chemistry_steps: usize = 8
+## How many steps development runs in (film_passes.lucb, film_stages.glsl):
+## enough for the release's course over time (the fields are single floats).
+pub let chemistry_steps: usize = 16
 
 ## The share of the developer a large even grey patch used that is still
 ## missing at the end, with the bath renewing it with time constant `renewal`
@@ -1108,7 +1107,7 @@ func grain_shape(width: f64) -> f64[3]:
     return [0.5534 + (0.5435 - 0.5534) * t, 1.0817 + (1.3708 - 1.0817) * t, 0.4216 + (0.3257 - 0.4216) * t]
 
 ## The three layers' exposure to scene light `c` (AP1): relative, 0.18 for a
-## grey card at normal exposure (film.frag's `expose`).
+## grey card at normal exposure (film_stages.glsl's `expose`).
 pub func expose(film: const Film*, c: f64[3]) -> f64[3]:
     var fitted = film_exposure.Fit()
     var values: f64[3]
@@ -1164,7 +1163,7 @@ pub func exhaustion(film: const Film*, held: f64[3]) -> f64:
 ## Exposure `e` developed, held back by the inhibitor around it (`held`, as the
 ## development's steps released and spread it) and by the developer used up
 ## around it (`exhausted`); `share` of the way through the development
-## (film.frag's `developed`).
+## (film_stages.glsl's `developed`).
 pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, share: f64 = 1.0) -> Developed:
     let log_h = log_exposure(film, e)
     let edge = film.value(20)[2]
@@ -1212,7 +1211,7 @@ func factor_at(saturation: f64, slope: f64, log_h: f64, grey: f64, start: f64, l
     let running = math.max(length - start, 0.0) / math.max(1.0 - start, 1.0e-9)
     return (1.0 - math.exp(-u * running)) / math.max(1.0 - math.exp(-u), 1.0e-12)
 
-## A step of development at exposure `e` (film.frag's stage 8): from share
+## A step of development at exposure `e` (film_stages.glsl's stage 8): from share
 ## `begun` to `reached` of the way through, what each layer releases as it
 ## develops (inhibitor in proportion: the dye on a negative, the first
 ## developer's image on a slide), and fourth the developer it uses, `keep` of it
