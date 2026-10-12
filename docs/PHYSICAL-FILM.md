@@ -42,7 +42,8 @@ pixel size only decides how finely the film is sampled.
    stock, light) fitted on real surfaces and sky. The scene light is kept.
    Exit test: held-out mean ≤ 0.1 stop (met: 0.10 estimated, 0.08 measured).
 
-2. **Development kinetics.** The state is developed silver mass per layer.
+2. **Development kinetics** (done, 1345bd5, in its closed form; the field form
+   comes with part 4). The state is developed silver mass per layer.
    Its growth is `dm/dt = k(T)·f_ind(t)·(m_max(E) − m)·a(C)/(1 + K_Br·Br + K_I·I)`,
    with Arrhenius k (61–71 kJ/mol B&W stock developers, 39 dilute, 68 C-41,
    64 E-6 first developer), an induction time, and fog as its own population
