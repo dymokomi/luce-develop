@@ -97,6 +97,28 @@ pixel size only decides how finely the film is sampled.
    Williams–Clapper/Shore–Spoonhower multiple internal reflection; projection
    seen in a dark surround (CAM16 dark to dim).
 
+## Rendering: progressive and stochastic
+
+Like a modern path tracer, the physical render is Monte Carlo and progressive
+(owner, 2026-10-12). Each pass adds samples, and the picture converges while
+the viewport shows it: the latent image forming, then development running its
+course. What is sampled:
+
+- photon catches per grain (Poisson in the exposure each grain receives);
+- the light reaching a grain through scatter and the halation ring (paths
+  through the stack, not convolutions);
+- the scanner's, printer's or enlarger's aperture over the film (transmitted
+  light averaged over random positions within each pixel's footprint);
+- chemistry, stepped in time on its grid, its own progressive axis.
+
+The emulsion's own randomness is not estimation noise. Grain positions,
+sizes, sensitivity classes and photon arrivals belong to one realization,
+seeded by the frame, and it stays fixed across passes and settings. Passes
+converge to that realization's exact result: its grain, never a smooth
+average. Only the sampling of light paths and apertures averages away.
+Interactive views may start from the statistical tables (the current engine)
+and refine toward the stochastic answer.
+
 ## Rules
 
 - Every constant names its source or says it is an estimate.
