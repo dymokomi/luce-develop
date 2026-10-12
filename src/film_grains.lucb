@@ -1,0 +1,592 @@
+## The emulsion as grains, for the stochastic render (docs/PHYSICAL-FILM.md,
+## "Rendering"). Each layer's three populations (fast, mid, slow; film_model.lucb's
+## `fit_populations`) are real grains on the film plane, in µm: a Poisson
+## process of each population's density, made cell by cell from a hash, so
+## nothing is stored and the same grains come back every pass. Each grain has
+## its place, a size (0.6–1.4 times its population's), and a rank (0..1, its
+## sensitivity among its population's). It develops where its rank is under
+## its population's developed share at the exposure its place had (after
+## inhibition and edges), so more exposure develops more of the same grains.
+## A developed grain forms a cloud of dye (silver on black and white): density
+## q·(1 − r²/ρ²)² within its radius ρ. Clouds add as density, as dyes do.
+##
+## The scanner averages the light a pixel passes, not its density: a pixel is
+## −log10 of the mean transmittance over its area. Campbell's theorem gives
+## that mean exactly for a Poisson field of clouds (−log10 E[T] = λ·∫(1 − 10^(−q·c))
+## dA / ln 10) and the variance of its mean over an aperture (an integral of
+## exp(λ·K(r)) − 1, K the clouds' overlap of their 1 − 10^(−q·c)). `fit`
+## uses both: each population's grains are placed so the developed field's
+## density over a large area is the stock's curve and its rms through a 48 µm
+## aperture the stock's granularity, at every exposure. Summing densities and
+## taking a mean (the thin-grain, first-order picture) would be wrong by a
+## factor of two or more at real densities: where clouds overlap, light comes
+## through the gaps between them.
+##
+## The clouds' peak density is an estimate: 0.5 for a color dye cloud, 2.0 for
+## a developed silver grain (nearly opaque). Their sizes follow from it and
+## the granularity, as Selwyn's law ties the two: grains of a given density
+## make more grain the larger they are. Populations' radii are 1, 0.75 and
+## 0.55 of the fast one's (an estimate: faster emulsions have larger grains).
+import memory
+import sync
+from luce_std import math
+import film_model
+
+pub let populations: usize = 3
+## Every population's sizes, uniform over this range of its radius.
+pub let size_low: f64 = 0.6
+pub let size_high: f64 = 1.4
+## A cell is this many radii wide, so a 3 × 3 block of cells holds every grain
+## that can reach a point in the middle one.
+pub let cell_radii: f64 = 1.4
+## The 48 µm circular aperture granularity is read through (µm²).
+pub let aperture_area: f64 = 1809.5573684677208
+## The clouds' peak density (estimates), and the populations' radii against the fast one's.
+pub let color_peak: f64 = 0.5
+pub let silver_peak: f64 = 2.0
+let radius_ratio: f64[3] = [1.0, 0.75, 0.55]
+let ln10: f64 = 2.302585092994046
+## Poisson counts beyond this mean come from the normal approximation.
+let knuth_most: f64 = 24.0
+pub let count_most: u32 = 96
+## The share tables over log H (film_model.lucb's grid).
+pub let table_samples: usize = 1024
+pub let log_low: f64 = -4.5
+pub let log_high: f64 = 2.5
+
+## A population's grains: how many per µm², their clouds' peak density, their radius (µm).
+pub struct Geometry:
+    pub var density: f64
+    pub var peak: f64
+    pub var radius: f64
+
+## The grains of a stock developed some way: each layer's populations, and per
+## layer over log H (`table_samples`, effective log H) each population's share
+## developed (four per sample: three shares and the clouds' strength, the
+## factor on their peak density).
+pub struct Fit:
+    pub var geometry: Geometry[9]
+    pub var table: f64[]
+
+    pub func release():
+        if self.table.length > 0:
+            free(self.table) in memory.heap
+        var empty: f64[]
+        self.table = empty
+
+# mark: Hashing ===============================================================
+
+## A hash of two numbers (film.lucb's `hashed`, without the fraction).
+pub func mixed(px: u32, py: u32) -> u32:
+    var x = px *% 1664525 +% py *% 1013904223
+    x = x ^ (x >> 16)
+    x = x *% 0x7feb352d
+    x = x ^ (x >> 15)
+    x = x *% 0x846ca68b
+    x = x ^ (x >> 16)
+    return x
+
+## A hash as a number in [0, 1), 24 bits (exact in single floats).
+pub func fraction(x: u32) -> f64:
+    return (f64)(x >> 8) / 16777216.0
+
+## Cell (`cx`, `cy`)'s seed for stream `stream` (a layer's population).
+pub func cell_seed(cx: u32, cy: u32, stream: u32) -> u32:
+    return mixed(cx +% stream *% 0x9e3779b9, cy ^ (stream *% 0x85ebca6b))
+
+## Number `k` of grain `j` in a cell with `seed`.
+pub func grain_value(seed: u32, j: u32, k: u32) -> f64:
+    return fraction(mixed(seed, j *% 5 +% k))
+
+## How many grains a cell with `seed` holds, Poisson with mean `mean`: Knuth's
+## product of uniforms below `knuth_most`, the normal approximation above.
+pub func grain_count(seed: u32, mean: f64) -> u32:
+    if mean <= 0.0:
+        return 0
+    if mean > knuth_most:
+        let first = math.max(fraction(mixed(seed, 0xfffffff1)), 1.0e-7)
+        let second = fraction(mixed(seed, 0xfffffff2))
+        let z = math.sqrt(-2.0 * math.log(first)) * math.cos(2.0 * math.pi * second)
+        return (u32)math.clamp(math.floor(mean + math.sqrt(mean) * z + 0.5), 0.0, (f64)count_most)
+    let limit = math.exp(-mean)
+    var product = 1.0
+    var count: u32 = 0
+    while count < count_most:
+        product *= fraction(mixed(seed, 0xffffff00 +% count))
+        if product <= limit:
+            break
+        count += 1
+    return count
+
+# mark: Campbell's integrals ==================================================
+
+## A unit cloud's light taken, 1 − 10^(−q·(1 − r²)²), integrated over its disc
+## and over ln 10 (`light_taken`), and two clouds' overlap of it at `r` apart
+## (`overlap`), tabulated over r (0..2) and over q on a log grid.
+pub let peak_count: usize = 48
+pub let peak_low: f64 = 0.002
+pub let peak_high: f64 = 120.0
+let distance_count: usize = 41
+var overlap_table: f64[1968]
+var taken_table: f64[48]
+var tables_once: sync.Once
+
+pub func peak_at(index: usize) -> f64:
+    return peak_low * math.pow(peak_high / peak_low, (f64)index / (f64)(peak_count - 1))
+
+func taken(q: f64, rr: f64) -> f64:
+    if rr >= 1.0:
+        return 0.0
+    let c = (1.0 - rr) * (1.0 - rr)
+    return 1.0 - math.pow(10.0, -q * c)
+
+func build_tables():
+    let grid = 48
+    let step = 2.0 / (f64)grid
+    for qi in 0..<peak_count:
+        let q = peak_at(qi)
+        var sum = 0.0
+        for at in 0..<(usize)256:
+            let v = ((f64)at + 0.5) / 256.0
+            sum += taken(q, v) / 256.0
+        taken_table[qi] = math.pi * sum / ln10
+        for di in 0..<distance_count:
+            let d = 2.0 * (f64)di / (f64)(distance_count - 1)
+            # Over the unit disc on a grid, the cloud at the origin against one
+            # `d` along x.
+            var shared = 0.0
+            for yi in 0..<grid:
+                let y = -1.0 + ((f64)yi + 0.5) * step
+                for xi in 0..<grid:
+                    let x = -1.0 + ((f64)xi + 0.5) * step
+                    let here = x * x + y * y
+                    if here >= 1.0:
+                        continue
+                    let there = (x - d) * (x - d) + y * y
+                    if there >= 1.0:
+                        continue
+                    shared += taken(q, here) * taken(q, there)
+            overlap_table[qi * distance_count + di] = shared * step * step
+
+## Where `q` falls on the peak grid: its cell and the share of the way.
+func peak_place(q: f64) -> (usize, f64):
+    let place = math.clamp(math.log(math.max(q, peak_low) / peak_low) / math.log(peak_high / peak_low), 0.0, 1.0) * (f64)(peak_count - 1)
+    let below = (usize)math.min(math.floor(place), (f64)(peak_count - 2))
+    return (below, place - (f64)below)
+
+## A unit cloud of peak `q`: the density it takes from a large area, per cloud
+## per unit area (∫(1 − 10^(−q·c)) dA / ln 10).
+pub func light_taken(q: f64) -> f64:
+    tables_once.run(build_tables)
+    let (below, t) = peak_place(q)
+    return taken_table[below] * (1.0 - t) + taken_table[below + 1] * t
+
+## Two unit clouds of peak `q` `d` apart: ∫(1 − 10^(−q·c(x)))(1 − 10^(−q·c(x − d))) dx.
+pub func overlap(q: f64, d: f64) -> f64:
+    tables_once.run(build_tables)
+    if d >= 2.0:
+        return 0.0
+    let (below, t) = peak_place(q)
+    let place = d / 2.0 * (f64)(distance_count - 1)
+    let near = (usize)math.min(math.floor(place), (f64)(distance_count - 2))
+    let u = place - (f64)near
+    let low = overlap_table[below * distance_count + near] * (1.0 - u) + overlap_table[below * distance_count + near + 1] * u
+    let high = overlap_table[(below + 1) * distance_count + near] * (1.0 - u) + overlap_table[(below + 1) * distance_count + near + 1] * u
+    return low * (1.0 - t) + high * t
+
+## The size factors (uniform over 0.6–1.4), at five midpoints, and the mean of
+## the square of the size.
+let size_points: usize = 5
+func size_at(index: usize) -> f64:
+    return size_low + (size_high - size_low) * ((f64)index + 0.5) / (f64)size_points
+pub let size_square_mean: f64 = 1.0533333333333332
+
+## The developed field of populations whose developed grains number `lambda`
+## per µm² (a share of their density), of `geometry`, their clouds `strength`
+## times their peak: its density over a large area (−log10 of the mean
+## transmittance), and the variance of its density through the 48 µm aperture.
+func field_density(geometry: const Geometry[], lambda: const f64[3], strength: f64) -> f64:
+    var d = 0.0
+    for p in 0..<populations:
+        let g = geometry[p]
+        d += lambda[p] * g.radius * g.radius * size_square_mean * light_taken(g.peak * strength)
+    return d
+
+func field_variance(geometry: const Geometry[], lambda: const f64[3], strength: f64) -> f64:
+    var reach = 0.0
+    for p in 0..<populations:
+        if lambda[p] > 0.0:
+            reach = math.max(reach, 2.0 * geometry[p].radius * size_high)
+    if reach <= 0.0:
+        return 0.0
+    let steps = 64
+    var sum = 0.0
+    for at in 0..<steps:
+        let r = reach * ((f64)at + 0.5) / (f64)steps
+        var exponent = 0.0
+        for p in 0..<populations:
+            let g = geometry[p]
+            if lambda[p] <= 0.0:
+                continue
+            var mean = 0.0
+            for s in 0..<size_points:
+                let radius = g.radius * size_at(s)
+                mean += radius * radius * overlap(g.peak * strength, r / radius) / (f64)size_points
+            exponent += lambda[p] * mean
+        sum += (math.exp(exponent) - 1.0) * 2.0 * math.pi * r * (reach / (f64)steps)
+    # The transmittance's relative variance through the aperture, as density's.
+    return sum / aperture_area / (ln10 * ln10)
+
+# mark: Fitting ===============================================================
+
+## A population's share developed at `log_h`: a logistic (film_model.lucb's
+## `developed_share`); on a slide, the share that forms dye, what the first
+## developer left.
+func share(populations_at: const f64[18], layer: usize, p: usize, log_h: f64, reversal: bool) -> f64:
+    let centre = populations_at[layer * 6 + p * 2]
+    let width = math.max(populations_at[layer * 6 + p * 2 + 1], 1.0e-6)
+    let developed = 1.0 / (1.0 + math.exp(-(log_h - centre) / width))
+    return 1.0 - developed if reversal else developed
+
+func log_h_at(at: usize) -> f64:
+    return log_low + (log_high - log_low) * (f64)at / (f64)(table_samples - 1)
+
+## Fit grains to `layers` layers (three, one for black and white): `curves`
+## their dye over its floor and `granularity` the rms through 48 µm wanted,
+## each `table_samples` × 3 over effective log H; `reversal` for a slide (dye
+## where the first developer left halide); `peak` the clouds' peak density.
+## The caller releases it.
+pub func fit(layers: usize, curves: const f64[], granularity: const f64[], reversal: bool, peak: f64) -> Fit!:
+    var out = Fit()
+    out.table = try new f64[table_samples * 3 * 4] --- in memory.heap
+    for at in 0..<out.table.length:
+        out.table[at] = 0.0
+    for layer in 0..<layers:
+        let populations_at = placed(curves, layer, reversal)
+        try fit_layer(&out, layer, curves, granularity, populations_at, reversal, peak)
+    return out
+
+## The populations of layer `layer` placed on its developed curve (as
+## film_model.lucb's `fit_populations` places them on the published one): the
+## fast, mid and slow ones half developed where the share the first developer
+## or the dye has reached is a sixth, a half and five sixths, each as wide as
+## its third of the curve (its ends at 2 % and 98 %) over 4.4. Laid out as film_model.lucb's (centre,
+## width per population, six per layer).
+func placed(curves: const f64[], layer: usize, reversal: bool) -> f64[18]:
+    var top = 0.0
+    for at in 0..<table_samples:
+        top = math.max(top, curves[at * 3 + layer])
+    var crossings: f64[7]
+    let levels: f64[7] = [0.02, 1.0 / 6.0, 1.0 / 3.0, 0.5, 2.0 / 3.0, 5.0 / 6.0, 0.98]
+    for c in 0..<(usize)7:
+        let level = levels[c]
+        var found = log_high if not reversal else log_low
+        for at in 1..<table_samples:
+            let a = developed_at(curves, layer, at - 1, top, reversal)
+            let b = developed_at(curves, layer, at, top, reversal)
+            if a < level and b >= level:
+                found = log_h_at(at - 1) + (level - a) / math.max(b - a, 1.0e-12) * (log_h_at(at) - log_h_at(at - 1))
+                break
+        crossings[c] = found
+    var out: f64[18]
+    for k in 0..<(usize)18:
+        out[k] = 0.0
+    for p in 0..<populations:
+        out[layer * 6 + p * 2] = crossings[2 * p + 1]
+        out[layer * 6 + p * 2 + 1] = math.max((crossings[2 * p + 2] - crossings[2 * p]) / 4.4, 0.03)
+    return out
+
+## How far the development has come at sample `at`: the dye's share of its most
+## on a negative, the first developer's (what the dye lost) on a slide.
+func developed_at(curves: const f64[], layer: usize, at: usize, top: f64, reversal: bool) -> f64:
+    let reached = curves[at * 3 + layer] / math.max(top, 1.0e-12)
+    return 1.0 - reached if reversal else reached
+
+## How many more grains each population has than its share of the curve's
+## most needs at clouds of their peak density (the strengths solved vary).
+let headroom: f64 = 1.6
+
+## The clouds' strength stays within 0.05–60 times their peak density.
+let strongest: f64 = 60.0
+
+## Every eighth sample is solved; between them, interpolated.
+let solved_every: usize = 8
+
+func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const f64[], populations_at: const f64[18], reversal: bool, peak: f64) -> !:
+    # Each population's most density, by least squares (none negative) over
+    # the curve: dye over its floor ≈ Σ M·share.
+    var normal: f64[9]
+    var right: f64[3]
+    for k in 0..<(usize)9:
+        normal[k] = 0.0
+    for k in 0..<(usize)3:
+        right[k] = 0.0
+    var at: usize = 0
+    while at < table_samples:
+        var basis: f64[3]
+        for p in 0..<populations:
+            basis[p] = share(populations_at, layer, p, log_h_at(at), reversal)
+        for a in 0..<(usize)3:
+            for b in 0..<(usize)3:
+                normal[a * 3 + b] += basis[a] * basis[b]
+            right[a] += basis[a] * curves[at * 3 + layer]
+        at += 4
+    let most = nonnegative3(normal, right)
+    # The fast population's radius from the granularity where the curve is
+    # halfway up (first order: σ²·S = Σ D·ρ²·F(q)·E[s⁴]/E[s²]); the others'
+    # in proportion.
+    var top = 0.0
+    for at2 in 0..<table_samples:
+        top = math.max(top, curves[at2 * 3 + layer])
+    var middle: usize = 0
+    for at2 in 0..<table_samples:
+        if curves[at2 * 3 + layer] >= 0.5 * top:
+            middle = at2
+            if not reversal:
+                break
+    let wanted = granularity[middle * 3 + layer] * granularity[middle * 3 + layer] * aperture_area
+    var weighed = 0.0
+    for p in 0..<populations:
+        weighed += most[p] * share(populations_at, layer, p, log_h_at(middle), reversal) * radius_ratio[p] * radius_ratio[p] * light_taken(peak)
+    let fourth_over_second = 1.3251199999999998 / size_square_mean
+    let fast = math.sqrt(math.max(wanted, 1.0e-12) / math.max(weighed * fourth_over_second, 1.0e-12))
+    var geometry: Geometry[3]
+    for p in 0..<populations:
+        let radius = math.clamp(fast * radius_ratio[p], 0.2, 12.0)
+        # Room above the curve's most: the strengths solved below are not 1.
+        let density = headroom * most[p] / (radius * radius * size_square_mean * light_taken(peak))
+        geometry[p] = Geometry(density = density, peak = peak, radius = radius)
+        out.geometry[layer * 3 + p] = geometry[p]
+    # At each exposure, how far the populations have developed and how strong
+    # their clouds are, so the field's density is the curve's and its rms the
+    # granularity's. The populations develop along their own logistics at a
+    # warped exposure, the same for the three (so no share ever turns back as
+    # exposure grows), found by bisection for the density; the clouds'
+    # strength by bisection outside it (at a given density, variance grows
+    # with the strength).
+    var solved_warp: f64[129]
+    var solved_strength: f64[129]
+    let count = table_samples // solved_every + 1
+    for index in 0..<count:
+        let sample = index * solved_every if index * solved_every < table_samples else table_samples - 1
+        let target = curves[sample * 3 + layer]
+        let variance = granularity[sample * 3 + layer] * granularity[sample * 3 + layer]
+        var low = math.log(0.05)
+        var high = math.log(strongest)
+        var strength = 1.0
+        var warp = log_low - 3.0 if not reversal else log_high + 3.0
+        if target > 1.0e-6:
+            for _ in 0..<40:
+                let middle_log = 0.5 * (low + high)
+                strength = math.exp(middle_log)
+                let (found, reached) = warp_for(geometry, populations_at, layer, reversal, strength, target)
+                warp = found
+                let lambda = developed_grains(geometry, populations_at, layer, reversal, warp)
+                # Every grain developed and still short of the curve: the
+                # clouds must be stronger, whatever the grain says.
+                if reached and field_variance(geometry, lambda, strength) > variance:
+                    high = middle_log
+                else:
+                    low = middle_log
+        solved_warp[index] = warp
+        solved_strength[index] = strength
+    # Exposure only moves the warp up (on a slide too: the first developer
+    # takes more of the grains).
+    for index in 1..<count:
+        solved_warp[index] = math.max(solved_warp[index], solved_warp[index - 1])
+    # Between the solved samples, the shares themselves interpolated (they stay
+    # monotone; the warp through a steep logistic would not stay near).
+    for sample in 0..<table_samples:
+        let place = (f64)sample / (f64)solved_every
+        let below = (usize)math.min(math.floor(place), (f64)(count - 2))
+        let t = place - (f64)below
+        let base = (sample * 3 + layer) * 4
+        for p in 0..<populations:
+            let low_share = share(populations_at, layer, p, solved_warp[below], reversal)
+            let high_share = share(populations_at, layer, p, solved_warp[below + 1], reversal)
+            out.table[base + p] = low_share * (1.0 - t) + high_share * t
+        out.table[base + 3] = solved_strength[below] * (1.0 - t) + solved_strength[below + 1] * t
+
+## The developed grains per µm² of each population with all developed as at
+## log H `warp`.
+func developed_grains(geometry: const Geometry[], populations_at: const f64[18], layer: usize, reversal: bool, warp: f64) -> f64[3]:
+    var lambda: f64[3]
+    for p in 0..<populations:
+        lambda[p] = geometry[p].density * share(populations_at, layer, p, warp, reversal)
+    return lambda
+
+## The warped exposure at which the field of clouds of `strength` reaches
+## density `target`, and whether it can (every grain developed may be too few).
+func warp_for(geometry: const Geometry[], populations_at: const f64[18], layer: usize, reversal: bool, strength: f64, target: f64) -> (f64, bool):
+    # Density grows toward high log H on a negative, toward low on a slide.
+    var thin = log_low - 3.0 if not reversal else log_high + 3.0
+    var dense = log_high + 3.0 if not reversal else log_low - 3.0
+    if field_density(geometry, developed_grains(geometry, populations_at, layer, reversal, dense), strength) < target:
+        return (dense, false)
+    for _ in 0..<50:
+        let middle = 0.5 * (thin + dense)
+        if field_density(geometry, developed_grains(geometry, populations_at, layer, reversal, middle), strength) >= target:
+            dense = middle
+        else:
+            thin = middle
+    return (dense, true)
+
+## The least-squares solution of 3 × 3 normal equations with none negative:
+## of every subset of the three left free (the rest zero), the best.
+pub func nonnegative3(normal: f64[9], right: f64[3]) -> f64[3]:
+    var best: f64[3] = [0.0, 0.0, 0.0]
+    var best_cost = 1.0e300
+    for mask in 1..<8:
+        var m: f64[9]
+        var v: f64[3]
+        for a in 0..<(usize)3:
+            let free_a = ((mask >> (i64)a) & 1) == 1
+            v[a] = right[a] if free_a else 0.0
+            for b in 0..<(usize)3:
+                let free_b = ((mask >> (i64)b) & 1) == 1
+                m[a * 3 + b] = normal[a * 3 + b] if free_a and free_b else (1.0 if a == b else 0.0)
+        let solved = film_model.invert3(m) else continue
+        var x: f64[3]
+        var fine = true
+        for a in 0..<(usize)3:
+            x[a] = solved[a * 3] * v[0] + solved[a * 3 + 1] * v[1] + solved[a * 3 + 2] * v[2]
+            fine = fine and x[a] >= 0.0
+        if not fine:
+            continue
+        var cost = 0.0
+        for a in 0..<(usize)3:
+            for b in 0..<(usize)3:
+                cost += x[a] * normal[a * 3 + b] * x[b]
+            cost -= 2.0 * x[a] * right[a]
+        if cost < best_cost:
+            best_cost = cost
+            best = x
+    return best
+
+# mark: Sampling ==============================================================
+
+## The clouds' density at (`x`, `y`) µm, per layer (`layers` of them, three or
+## one), from grains of `geometry`; `grown` how far each layer's development has
+## come (1: done), `reversal` for a slide (its first developer is what grows).
+## `lookup` gives what a grain's place says: each population's share developed
+## there and the clouds' strength, for a layer at a place in µm (the effective
+## log H there, through the table), from `context`.
+pub func clouds(geometry: const Geometry[], layers: usize, x: f64, y: f64, grown: f64[3], reversal: bool,
+                lookup: func(void*, usize, f64, f64) -> f64[4], context: void*) -> f64[3]:
+    var out: f64[3] = [0.0, 0.0, 0.0]
+    for layer in 0..<layers:
+        for p in 0..<populations:
+            let g = geometry[layer * 3 + p]
+            if g.density <= 0.0:
+                continue
+            let cell = cell_radii * g.radius
+            let mean = g.density * cell * cell
+            # Two cells in, so no cell index is negative.
+            let u = x / cell + 2.0
+            let v = y / cell + 2.0
+            let cx = (i64)math.floor(u)
+            let cy = (i64)math.floor(v)
+            let stream = (u32)(layer * 3 + p + 1)
+            for dy in -1..=1:
+                for dx in -1..=1:
+                    let kx = cx + dx
+                    let ky = cy + dy
+                    let seed = cell_seed((u32)kx, (u32)ky, stream)
+                    let count = grain_count(seed, mean)
+                    for j in 0..<count:
+                        let gx = ((f64)kx + grain_value(seed, j, 0) - 2.0) * cell
+                        let gy = ((f64)ky + grain_value(seed, j, 1) - 2.0) * cell
+                        let radius = g.radius * (size_low + (size_high - size_low) * grain_value(seed, j, 3))
+                        let far = ((x - gx) * (x - gx) + (y - gy) * (y - gy)) / (radius * radius)
+                        if far >= 1.0:
+                            continue
+                        let place = lookup(context, layer, gx, gy)
+                        var on = place[p]
+                        if grown[layer] < 1.0:
+                            on = 1.0 - (1.0 - on) * grown[layer] if reversal else on * grown[layer]
+                        if grain_value(seed, j, 2) >= on:
+                            continue
+                        out[layer] += g.peak * place[3] * (1.0 - far) * (1.0 - far)
+    return out
+
+## Layer `layer`'s developed field at table sample `sample`, read through a
+## channel that sees its dye `factor` times as dense as its own does (a
+## scanner's band reads other layers' dyes a little): its density over a large
+## area (Campbell).
+pub func reading(fitted: const Fit*, layer: usize, sample: usize, factor: f64) -> f64:
+    let base = (sample * 3 + layer) * 4
+    var d = 0.0
+    for p in 0..<populations:
+        let g = fitted.geometry[layer * 3 + p]
+        let lambda = g.density * fitted.table[base + p]
+        d += lambda * g.radius * g.radius * size_square_mean * light_taken(factor * g.peak * fitted.table[base + 3])
+    return d
+
+## Where pixel (`px`, `py`)'s sample `k` falls in it (0..1 each way): a
+## low-discrepancy sequence (R2) turned by an offset of the pixel's own, so
+## its samples spread evenly over it and neighbours' do not line up.
+pub func sample_place(px: u32, py: u32, k: u32) -> (f64, f64):
+    let rx = fraction(mixed(px, py ^ 0x51ed27))
+    let ry = fraction(mixed(py +% 0x2545f491, px))
+    let ax = rx + 0.7548776662466927 * (f64)k
+    let ay = ry + 0.5698402909980532 * (f64)k
+    return (ax - math.floor(ax), ay - math.floor(ay))
+
+# mark: Tests =================================================================
+
+## A field of populations developed evenly: the share of points' transmittance
+## sampled over a large patch, against Campbell's mean.
+func even_place(context: void*, layer: usize, x: f64, y: f64) -> f64[4]:
+    _ = layer
+    _ = x
+    _ = y
+    return *(f64[4]*)context
+
+test "an even field's sampled transmittance is Campbell's density":
+    var geometry: Geometry[9]
+    for at in 0..<(usize)9:
+        geometry[at] = Geometry(density = 0.0, peak = 0.5, radius = 1.0)
+    geometry[0] = Geometry(density = 1.2, peak = 0.5, radius = 1.5)
+    geometry[1] = Geometry(density = 3.0, peak = 0.5, radius = 0.9)
+    var place: f64[4] = [0.7, 0.4, 0.0, 1.3]
+    var sum = 0.0
+    let n = 400
+    for yi in 0..<n:
+        for xi in 0..<n:
+            let x = ((f64)xi + fraction(mixed((u32)xi, (u32)yi))) * 0.37
+            let y = ((f64)yi + fraction(mixed((u32)yi +% 77, (u32)xi))) * 0.37
+            let d = clouds(geometry, 1, x, y, [1.0, 1.0, 1.0], false, even_place, (void*)&place)
+            sum += math.pow(10.0, -d[0])
+    let measured = -math.log10(sum / (f64)(n * n))
+    let lambda: f64[3] = [1.2 * 0.7, 3.0 * 0.4, 0.0]
+    let expected = field_density(geometry[0..<3], lambda, 1.3)
+    assert(math.abs(measured / expected - 1.0) < 0.03)
+
+test "the fit makes a curve's density and granularity":
+    # A curve rising over three stops to 2.0, its granularity 0.01·√D: the
+    # fitted field reads both (Campbell), the shares never turn back.
+    var curves: f64[3072]
+    var grain: f64[3072]
+    for at in 0..<table_samples:
+        let d = 2.0 / (1.0 + math.exp(-(log_h_at(at) + 1.0) / 0.35))
+        for k in 0..<(usize)3:
+            curves[at * 3 + k] = d
+            grain[at * 3 + k] = 0.01 * math.sqrt(d)
+    var fitted = fit(1, curves, grain, false, color_peak) catch failure:
+        assert(false)
+        return
+    defer fitted.release()
+    let checked: usize[4] = [450, 512, 600, 700]
+    for at in checked:
+        let base = (at * 3) * 4
+        var lambda: f64[3]
+        for p in 0..<populations:
+            lambda[p] = fitted.geometry[p].density * fitted.table[base + p]
+        let strength = fitted.table[base + 3]
+        let density = field_density(fitted.geometry[0..<3], lambda, strength)
+        let rms = math.sqrt(field_variance(fitted.geometry[0..<3], lambda, strength))
+        assert(math.abs(density / curves[at * 3] - 1.0) < 0.03)
+        assert(math.abs(rms / grain[at * 3] - 1.0) < 0.05)
+    for at in 1..<table_samples:
+        for p in 0..<populations:
+            assert(fitted.table[(at * 3) * 4 + p] >= fitted.table[((at - 1) * 3) * 4 + p])

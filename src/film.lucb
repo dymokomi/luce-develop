@@ -57,7 +57,10 @@
 ##   34     development under inhibition: amounts over the effective log H
 ##   35     the grain populations' correction to the rms granularity (48 µm)
 ##          over log H
-##   36     values: 0–2 the matrix from AP1 back to the camera's values, by
+##   36–38  the stochastic render's grains (film_grains.lucb), a row per layer
+##          over the effective log H: each population's share developed and the
+##          clouds' strength (`fit_grains`)
+##   39     values: 0–2 the matrix from AP1 back to the camera's values, by
 ##          rows; 3–5 the inhibition matrix; 6 grey's log H, top, the frame
 ##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
 ##          inverse gammas times contrast, Black; 9 the floors; 10 the timing
@@ -79,7 +82,12 @@
 ##          exposure time (s); 52–54 the development's kinetics; 64–319 the
 ##          halation's samples, offsets in µm; 320–328 the grain populations,
 ##          per layer three: where half develop (log H), how gradually, and
-##          their strength
+##          their strength; 329–337 the stochastic render's grains, per layer
+##          three populations: grains per µm², their clouds' peak density and
+##          radius (µm); 338 each layer's dye under its clouds (the floor), and
+##          how many layers have grains (1 for black and white); 340–387 a
+##          cloud's light taken over its peak density (film_grains.lucb's
+##          `light_taken`, on its log grid)
 import interop
 import memory
 from luce_std.collections import Buffer
@@ -97,6 +105,7 @@ import film_model
 from film_model import Model, build_model, invert3, log_h_at, lut_size, curve_samples, log_low, log_high
 import film_exposure
 import film_halation
+import film_grains
 from film_exposure import Input
 from settings import Settings, View, defaults
 import recipe
@@ -104,11 +113,12 @@ import recipe
 # mark: Layout ================================================================
 
 pub let atlas_width: usize = 1089
-pub let atlas_rows: usize = 37
+pub let atlas_rows: usize = 40
 pub let neutral_row: usize = 33
 pub let developed_row: usize = 34
 pub let grain_row: usize = 35
-pub let values_row: usize = 36
+pub let grains_row: usize = 36
+pub let values_row: usize = 39
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
 ## 4:3 television frame), Super 35, 16 mm, 65 mm (5-perf, Super Panavision 70),
@@ -293,6 +303,11 @@ pub struct Film:
     var printing: i64
     var paper: i64
     var paper_table: f64[]
+    ## The granularity wanted (rms through 48 µm, over the effective log H, per
+    ## layer) as the development leaves it, and whether `fit_grains` has made
+    ## the stochastic render's grains for it.
+    var granularity: f64[]
+    var grains_fitted: bool
 
     func release_paper_table():
         if self.paper_table.length > 0:
@@ -302,6 +317,10 @@ pub struct Film:
 
     pub func release():
         self.release_paper_table()
+        if self.granularity.length > 0:
+            free(self.granularity) in memory.heap
+        var no_granularity: f64[]
+        self.granularity = no_granularity
         self.model.release()
         if self.texels.length > 0:
             free(self.texels) in memory.heap
@@ -324,6 +343,8 @@ pub struct Film:
             self.texels = try new f32[atlas_width * atlas_rows * 4] --- in memory.heap
             for at in 0..<self.texels.length:
                 self.texels[at] = 0.0f32
+            self.granularity = try new f64[curve_samples * 3] --- in memory.heap
+        self.grains_fitted = false
         if choice == 0:
             self.on = false
             self.put(values_row, 7, 0.0, 0.0, 0.0, 0.0)
@@ -483,6 +504,8 @@ pub struct Film:
             if not grown.reversal:
                 for layer in 0..<(usize)3:
                     grows[layer] = grown.factor(layer, x)
+            for layer in 0..<(usize)3:
+                self.granularity[at * 3 + layer] = grain[layer] * coarse * grows[layer]
             self.put(grain_row, at, grain[0] * coarse * grows[0], grain[1] * coarse * grows[1], grain[2] * coarse * grows[2], 1.0)
         # The grain populations' strengths, fitted to that granularity; then
         # the grain row becomes what still corrects them to it exactly at each
@@ -729,6 +752,134 @@ pub struct Film:
         let at = (values_row * atlas_width + column) * 4
         return [(f64)(f16)self.texels[at], (f64)(f16)self.texels[at + 1], (f64)(f16)self.texels[at + 2], (f64)(f16)self.texels[at + 3]]
 
+    ## The stochastic render's grains for the settings last prepared
+    ## (film_grains.lucb): fitted to the development's curve over its floor and
+    ## to its granularity, at each effective log H. Slower than `prepare` (a
+    ## fraction of a second), so done only when the render begins.
+    pub func fit_grains() -> !:
+        if self.grains_fitted or not self.on:
+            return
+        let kind = self.model.stock.kind
+        let layers: usize = 1 if kind == 2 else 3
+        var floors: f64[3] = [1.0e300, 1.0e300, 1.0e300]
+        for at in 0..<curve_samples:
+            let amounts = self.texel(developed_row, at)
+            for layer in 0..<(usize)3:
+                floors[layer] = math.min(floors[layer], amounts[layer])
+        var curves = try new f64[curve_samples * 3] --- in memory.heap
+        defer free(curves) in memory.heap
+        for at in 0..<curve_samples:
+            let amounts = self.texel(developed_row, at)
+            for layer in 0..<(usize)3:
+                curves[at * 3 + layer] = math.max(amounts[layer] - floors[layer], 0.0)
+        let peak = film_grains.silver_peak if kind == 2 else film_grains.color_peak
+        var fitted = try film_grains.fit(layers, curves, self.granularity, kind == 1, peak)
+        defer fitted.release()
+        for layer in 0..<(usize)3:
+            for at in 0..<curve_samples:
+                let base = (at * 3 + layer) * 4
+                self.put(grains_row + layer, at, fitted.table[base], fitted.table[base + 1], fitted.table[base + 2], fitted.table[base + 3])
+            for p in 0..<film_grains.populations:
+                let g = fitted.geometry[layer * 3 + p]
+                let used = layer < layers
+                self.put(values_row, 329 + layer * 3 + p, g.density if used else 0.0, g.peak, g.radius, 0.0)
+        self.put(values_row, 338, floors[0], floors[1], floors[2], (f64)layers)
+        for at in 0..<film_grains.peak_count:
+            self.put(values_row, 340 + at, film_grains.light_taken(film_grains.peak_at(at)), 0.0, 0.0, 0.0)
+        self.grains_fitted = true
+
+    ## The scan's reading of dye `amounts` as density (a slide's light too).
+    pub func density_read(amounts: f64[3]) -> f64[3]:
+        let read = self.scanned_lut(amounts, self.value(6)[1])
+        if self.model.stock.kind != 1:
+            return read
+        var out: f64[3]
+        for c in 0..<(usize)3:
+            out[c] = -math.log10(math.max(math.sinh(read[c]) / 256.0, 1.0e-30))
+        return out
+
+    ## The granularity wanted for layer `layer` at effective log H `log_h` (rms
+    ## through 48 µm).
+    pub func granularity_at(layer: usize, log_h: f64) -> f64:
+        let x = math.clamp((log_h - log_low) / (log_high - log_low), 0.0, 1.0) * (f64)(curve_samples - 1)
+        let below = (usize)math.min(math.floor(x), (f64)(curve_samples - 2))
+        let t = x - (f64)below
+        return self.granularity[below * 3 + layer] * (1.0 - t) + self.granularity[(below + 1) * 3 + layer] * t
+
+    ## Whether `fit_grains` has fitted the grains for the settings last prepared.
+    pub func has_grains() -> bool:
+        return self.grains_fitted
+
+    ## The grains' populations as the atlas holds them (as the GPU reads them).
+    pub func grain_geometry() -> film_grains.Geometry[9]:
+        var out: film_grains.Geometry[9]
+        for at in 0..<(usize)9:
+            let v = self.value(329 + at)
+            out[at] = film_grains.Geometry(density = v[0], peak = v[1], radius = v[2])
+        return out
+
+    ## Layer `layer`'s grain table at effective log H `log_h`: its populations'
+    ## shares developed and the clouds' strength (film.frag's `grain_table`).
+    pub func grain_table(layer: usize, log_h: f64) -> f64[4]:
+        let x = math.clamp((log_h - log_low) / (log_high - log_low), 0.0, 1.0) * (f64)(curve_samples - 1)
+        let below = (usize)math.min(math.floor(x), (f64)(curve_samples - 2))
+        let t = x - (f64)below
+        let row = grains_row + layer
+        let a = (row * atlas_width + below) * 4
+        let b = a + 4
+        var out: f64[4]
+        for k in 0..<(usize)4:
+            out[k] = (f64)(f16)self.texels[a + k] * (1.0 - t) + (f64)(f16)self.texels[b + k] * t
+        return out
+
+    ## The scan's slopes at dye `amounts`: how each channel's density (a slide's
+    ## light as density too) moves with each layer's dye (layer by row). The
+    ## stochastic render reads a pixel's grain through them, about the
+    ## developed film's reading there.
+    pub func scan_slopes(amounts: f64[3]) -> f64[9]:
+        let here = self.density_read(amounts)
+        var slopes: f64[9]
+        for layer in 0..<(usize)3:
+            var nudged = amounts
+            nudged[layer] += 0.02
+            let moved = self.density_read(nudged)
+            for channel in 0..<(usize)3:
+                slopes[layer * 3 + channel] = (moved[channel] - here[channel]) / 0.02
+        return slopes
+
+    ## What the grains add on average to each channel's density over the
+    ## developed film's where each layer developed at `log_h`, read through the
+    ## scan's `slopes` there (Campbell, exact for them): each layer's clouds
+    ## are fitted to read its curve through its own channel, but another
+    ## channel sees them fainter, and faint clouds lose less to the averaging
+    ## of light, so they read denser there than their share of the mean. The
+    ## published curves are read through every channel at once, so the
+    ## stochastic render takes this off (film.frag's `grain_bias`).
+    pub func grain_bias(log_h: f64[3], slopes: f64[9]) -> f64[3]:
+        let base = self.value(338)
+        let layers = (usize)base[3]
+        var out: f64[3] = [0.0, 0.0, 0.0]
+        for channel in 0..<(usize)3:
+            for layer in 0..<layers:
+                # Black and white: one silver for the three amounts the table reads.
+                var factor = slopes[layer * 3 + channel]
+                if layers == 1:
+                    factor = slopes[channel] + slopes[3 + channel] + slopes[6 + channel]
+                let table = self.grain_table(layer, log_h[layer])
+                for p in 0..<film_grains.populations:
+                    let v = self.value(329 + layer * 3 + p)
+                    let area = v[0] * table[p] * v[2] * v[2] * film_grains.size_square_mean
+                    let peak = v[1] * table[3]
+                    out[channel] += area * (self.taken(factor * peak) - factor * self.taken(peak))
+        return out
+
+    ## film_grains.lucb's `light_taken`, from the atlas as the GPU reads it.
+    func taken(q: f64) -> f64:
+        let place = math.clamp(math.log(math.max(q, film_grains.peak_low) / film_grains.peak_low) / math.log(film_grains.peak_high / film_grains.peak_low), 0.0, 1.0) * (f64)(film_grains.peak_count - 1)
+        let below = (usize)math.min(math.floor(place), (f64)(film_grains.peak_count - 2))
+        let t = place - (f64)below
+        return self.value(340 + below)[0] * (1.0 - t) + self.value(341 + below)[0] * t
+
     ## Bilinear between texel centres at (`x`, `y`) in texels, as the GPU filters.
     func bilinear(x: f64, y: f64) -> f64[3]:
         let x0 = (usize)math.floor(x)
@@ -798,43 +949,10 @@ func population_amplitudes(model: const Model*, texels: const f32[]) -> f64[9]:
                     normal[a * 3 + b] += basis[a] * basis[b]
                 right[a] += basis[a] * target
             at += 8
-        let squares = nonnegative3(normal, right)
+        let squares = film_grains.nonnegative3(normal, right)
         for p in 0..<(usize)3:
             out[layer * 3 + p] = math.sqrt(squares[p])
     return out
-
-## The least-squares solution of the 3 × 3 normal equations with none negative:
-## of every subset of the three left free (the rest zero), the best.
-func nonnegative3(normal: f64[9], right: f64[3]) -> f64[3]:
-    var best: f64[3] = [0.0, 0.0, 0.0]
-    var best_cost = 1.0e300
-    for mask in 1..<8:
-        var m: f64[9]
-        var v: f64[3]
-        for a in 0..<(usize)3:
-            let free_a = ((mask >> (i64)a) & 1) == 1
-            v[a] = right[a] if free_a else 0.0
-            for b in 0..<(usize)3:
-                let free_b = ((mask >> (i64)b) & 1) == 1
-                m[a * 3 + b] = normal[a * 3 + b] if free_a and free_b else (1.0 if a == b else 0.0)
-        let solved = invert3(m) else continue
-        var x: f64[3]
-        var fine = true
-        for a in 0..<(usize)3:
-            x[a] = solved[a * 3] * v[0] + solved[a * 3 + 1] * v[1] + solved[a * 3 + 2] * v[2]
-            fine = fine and x[a] >= 0.0
-        if not fine:
-            continue
-        # The cost up to a constant: x·N·x − 2·x·r.
-        var cost = 0.0
-        for a in 0..<(usize)3:
-            for b in 0..<(usize)3:
-                cost += x[a] * normal[a * 3 + b] * x[b]
-            cost -= 2.0 * x[a] * right[a]
-        if cost < best_cost:
-            best_cost = cost
-            best = x
-    return best
 
 ## How many steps development runs in (film_passes.lucb, film.frag): enough
 ## for the release's smooth course over time; more would let the GPU's half
@@ -1000,14 +1118,22 @@ pub func developed(film: const Film*, e: f64[3], held: f64[3], exhausted: f64, s
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
         out.effective[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2]) - edge * (exhausted - even)
-        out.amounts[k] = film.curve(developed_row, k, out.effective[k])
+    out.amounts = developed_amounts(film, out.effective, share)
+    return out
+
+## Each layer's dye where it developed at effective log H `log_h`, `share` of the way
+## through the development.
+pub func developed_amounts(film: const Film*, log_h: f64[3], share: f64 = 1.0) -> f64[3]:
+    var out: f64[3]
+    for k in 0..<(usize)3:
+        out[k] = film.curve(developed_row, k, log_h[k])
     if share < 1.0:
         # Part of the way: from the unexposed film's (a negative's fog, a
         # slide's most dye), grown as far as the kinetics say.
-        let grown = progress(film, out.effective, share)
+        let grown = progress(film, log_h, share)
         for k in 0..<(usize)3:
             let base = film.curve(developed_row, k, log_low)
-            out.amounts[k] = base + (out.amounts[k] - base) * grown[k]
+            out[k] = base + (out[k] - base) * grown[k]
     return out
 
 ## How far each layer at log H `log_h` has developed `share` of the way through
@@ -1175,7 +1301,32 @@ func silver(film: const Film*, d: f64[3]) -> f64[3]:
 ## Dye `amounts` scanned back to AP1, less `unbias` in density. `matrix` false
 ## skips the scan's matrix and the timing (for fitting the matrix).
 pub func finish(film: const Film*, amounts: f64[3], unbias: f64[3], matrix: bool = true) -> f64[3]:
-    let d = silver(film, film.scanned_lut(amounts, film.value(6)[1]))
+    return finish_density(film, scanned(film, amounts), unbias, matrix)
+
+## What the scanner reads of dye `amounts` (the retained silver included): a
+## negative's densities, a slide's asinh-encoded light.
+pub func scanned(film: const Film*, amounts: f64[3]) -> f64[3]:
+    return silver(film, film.scanned_lut(amounts, film.value(6)[1]))
+
+## The light behind what the scanner read, `d`: a negative's transmittance, a
+## slide's light (its table holds it asinh-encoded); `reading_of` turns it back.
+## Averaged over a pixel's area, light is what a scanner sees.
+pub func light_of(film: const Film*, d: f64[3]) -> f64[3]:
+    if film.value(17)[3] == 1.0:
+        return [math.sinh(d[0]) / 256.0, math.sinh(d[1]) / 256.0, math.sinh(d[2]) / 256.0]
+    return [math.pow(10.0, -d[0]), math.pow(10.0, -d[1]), math.pow(10.0, -d[2])]
+
+pub func reading_of(film: const Film*, light: f64[3]) -> f64[3]:
+    if film.value(17)[3] == 1.0:
+        return [asinh(256.0 * light[0]), asinh(256.0 * light[1]), asinh(256.0 * light[2])]
+    return [-math.log10(math.max(light[0], 1.0e-30)), -math.log10(math.max(light[1], 1.0e-30)), -math.log10(math.max(light[2], 1.0e-30))]
+
+func asinh(x: f64) -> f64:
+    let magnitude = math.abs(x)
+    return math.copysign(math.log(magnitude + math.sqrt(magnitude * magnitude + 1.0)), x)
+
+## What the scanner read, `d` (`scanned`), back to AP1, less `unbias` in density.
+pub func finish_density(film: const Film*, d: f64[3], unbias: f64[3], matrix: bool = true) -> f64[3]:
     let v8 = film.value(8)
     if film.value(17)[3] == 1.0:
         # A slide: scene light (asinh-encoded), Contrast a power about grey; the timing.

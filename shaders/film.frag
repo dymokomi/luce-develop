@@ -40,7 +40,7 @@ layout(set = 0, binding = 4) uniform sampler2D film;
 
 const float table_width = 1024.0;
 const float film_width = 1089.0;
-const float film_rows = 37.0;
+const float film_rows = 40.0;
 const float film_lut_size = 33.0;
 
 vec4 value(float at) {
