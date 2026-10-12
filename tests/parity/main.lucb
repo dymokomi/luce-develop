@@ -6,7 +6,8 @@
 ## off by more than 6. The Standard and Linear views are computed the same way on
 ## both, so no value may be off by 3 (8 with film, which runs nine half-float
 ## passes first); ACES and Print go through a table on the GPU, so their limit
-## is 40.
+## is 40. A recipe with two outputs draws A left of the split and B right of
+## it, each matching its own CPU develop.
 import c
 import memory
 import strings
@@ -17,7 +18,8 @@ from luce_std import paths
 from luce_develop import scene
 from luce_develop import process
 from luce_develop import renderer
-from luce_develop.settings import parse
+from luce_develop.settings import parse, Settings
+from luce_develop import recipe
 
 let cases: str[18] = [
     "",
@@ -31,13 +33,13 @@ let cases: str[18] = [
     "view=1;geometry_vertical=40;geometry_rotate=4;geometry_aspect=20;guides=0.1,0.1,0.12,0.9",
     "view=1;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40",
     "view=1;film_stock=1;film_grain=0",
-    "view=1;film_stock=1;film_exposure=1;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2",
+    "view=1;film_stock=1;develop_time=4.5;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2",
     "view=1;film_stock=3;film_halation=300;film_grain=0;exposure=2",
     "view=3;exposure=0.5;saturation=20",
     "view=3;film_stock=1;film_grain=0",
     "view=1;film_stock=5;film_grain=0",
     "view=1;film_stock=5;film_grain=80",
-    "view=1;film_stock=6;film_grain=120;film_exposure=-1"]
+    "view=1;film_stock=6;film_grain=120;develop_time=10;develop_temperature=22"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
@@ -97,6 +99,61 @@ func check_file(device: gpu.Device, path: str) -> i64!:
             failed += 1
     return failed
 
+## A and B compared, the split at 0.4: each side within the film limit (8) of
+## its own CPU develop (B: the recipe shown at Develop, scanned as is).
+func check_compare(device: gpu.Device, path: str) -> i64!:
+    var settings = parse("film_grain=0;contrast=40;saturation=-30")
+    settings.recipe.set_compare((i64)recipe.Stage.develop)
+    var shown_b = settings
+    shown_b.recipe.display = settings.recipe.compare
+    shown_b.recipe.compare = -1
+    var cpu_scene = try scene.open(path, 384)
+    defer cpu_scene.close()
+    var expected_a = try process.render(&cpu_scene, settings)
+    defer expected_a.close()
+    var expected_b = try process.render(&cpu_scene, shown_b)
+    defer expected_b.close()
+    let width = (u32)expected_a.width()
+    let height = (u32)expected_a.height()
+    var drawer = try renderer.create(gpu.Format.rgba8)
+    defer drawer.close()
+    drawer.show(try scene.open(path, 384))
+    drawer.set_settings(settings)
+    drawer.set_split(0.4)
+    var texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba8)
+    defer texture.destroy()
+    let frame = try texture.frame()
+    defer frame.release()
+    let target = try frame.value().target()
+    defer target.release()
+    try drawer.draw(target, 0.0, 0.0, (f64)width, (f64)height)
+    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+    let shown = try new u8[(usize)(width * height * 4)] in memory.heap
+    defer free(shown) in memory.heap
+    try texture.read(shown)
+    let split = (usize)((f64)width * 0.4)
+    var largest = 0
+    var total = 0.0
+    var differs = false
+    for y in 0..<(usize)height:
+        for x in 0..<(usize)width:
+            # A column either side of the split may be either.
+            if x + 1 >= split and x <= split:
+                continue
+            let want = expected_a.pixels() if x < split else expected_b.pixels()
+            for k in 0..<(usize)3:
+                let at = (y * (usize)width + x) * 4 + k
+                let difference = (i64)shown[at] - (i64)want[at]
+                let size = difference if difference >= 0 else -difference
+                total += (f64)size
+                largest = size if size > largest else largest
+                if expected_a.pixels()[at] != expected_b.pixels()[at]:
+                    differs = true
+    let mean = total / (f64)(width * height * 3)
+    let good = mean < 1.0 and largest < 8 and differs
+    print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [A | B at Develop]  mean {mean}  largest {largest}")
+    return 0 if good else 1
+
 ## Whether a file is at `path`.
 func present(path: str) -> bool!:
     let terminated = try strings.copy(path)
@@ -112,6 +169,7 @@ pub func main(arguments: str[]) -> i32!:
     if arguments.length > 1:
         for path in arguments[1..]:
             failed += try check_file(device, path)
+            failed += try check_compare(device, path)
         return 1 if failed > 0 else 0
     for sample in samples:
         if not try present(sample):
@@ -119,4 +177,5 @@ pub func main(arguments: str[]) -> i32!:
             return 0
     for sample in samples:
         failed += try check_file(device, sample)
+        failed += try check_compare(device, sample)
     return 1 if failed > 0 else 0

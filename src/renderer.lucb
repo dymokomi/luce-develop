@@ -4,6 +4,10 @@
 ## pass of shaders/develop.frag with the settings in its uniforms and two
 ## textures: the develop's tables (tables.lucb), rebuilt when the settings change,
 ## and the ACES view's table, baked once.
+##
+## A recipe with two outputs (A displayed, B compared) develops the scene twice,
+## each with its own tables, film and view, and draws A left of the split and B
+## right of it.
 import interop
 import memory
 import ownership
@@ -12,7 +16,7 @@ import sync
 import thread
 from luce_gpu import gpu
 from luce_std import math
-from settings import Settings, View, Look, defaults, compile
+from settings import Settings, View, Look, defaults, compile, compile_to
 from scene import Scene
 import scene
 import tables
@@ -77,6 +81,38 @@ func load(context: void*?):
             opened.close()
         loading.lock.unlock()
 
+## One develop of the shown scene: its settings, compiled for one output, and
+## the GPU state they make (the tables, the view's table, the film's atlas and
+## the passes that film the scene, whose result is theirs).
+struct Developing:
+    var settings: Settings
+    var tables_stale: bool
+    var view_baked: i64
+    var tables_texture: gpu.Texture?
+    var view_texture: gpu.Texture?
+    var film: Film
+    var film_texture: gpu.Texture?
+    var film_passes: FilmPasses
+    var filmed: gpu.Texture?
+    var film_stale: bool
+
+    func take(settings: Settings):
+        self.settings = settings
+        self.tables_stale = true
+
+    func release():
+        self.film.release()
+        self.film_passes.release()
+        self.filmed = none
+        for slot in [&self.tables_texture, &self.view_texture, &self.film_texture]:
+            if let held = *slot:
+                var gone = held
+                gone.destroy()
+            *slot = none
+
+func developing() -> Developing:
+    return Developing(settings = defaults(), view_baked = -1)
+
 pub struct Renderer:
     var loading: Loading*?
     var worker: thread.Handle
@@ -84,24 +120,17 @@ pub struct Renderer:
     var shown: Scene
     var shown_serial: u64
     var upload: bool
-    var settings: Settings
-    var tables_stale: bool
-    var view_baked: i64
+    ## Output A, always drawn, and output B, drawn right of `split` (0..1 of
+    ## the photo's width) while `comparing`.
+    var a: Developing
+    var b: Developing
+    var comparing: bool
+    var split: f64
     ## Made on the first draw, on the window's device.
     var device: gpu.Device?
     var shader: gpu.Shader?
     var pipeline: gpu.Pipeline?
     var scene_texture: gpu.Texture?
-    var tables_texture: gpu.Texture?
-    var view_texture: gpu.Texture?
-    ## The film stock's model and atlas, and its texture; the passes that film
-    ## the scene on the negative, the filmed scene they made (theirs), and
-    ## whether it must be made again.
-    var film: Film
-    var film_texture: gpu.Texture?
-    var film_passes: FilmPasses
-    var filmed: gpu.Texture?
-    var film_stale: bool
     var problem: u8[256]
     var problem_length: usize
     ## The format of the targets drawn into: the window's when none.
@@ -196,7 +225,7 @@ pub struct Renderer:
         let height = (f64)self.shown.height()
         if not self.geometry_shown or not self.crop_shown:
             return (width, height)
-        return geometry.output_size(&self.settings, width, height)
+        return geometry.output_size(&self.a.settings, width, height)
 
     ## The output's width and height in scene pixels, for placing it.
     pub func output_width() -> f64:
@@ -210,13 +239,24 @@ pub struct Renderer:
 
     ## Develop with `settings` from the next draw on.
     pub func set_settings(settings: Settings):
-        self.settings = compile(&settings)
-        self.tables_stale = true
+        self.a.take(compile(&settings))
+        self.comparing = settings.recipe.comparing()
+        if self.comparing:
+            self.b.take(compile_to(&settings, settings.recipe.compare))
 
-    ## The matrix from the scene into AP1: the white balance's, or as shot when
-    ## the film sees the light on set (film.camera_settings).
-    func scene_matrix() -> f64[9]!:
-        let camera = film.camera_settings(&self.settings)
+    ## Whether outputs A and B are both shown, and where B begins across the
+    ## photo (0..1 of its width).
+    pub func is_comparing() -> bool:
+        return self.comparing
+    pub func split_at() -> f64:
+        return self.split
+    pub func set_split(at: f64):
+        self.split = math.clamp(at, 0.0, 1.0)
+
+    ## The matrix from the scene into AP1 for `which`: the white balance's, or as
+    ## shot when the film sees the light on set (film.camera_settings).
+    func scene_matrix(which: const Developing*) -> f64[9]!:
+        let camera = film.camera_settings(&which.settings)
         return try self.shown.matrix(&camera)
 
     ## Draw the photo into `x`, `y`, `width` × `height` points of `target`.
@@ -226,33 +266,43 @@ pub struct Renderer:
         let checked = try target.get()
         try self.prepare(checked)
         let pipeline = self.pipeline else return
-        try self.shade(checked, pipeline, x, y, width, height)
+        if not self.comparing:
+            try self.shade(checked, pipeline, &self.a, x, y, width, height, x, width)
+            return
+        let middle = width * self.split
+        try self.shade(checked, pipeline, &self.a, x, y, width, height, x, middle)
+        try self.shade(checked, pipeline, &self.b, x, y, width, height, x + middle, width - middle)
 
-    ## One develop pass into `target` with `pipeline`.
-    func shade(checked: const gpu.RenderTarget*, pipeline: gpu.Pipeline, x: f64, y: f64, width: f64, height: f64) -> !:
+    ## One develop pass of `which` into `target` with `pipeline`: the photo
+    ## placed at `x`, `y`, `width` × `height`, drawn only from `left` across
+    ## `across`.
+    func shade(checked: const gpu.RenderTarget*, pipeline: gpu.Pipeline, which: const Developing*, x: f64, y: f64, width: f64, height: f64,
+               left: f64, across: f64) -> !:
+        if across <= 0.0:
+            return
         let scene_texture = self.scene_texture else return
-        let tables_texture = self.tables_texture else return
-        let view_texture = self.view_texture else return
-        let film_texture = self.film_texture else return
+        let tables_texture = which.tables_texture else return
+        let view_texture = which.view_texture else return
+        let film_texture = which.film_texture else return
         let place = try checked.placement()
         let size = try checked.size()
         let scale = size.pixel_width / size.width if size.width > 0.0 else 1.0
         # With film the scene is the filmed one, already in AP1.
         var source_texture = scene_texture
-        var m = try self.scene_matrix()
-        if self.film.active():
-            source_texture = self.filmed else return
+        var m = try self.scene_matrix(which)
+        if which.film.active():
+            source_texture = which.filmed else return
             m = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         let identity: geometry.Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
-        let map = geometry.frame_map(&self.settings, (f64)self.shown.width(), (f64)self.shown.height(), self.crop_shown) if self.geometry_shown else identity
+        let map = geometry.frame_map(&which.settings, (f64)self.shown.width(), (f64)self.shown.height(), self.crop_shown) if self.geometry_shown else identity
         let (out_width, out_height) = self.output_size()
         var uniforms: f32[32] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
             (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
-            (f32)(self.settings.get(.vibrance) / 100.0), (f32)(self.settings.get(.saturation) / 100.0), (f32)self.settings.get(.view), (f32)(out_width / out_height),
+            (f32)(which.settings.get(.vibrance) / 100.0), (f32)(which.settings.get(.saturation) / 100.0), (f32)which.settings.get(.view), (f32)(out_width / out_height),
             (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
         let images: gpu.Texture[4] = [source_texture, tables_texture, view_texture, film_texture]
-        try gpu.shade(checked, pipeline, gpu.Rect(x, y, width, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
+        try gpu.shade(checked, pipeline, gpu.Rect(left, y, across, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
 
     ## Count the develop as shown into the histogram (`histogram`): the photo is
     ## developed at most 256 pixels on its longer side, off screen, and read back.
@@ -276,7 +326,7 @@ pub struct Renderer:
         defer frame.release()
         let area = try frame.value().target()
         defer area.release()
-        try self.shade(try area.get(), pipeline, 0.0, 0.0, width, height)
+        try self.shade(try area.get(), pipeline, &self.a, 0.0, 0.0, width, height, 0.0, width)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
         let pixels = try new u8[(usize)(width * height) * 4] in memory.heap
         defer free(pixels) in memory.heap
@@ -320,46 +370,54 @@ pub struct Renderer:
             try texture.upload(self.shown.bytes())
             self.scene_texture = texture
             self.upload = false
-            self.film_stale = true
-        if self.tables_texture == none or self.tables_stale:
-            let built = tables.build(&self.settings)
+            self.a.film_stale = true
+            self.b.film_stale = true
+        try self.prepare_develop(device, &self.a)
+        if self.comparing:
+            try self.prepare_develop(device, &self.b)
+
+    ## `which`'s tables, view table, film atlas and filmed scene, made or
+    ## refreshed for what changed.
+    func prepare_develop(device: gpu.Device, which: Developing*) -> !:
+        if which.tables_texture == none or which.tables_stale:
+            let built = tables.build(&which.settings)
             let texels = try new f16[tables.table_width * tables.table_rows * 4] --- in memory.heap
             defer free(texels) in memory.heap
             tables.half(&built, texels)
-            if self.tables_texture == none:
-                self.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
-            let held = self.tables_texture else return
+            if which.tables_texture == none:
+                which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
+            let held = which.tables_texture else return
             try held.upload(u8[]((u8*)texels.data, texels.length * 2))
-            try self.film.prepare(&self.settings, self.shown.shot_temperature, self.shown.shot_tint)
+            try which.film.prepare(&which.settings, self.shown.shot_temperature, self.shown.shot_tint)
             let atlas = try new f16[film.atlas_width * film.atlas_rows * 4] --- in memory.heap
             defer free(atlas) in memory.heap
             for at in 0..<atlas.length:
-                atlas[at] = (f16)self.film.texels[at]
-            if self.film_texture == none:
-                self.film_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
-            let film_held = self.film_texture else return
+                atlas[at] = (f16)which.film.texels[at]
+            if which.film_texture == none:
+                which.film_texture = try gpu.Texture.create(device, (u32)film.atlas_width, (u32)film.atlas_rows, gpu.Format.rgba16_float)
+            let film_held = which.film_texture else return
             try film_held.upload(u8[]((u8*)atlas.data, atlas.length * 2))
-            self.tables_stale = false
-            self.film_stale = true
-        if self.view_texture == none or self.view_baked != (i64)self.settings.get(.view):
+            which.tables_stale = false
+            which.film_stale = true
+        if which.view_texture == none or which.view_baked != (i64)which.settings.get(.view):
             let n = view.lut_size
             let table = try new f16[n * n * n * 4] --- in memory.heap
             defer free(table) in memory.heap
-            view.bake((View)(i64)self.settings.get(.view), table)
-            if self.view_texture == none:
-                self.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
-            let held = self.view_texture else return
+            view.bake((View)(i64)which.settings.get(.view), table)
+            if which.view_texture == none:
+                which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
+            let held = which.view_texture else return
             try held.upload(u8[]((u8*)table.data, table.length * 2))
-            self.view_baked = (i64)self.settings.get(.view)
+            which.view_baked = (i64)which.settings.get(.view)
         # Film the scene on the negative when it or the settings changed.
-        if self.film.active() and (self.film_stale or self.filmed == none):
+        if which.film.active() and (which.film_stale or which.filmed == none):
             let scene_texture = self.scene_texture else return
-            let tables_texture = self.tables_texture else return
-            let film_texture = self.film_texture else return
+            let tables_texture = which.tables_texture else return
+            let film_texture = which.film_texture else return
             let aspect = (f64)self.shown.width() / (f64)self.shown.height()
-            self.filmed = try self.film_passes.run(device, scene_texture, tables_texture, film_texture, &self.film,
-                                                   try self.scene_matrix(), aspect, (u32)self.shown.width(), (u32)self.shown.height())
-            self.film_stale = false
+            which.filmed = try which.film_passes.run(device, scene_texture, tables_texture, film_texture, &which.film,
+                                                   try self.scene_matrix(which), aspect, (u32)self.shown.width(), (u32)self.shown.height())
+            which.film_stale = false
 
     ## Stop the loading thread and let every texture go.
     pub func close():
@@ -376,14 +434,12 @@ pub struct Renderer:
             free(loading) in memory.heap
         self.loading = none
         self.shown.close()
-        self.film.release()
-        self.film_passes.release()
-        self.filmed = none
-        for slot in [&self.scene_texture, &self.tables_texture, &self.view_texture, &self.film_texture]:
-            if let held = *slot:
-                var gone = held
-                gone.destroy()
-            *slot = none
+        self.a.release()
+        self.b.release()
+        if let held = self.scene_texture:
+            var gone = held
+            gone.destroy()
+        self.scene_texture = none
         if let held = self.pipeline:
             var gone = held
             gone.destroy()
@@ -411,12 +467,12 @@ pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, settings = defaults(), view_baked = -1, format = format, geometry_shown = true, crop_shown = true)
+    return Renderer(loading = loading, worker = worker, a = developing(), b = developing(), split = 0.5, format = format, geometry_shown = true, crop_shown = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
-    let renderer = new Renderer(loading = made.loading, worker = made.worker, settings = made.settings, view_baked = -1, geometry_shown = true, crop_shown = true) in memory.heap catch failure:
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, a = developing(), b = developing(), split = 0.5, geometry_shown = true, crop_shown = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

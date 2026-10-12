@@ -57,7 +57,7 @@ let descriptions: str[14] = [
     "Light through the lens: its vignetting.",
     "A filter on the lens: light-balancing (85) or a black-and-white color filter.",
     "A film stock exposed to the light: its format, grain, halation and interimage.",
-    "The negative or slide developed: push and pull.",
+    "The negative or slide developed in its process: time and temperature, to push or pull it.",
     "A scanner or telecine reads the film back to light: timing, contrast and black.",
     "The colorist's tools: tone, levels, curves, color, the mixer, wheels and black and white.",
     "The negative printed on Kodak Vision 2383 print film.",
@@ -125,8 +125,10 @@ pub struct Node:
 
 pub struct Recipe:
     pub var nodes: Node[14]
-    ## The stage whose result is shown.
+    ## The stage whose result is shown (output A), and the one shown beside it
+    ## for comparing (output B), -1 for none.
     pub var display: i64
+    pub var compare: i64 = -1
 
     pub func has(stage: i64) -> bool:
         return stage >= 0 and stage < (i64)stage_count and self.nodes[(usize)stage].present
@@ -148,6 +150,8 @@ pub struct Recipe:
                 self.nodes[at].input = -1
         if self.display == stage:
             self.display = -1
+        if self.compare == stage:
+            self.compare = -1
 
     ## Wire `source`'s output into `to`'s input, if the media match and it makes
     ## no loop; whether it did.
@@ -183,12 +187,28 @@ pub struct Recipe:
     pub func set_display(stage: i64):
         if self.has(stage):
             self.display = stage
+            if self.compare == stage:
+                self.compare = -1
 
-    ## The stages from the photo to the displayed one, in that order; empty
+    ## Compare `stage` beside the displayed one (-1, or the displayed stage:
+    ## compare nothing).
+    pub func set_compare(stage: i64):
+        self.compare = stage if self.has(stage) and stage != self.display else -1
+
+    ## Whether outputs A and B are both set, on different stages.
+    pub func comparing() -> bool:
+        return self.compare >= 0 and self.compare != self.display and self.has(self.compare)
+
+    ## The stages from the File to the displayed one, in that order; empty
     ## when the displayed stage does not reach a File.
     pub func path() -> Path:
+        return self.path_to(self.display)
+
+    ## The stages from the File to `target`, in that order; empty when it does
+    ## not reach a File.
+    pub func path_to(target: i64) -> Path:
         var out: Path
-        var at = self.display
+        var at = target
         while at >= 0 and out.count < stage_count:
             out.stages[out.count] = at
             out.count += 1
@@ -208,7 +228,11 @@ pub struct Recipe:
 
     ## Whether `stage` is on the path to the displayed stage and not bypassed.
     pub func active(stage: i64) -> bool:
-        let route = self.path()
+        return self.active_for(stage, self.display)
+
+    ## Whether `stage` is on the path to `target` and not bypassed.
+    pub func active_for(stage: i64, target: i64) -> bool:
+        let route = self.path_to(target)
         for at in 0..<route.count:
             if route.stages[at] == stage:
                 return not self.nodes[(usize)stage].bypassed
@@ -274,7 +298,8 @@ func key_stage(key: str) -> i64:
 
 ## The recipe's text form, the value of settings' "recipe=": its stages, "|"
 ## between, each "key:x:y:input" (input a stage's key, or empty) followed by
-## ":b" when bypassed and ":d" for the displayed one.
+## ":b" when bypassed, ":d" for the displayed one (output A) and ":c" for the
+## compared one (output B).
 pub func text_of(recipe: const Recipe*, out: Buffer*) -> !:
     var first = true
     for at in 0..<stage_count:
@@ -296,6 +321,8 @@ pub func text_of(recipe: const Recipe*, out: Buffer*) -> !:
             try out.put_text(":b")
         if recipe.display == (i64)at:
             try out.put_text(":d")
+        if recipe.compare == (i64)at:
+            try out.put_text(":c")
 
 ## A recipe from its text form; stages it cannot read are passed over, and
 ## wires are made only where the media match.
@@ -313,13 +340,13 @@ pub func parse(text: str) -> Recipe:
             continue
         let part = (str)bytes[first..<index]
         first = index + 1
-        # key:x:y:input[:b][:d]
-        var fields: str[6]
+        # key:x:y:input[:b][:d][:c]
+        var fields: str[7]
         var count: usize = 0
         var start: usize = 0
         let piece = part.bytes
         for at in 0..=piece.length:
-            if (at == piece.length or piece[at] == ':') and count < 6:
+            if (at == piece.length or piece[at] == ':') and count < 7:
                 fields[count] = (str)piece[start..<at]
                 count += 1
                 start = at + 1
@@ -335,6 +362,8 @@ pub func parse(text: str) -> Recipe:
                 out.nodes[(usize)stage].bypassed = true
             elif fields[flag] == "d":
                 out.display = stage
+            elif fields[flag] == "c":
+                out.compare = stage
     for at in 0..<stage_count:
         if wanted[at] >= 0:
             _ = out.connect(wanted[at], (i64)at)
@@ -380,6 +409,8 @@ test "only matching media wire up, and never in a loop":
 test "the text form round-trips":
     var recipe = mode(1)
     recipe.set_bypassed((i64)Stage.exposure, true)
+    recipe.set_compare((i64)Stage.develop)
+    assert(recipe.comparing())
     recipe.move((i64)Stage.film, 30.0, -12.0)
     var out: Buffer
     defer out.destroy()
@@ -393,3 +424,4 @@ test "the text form round-trips":
         assert(back.nodes[at].bypassed == recipe.nodes[at].bypassed)
         assert(back.nodes[at].x == recipe.nodes[at].x and back.nodes[at].y == recipe.nodes[at].y)
     assert(back.display == recipe.display)
+    assert(back.compare == recipe.compare)

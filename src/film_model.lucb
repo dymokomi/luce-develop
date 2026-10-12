@@ -308,7 +308,9 @@ pub func build_model(stock: Stock) -> Model!:
         for layer in 0..<(usize)3:
             out.most[layer] = math.max(out.most[layer], out.neutral[at * 3 + layer])
     for layer in 0..<(usize)3:
-        out.top = math.max(out.top, out.most[layer] * 1.1)
+        # Room above the densest normal negative for one developed longer
+        # (film_develop.lucb's gain reaches 1.4); a slide's dye only moves.
+        out.top = math.max(out.top, out.most[layer] * (1.1 if stock.kind == 1 else 1.5))
     # The scan over the dye amounts: a negative's densities as the scanner reads
     # them; a slide as seen on a lightbox, as scene light (asinh-encoded).
     let n = lut_size

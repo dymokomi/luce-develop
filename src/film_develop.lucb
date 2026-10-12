@@ -1,0 +1,84 @@
+## Development: how long, and how warm, the film sits in its developer, and what
+## that does to its curve. Each kind of stock has its process and that
+## process's normal time and temperature:
+##
+##   color negative   ECN-2 developer, 3:00 at 41.1 °C (Kodak's motion picture
+##                     process)
+##   slide             E-6 first developer, 6:00 at 37.8 °C
+##   black and white   D-76 stock, 7:00 at 20 °C (Acros II's data sheet curve)
+##
+## Time and temperature together give the development, as a ratio to normal:
+## r = (time / normal time) · e^(0.081 · (temperature − normal)), about 8 % more
+## per degree, as black-and-white time–temperature charts have it (the color
+## processes are run at theirs; the same rate stands in).
+##
+## A negative developed r times normal (L = log2 r) reads, at log H x,
+##   D(x) = fog + g · (D_normal(x + s) − fog)
+## gaining contrast g and speed s with development. Both are fitted to Acros
+## II's D-76 curves at 4, 7 and 10 minutes (dev/film/fuji_acros_ii.json; the fit
+## is within 0.013 and 0.031 density of the 4 and 10 minute curves):
+##   under (L < 0):  s = 0.161 · L,  ln g = 0.231 · L
+##   over  (L > 0):  s = 0.350 · L,  ln g = 0.211 · L
+## Colour negatives take the same shape: their data sheets publish one time.
+##
+## A slide's first developer makes its negative silver image, so developing it
+## longer leaves less dye: the positive curve moves toward less exposure, the
+## film rated faster. The E-6 push times labs publish put one stop at 8:00 from
+## 6:00, and each stop further about as much again: stops = log(r) / log(4/3),
+## s = 0.301 · stops.
+from luce_std import math
+
+## The process each kind develops in, its normal time (minutes) and temperature
+## (°C), by stock kind (0 color negative, 1 slide, 2 black and white).
+pub let process_names: str[3] = ["ECN-2", "E-6", "D-76"]
+let normal_minutes: f64[3] = [3.0, 6.0, 7.0]
+let normal_celsius: f64[3] = [41.1, 37.8, 20.0]
+## Development beyond these ratios to normal is not modelled.
+let least: f64 = 0.4
+let most: f64 = 3.0
+
+pub func process_name(kind: i64) -> str:
+    return process_names[(usize)math.clamp((f64)kind, 0.0, 2.0)]
+pub func normal_time(kind: i64) -> f64:
+    return normal_minutes[(usize)math.clamp((f64)kind, 0.0, 2.0)]
+pub func normal_temperature(kind: i64) -> f64:
+    return normal_celsius[(usize)math.clamp((f64)kind, 0.0, 2.0)]
+
+## The development, as a ratio to normal, for `minutes` at `celsius` (0 for
+## either: the process's own).
+pub func ratio(kind: i64, minutes: f64, celsius: f64) -> f64:
+    let time = minutes if minutes > 0.0 else normal_time(kind)
+    let warmth = celsius if celsius > 0.0 else normal_temperature(kind)
+    return math.clamp(time / normal_time(kind) * math.exp(0.081 * (warmth - normal_temperature(kind))), least, most)
+
+## What development `degree` (a ratio to normal) does to a stock of `kind`'s curve: its shift in log H
+## (positive: the film rates faster) and its contrast gain.
+pub struct Development:
+    pub var shift: f64
+    pub var gain: f64
+
+pub func development(kind: i64, degree: f64) -> Development:
+    let held = math.clamp(degree, least, most)
+    let stops = math.log2(held)
+    if kind == 1:
+        return Development(shift = 0.30103 * math.log(held) / math.log(4.0 / 3.0), gain = 1.0)
+    if stops < 0.0:
+        return Development(shift = 0.161 * stops, gain = math.exp(0.231 * stops))
+    return Development(shift = 0.350 * stops, gain = math.exp(0.211 * stops))
+
+test "normal development changes nothing":
+    for kind in 0..<3:
+        let normal = development((i64)kind, ratio((i64)kind, 0.0, 0.0))
+        assert(math.abs(normal.shift) < 1.0e-12 and math.abs(normal.gain - 1.0) < 1.0e-12)
+
+test "D-76 4 and 10 minutes give the fitted contrast and speed":
+    let short = development(2, ratio(2, 4.0, 20.0))
+    assert(math.abs(short.shift + 0.13) < 0.005 and math.abs(short.gain - 0.83) < 0.005)
+    let long = development(2, ratio(2, 10.0, 0.0))
+    assert(math.abs(long.shift - 0.18) < 0.005 and math.abs(long.gain - 1.115) < 0.005)
+    # Warmer develops faster: 7 minutes at 24 °C is more than at 20 °C.
+    assert(ratio(2, 7.0, 24.0) > 1.3)
+
+test "an E-6 push of two minutes rates a slide a stop faster":
+    let push = development(1, ratio(1, 8.0, 0.0))
+    assert(math.abs(push.shift - 0.30103) < 1.0e-9 and push.gain == 1.0)

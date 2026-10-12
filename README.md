@@ -120,9 +120,8 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
 1. **Exposure.** A color gets a smooth spectrum (luce-color's `spectral`
    upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
    each layer is exposed to it through its spectral sensitivity. Middle grey
-   lands on the stock's normal exposure; Film Exposure over- or underexposes
-   the negative, and the transfer brings grey back. Exposure is the camera's
-   exposure onto the negative. Filter decides the light: Matched (the default)
+   lands on the stock's normal exposure; Exposure over- or underexposes the
+   negative, which the scan does not take back. Filter decides the light: Matched (the default)
    balances it to the stock, as a white balance does; with None or 85, the
    White Balance's Temperature and Tint become the light on set (as shot unless
    set), so daylight on tungsten film goes blue unless an 85 warms it (and
@@ -130,6 +129,12 @@ datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
    photographer's filter on the lens (Yellow 8, Orange 21, Red 25, Green 11,
    Blue 47, modelled on Wratten curves): its transmission multiplies the light
    before the layers see it, and exposure opens up by its factor.
+   **Development** (`film_develop.lucb`) follows the stock's process (ECN-2
+   3:00 at 41.1 °C, E-6 first developer 6:00 at 37.8 °C, D-76 7:00 at 20 °C
+   for Acros); Time and Temperature push or pull it. A negative gains contrast
+   and speed as Acros II's D-76 curves at 4, 7 and 10 minutes do; a slide rates
+   faster, a stop for each published E-6 push step. The scan stays set for a
+   normal negative, so a push shows its density, contrast and grain.
 2. **Light in the emulsion.** Each layer's exposure scatters (an exponential,
    the emulsion's classic spread of light); Halation adds light that came back
    off the base, mostly to the red layer, weak behind rem-jet backing.

@@ -14,7 +14,8 @@
 ##   Filter           a light-balancing filter (with film: the light as the
 ##                    film saw it) and a black-and-white color filter (film.lucb)
 ##   Film             stock (0 none), format, grain, halation, interimage
-##   Develop          push and pull
+##   Develop          time (minutes) and temperature (°C) in the stock's
+##                    process, 0 for its normal (film_develop.lucb)
 ##   Scan             the transfer's warmth, tint, contrast and black
 ##   Tone             contrast, highlights, shadows, whites and blacks: a tone
 ##                    curve on luminance (tone.lucb)
@@ -198,8 +199,14 @@ pub func defaults() -> Settings:
 ## ACES view; a View stage its own. A recipe whose displayed stage does not reach
 ## a File renders as shot, without film.
 pub func compile(settings: const Settings*) -> Settings:
+    return compile_to(settings, settings.recipe.display)
+
+## What `settings` render with shown at stage `target` instead: output B, the
+## compared stage, renders so.
+pub func compile_to(settings: const Settings*, target: i64) -> Settings:
     var out = *settings
-    let plan = settings.recipe
+    var plan = settings.recipe
+    plan.display = target
     let base = defaults()
     for at in 0..<parameter_count:
         let owner = recipe.owner_of(parameters[at].section)
@@ -538,6 +545,14 @@ pub struct Look:
         self.settings.recipe.set_bypassed(stage, bypassed)
     pub func set_display(stage: i64):
         self.settings.recipe.set_display(stage)
+    ## Output B: the stage compared beside the displayed one (-1 none), and
+    ## whether the viewer compares.
+    pub func compare_stage() -> i64:
+        return self.settings.recipe.compare
+    pub func set_compare(stage: i64):
+        self.settings.recipe.set_compare(stage)
+    pub func comparing() -> bool:
+        return self.settings.recipe.comparing()
 
     ## The recipe as a part of settings text, "recipe=…", even when it is the
     ## default one (a saved recipe names its graph whatever it is).
@@ -669,6 +684,10 @@ test "a recipe compiles to the stages at work and its mode":
     assert(out.get(.contrast) == 0.0)
     assert(out.get(.film_grain) == 50.0)
     assert(out.get(.view) == (f64)(i64)View.print)
+    # Output B at Develop compiles as if Develop were shown: no print yet.
+    wanted.recipe.set_compare((i64)recipe.Stage.develop)
+    let compared = compile_to(&wanted, wanted.recipe.compare)
+    assert(compared.get(.film_stock) == 3.0 and compared.get(.view) != (f64)(i64)View.print)
     # Shown before the film: no film at all.
     wanted.recipe.set_display((i64)recipe.Stage.exposure)
     out = compile(&wanted)
