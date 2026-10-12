@@ -47,6 +47,22 @@ pub struct Scene:
     pub func is_raw() -> bool:
         return self.data.length > 0
 
+    ## The mean of the scene's values, from every 97th pixel (enough for a
+    ## mean, cheap enough for every draw).
+    pub func average() -> f64[3]:
+        var sum: f64[3] = [0.0, 0.0, 0.0]
+        var count = 0.0
+        var at: usize = 0
+        let total = self.columns * self.rows
+        while at < total:
+            for k in 0..<(usize)3:
+                sum[k] += (f64)self.pixels[at * 4 + k]
+            count += 1.0
+            at += 97
+        if count == 0.0:
+            return [0.0, 0.0, 0.0]
+        return [sum[0] / count, sum[1] / count, sum[2] / count]
+
     ## The scene values of pixel `at` (rows packed).
     pub func value_at(at: usize) -> f64[3]:
         return [(f64)self.pixels[at * 4], (f64)self.pixels[at * 4 + 1], (f64)self.pixels[at * 4 + 2]]

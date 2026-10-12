@@ -85,6 +85,8 @@ struct Pass:
     var matrix: f64[9]
     var tables: const Tables*
     var aspect: f64
+    ## The lens's veiling glare, added to the scene light before exposure.
+    var veil: f64
     ## Blurs: the step between taps, and the blur.
     var dx: i64
     var dy: i64
@@ -153,7 +155,7 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
                 let t = math.clamp((radius - start) / (1.0 - start), 0.0, 1.0)
                 for k in 0..<(usize)3:
                     c[k] *= 1.0 + v[1] * 2.0 * t * t
-            out = film.expose(pass.film, c)
+            out = film.expose(pass.film, [c[0] + pass.veil, c[1] + pass.veil, c[2] + pass.veil])
         elif pass.stage == 1:
             let blur = blurred(pass, pass.first, x, y)
             out = [blur[0], blur[1], blur[2]]
@@ -186,7 +188,7 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
 ## AP1 at the same size, which the caller closes. `matrix` takes the scene into
 ## AP1 (the develop's white balance and exposure); `tables` and `aspect` (the
 ## scene's) give the lens vignetting, done here on the negative.
-pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables: const Tables*, aspect: f64) -> Scene!:
+pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables: const Tables*, aspect: f64, veil: f64 = 0.0) -> Scene!:
     let width = (usize)scene.width()
     let height = (usize)scene.height()
     let size = width * height * 4
@@ -200,7 +202,7 @@ pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables
     let out = try new f16[size] --- in memory.heap
     errdefer free(out) in memory.heap
     var pass = Pass(stage = 0, film = source, width = width, height = height, first = exposed, second = exposed, out = exposed,
-                    source = scene, matrix = matrix, tables = tables, aspect = aspect, pitch = (f64)plan.pitch)
+                    source = scene, matrix = matrix, tables = tables, aspect = aspect, veil = veil, pitch = (f64)plan.pitch)
     try parallel.for_each(height, (void*)&pass, run_row)
     # Scatter, across then down: exposed → one → two.
     try run_blur(&pass, exposed, exposed, one, 1, 1, 0, plan.scatter)

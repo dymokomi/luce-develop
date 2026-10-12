@@ -97,30 +97,32 @@ pub enum Parameter as u8:
     bw_tint_amount = 80
     lens_vignetting = 81
     lens_midpoint = 82
-    vignette_amount = 83
-    vignette_midpoint = 84
-    vignette_roundness = 85
-    vignette_feather = 86
-    geometry_rotate = 87
-    geometry_vertical = 88
-    geometry_horizontal = 89
-    geometry_aspect = 90
-    geometry_scale = 91
-    geometry_autocrop = 92
-    crop_left = 93
-    crop_top = 94
-    crop_right = 95
-    crop_bottom = 96
-    print_red = 97
-    print_green = 98
-    print_blue = 99
-    print_silver = 100
-    view = 101
+    lens_coating = 83
+    lens_diffusion = 84
+    vignette_amount = 85
+    vignette_midpoint = 86
+    vignette_roundness = 87
+    vignette_feather = 88
+    geometry_rotate = 89
+    geometry_vertical = 90
+    geometry_horizontal = 91
+    geometry_aspect = 92
+    geometry_scale = 93
+    geometry_autocrop = 94
+    crop_left = 95
+    crop_top = 96
+    crop_right = 97
+    crop_bottom = 98
+    print_red = 99
+    print_green = 100
+    print_blue = 101
+    print_silver = 102
+    view = 103
 
 ## How many parameters there are.
-pub let parameter_count: usize = 102
+pub let parameter_count: usize = 104
 
-pub let parameters: ParameterSpec[102] = [
+pub let parameters: ParameterSpec[104] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -204,6 +206,8 @@ pub let parameters: ParameterSpec[102] = [
     ParameterSpec("bw_tint_amount", "Tint Amount", "Black & White", 0.0, 100.0, 0.0, 0),
     ParameterSpec("lens_vignetting", "Vignetting", "Lens", 0.0, 100.0, 0.0, 0),
     ParameterSpec("lens_midpoint", "Midpoint", "Lens", 0.0, 100.0, 50.0, 0),
+    ParameterSpec("lens_coating", "Coating", "Lens", 0.0, 2.0, 0.0, 0),
+    ParameterSpec("lens_diffusion", "Diffusion", "Lens", 0.0, 6.0, 0.0, 0),
     ParameterSpec("vignette_amount", "Amount", "Vignette", -100.0, 100.0, 0.0, 0),
     ParameterSpec("vignette_midpoint", "Midpoint", "Vignette", 0.0, 100.0, 50.0, 0),
     ParameterSpec("vignette_roundness", "Roundness", "Vignette", -100.0, 100.0, 0.0, 0),

@@ -1,0 +1,41 @@
+## The lens: what it does to the light before the film, beyond vignetting. Light
+## scattered inside a lens, off its glass surfaces, mount and barrel, spreads
+## over the whole frame as veiling glare: a share of the frame's light laid
+## evenly over it, lifting the shadows and softening contrast. How much depends
+## on the lens's coating (Lens node, Coating) and on diffusion filters built to
+## add it, such as Tiffen's Low Contrast series (Lens node, Diffusion).
+##
+## The shares are veiling glare indexes (ISO 9358: the light in a small black
+## patch over the light around it), counted beyond the camera's own: a raw
+## already holds its modern, multi-coated lens's glare, so that one adds none.
+from luce_std import math
+from settings import Settings
+
+## Veiling glare by coating, beyond a modern multi-coated lens's: multi-coated,
+## single-coated (1940s–60s), uncoated (pre-war, or Saving Private Ryan's
+## stripped lenses).
+let coatings: f64[3] = [0.0, 0.015, 0.055]
+## Added by Tiffen Low Contrast filters: none, ½, 1, 2, 3, 4, 5.
+let diffusions: f64[7] = [0.0, 0.01, 0.02, 0.04, 0.06, 0.08, 0.10]
+
+## The share of the frame's mean light the lens lays evenly over it, for
+## `settings`.
+pub func glare(settings: const Settings*) -> f64:
+    let coating = coatings[(usize)math.clamp(settings.get(.lens_coating), 0.0, 2.0)]
+    let diffusion = diffusions[(usize)math.clamp(settings.get(.lens_diffusion), 0.0, 6.0)]
+    return coating + diffusion
+
+## The veil `settings`' lens adds to every point of a frame whose mean light (AP1)
+## is `average`: neutral light, the glare's share of its luminance.
+pub func veil(settings: const Settings*, average: f64[3]) -> f64:
+    let luminance = 0.272228717 * average[0] + 0.674081766 * average[1] + 0.053689517 * average[2]
+    return glare(settings) * math.max(luminance, 0.0)
+
+test "an uncoated lens veils more than a coated one, and a filter adds":
+    var settings = Settings()
+    settings.set(.lens_coating, 0.0)
+    let coated = veil(&settings, [0.18, 0.18, 0.18])
+    settings.set(.lens_coating, 2.0)
+    let uncoated = veil(&settings, [0.18, 0.18, 0.18])
+    settings.set(.lens_diffusion, 4.0)
+    assert(coated == 0.0 and uncoated > 0.005 and veil(&settings, [0.18, 0.18, 0.18]) > uncoated)

@@ -314,6 +314,11 @@ pub func text_of(settings: const Settings*, out: Buffer*) -> !:
 ## over, so text from a newer version still opens.
 pub func parse(text: str) -> Settings:
     var out = defaults()
+    parse_into(&out, text)
+    return out
+
+## The settings `text` names, set over `out`'s (the rest kept).
+pub func parse_into(out: Settings*, text: str):
     let bytes = text.bytes
     var first: usize = 0
     while first < bytes.length:
@@ -335,14 +340,13 @@ pub func parse(text: str) -> Settings:
             continue
         for at in 0..<curve_count:
             if curve_names[at] == name:
-                parse_curve(&out, at, value)
+                parse_curve(out, at, value)
         if name == "guides":
-            parse_guides(&out, value)
+            parse_guides(out, value)
         if name == "recipe":
             out.recipe = recipe.parse(value)
     if out.get(.temperature) > 0.0 and out.get(.temperature) < 1667.0:
         out.set(.temperature, 1667.0)
-    return out
 
 func parse_curve(settings: Settings*, at: usize, text: str):
     var xs: f64[16]
@@ -397,7 +401,7 @@ func parse_guides(settings: Settings*, text: str):
     settings.set_guides(guides[..<count])
 
 ## `value` with up to four decimals, trailing zeros dropped.
-func put_decimal(out: Buffer*, value: f64) -> !:
+pub func put_decimal(out: Buffer*, value: f64) -> !:
     let scaled = math.round(math.abs(value) * 10000.0)
     if value < 0.0 and scaled > 0.0:
         try out.put_byte('-')

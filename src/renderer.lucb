@@ -23,6 +23,7 @@ import tables
 import geometry
 import view
 import film_print
+import lens
 import film
 from film import Film
 from film_gpu import FilmPasses
@@ -260,6 +261,15 @@ pub struct Renderer:
         let camera = film.camera_settings(&which.settings)
         return try self.shown.matrix(&camera)
 
+    ## The lens's veiling glare for `which`: a share of the scene's mean light
+    ## (lens.lucb).
+    func veil_of(which: const Developing*) -> f64!:
+        let m = try self.scene_matrix(which)
+        let mean = self.shown.average()
+        let ap1: f64[3] = [m[0] * mean[0] + m[1] * mean[1] + m[2] * mean[2], m[3] * mean[0] + m[4] * mean[1] + m[5] * mean[2],
+                           m[6] * mean[0] + m[7] * mean[1] + m[8] * mean[2]]
+        return lens.veil(&which.settings, ap1)
+
     ## Draw the photo into `x`, `y`, `width` × `height` points of `target`.
     pub func draw(target: interop.View[gpu.RenderTarget], x: f64, y: f64, width: f64, height: f64) -> !:
         if not self.has_image() or width <= 0.0 or height <= 0.0:
@@ -291,15 +301,18 @@ pub struct Renderer:
         # With film the scene is the filmed one, already in AP1.
         var source_texture = scene_texture
         var m = try self.scene_matrix(which)
+        # The lens's veil, unless the film took it in (film_gpu's expose pass).
+        var veil = try self.veil_of(which)
         if which.film.active():
             source_texture = which.filmed else return
             m = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+            veil = 0.0
         let identity: geometry.Matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
         let map = geometry.frame_map(&which.settings, (f64)self.shown.width(), (f64)self.shown.height(), self.crop_shown) if self.geometry_shown else identity
         let (out_width, out_height) = self.output_size()
         var uniforms: f32[32] = [
             (f32)((place.x + x) * scale), (f32)((place.y + y) * scale), (f32)(width * scale), (f32)(height * scale),
-            (f32)m[0], (f32)m[1], (f32)m[2], 0.0f32, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
+            (f32)m[0], (f32)m[1], (f32)m[2], (f32)veil, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
             (f32)(which.settings.get(.vibrance) / 100.0), (f32)(which.settings.get(.saturation) / 100.0), (f32)which.settings.get(.view), (f32)(out_width / out_height),
             (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
         let images: gpu.Texture[4] = [source_texture, tables_texture, view_texture, film_texture]
@@ -419,7 +432,8 @@ pub struct Renderer:
             let film_texture = which.film_texture else return
             let aspect = (f64)self.shown.width() / (f64)self.shown.height()
             which.filmed = try which.film_passes.run(device, scene_texture, tables_texture, film_texture, &which.film,
-                                                   try self.scene_matrix(which), aspect, (u32)self.shown.width(), (u32)self.shown.height())
+                                                   try self.scene_matrix(which), aspect, (u32)self.shown.width(), (u32)self.shown.height(),
+                                                   try self.veil_of(which))
             which.film_stale = false
 
     ## Stop the loading thread and let every texture go.

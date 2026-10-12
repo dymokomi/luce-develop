@@ -57,7 +57,7 @@ let descriptions: str[15] = [
     "The photo picked in the library, as its raw recorded the light.",
     "The light on set: its color temperature and tint (as shot unless set).",
     "More or less light than the camera took, in stops.",
-    "Light through the lens: its vignetting.",
+    "Light through the lens: its vignetting, and the veiling glare of its coating and any diffusion filter.",
     "A filter on the lens: light-balancing (85) or a black-and-white color filter.",
     "A film stock exposed to the light: its format, grain, halation and interimage.",
     "The negative or slide developed in its process: time and temperature, to push or pull it.",
@@ -176,6 +176,22 @@ pub struct Recipe:
             steps += 1
         self.nodes[(usize)to].input = source
         return true
+
+    ## Put `stage` into the chain right after `after`: what took `after`'s output
+    ## now takes `stage`'s, and the stages below move down a place.
+    pub func insert_after(stage: i64, after: i64):
+        if not self.has(after) or self.has(stage):
+            return
+        let below = self.nodes[(usize)after].y
+        for at in 0..<stage_count:
+            if self.nodes[at].present and self.nodes[at].y > below:
+                self.nodes[at].y += mode_spacing
+        _ = self.add(stage, self.nodes[(usize)after].x, below + mode_spacing)
+        for at in 0..<stage_count:
+            if (i64)at != stage and self.nodes[at].present and self.nodes[at].input == after:
+                self.nodes[at].input = -1
+                _ = self.connect(stage, (i64)at)
+        _ = self.connect(after, stage)
 
     pub func disconnect(to: i64):
         if self.has(to):
@@ -422,6 +438,12 @@ test "only matching media wire up, and never in a loop":
     # Light stages chain in any order.
     assert(recipe.add((i64)Stage.lens, 0.0, 0.0) and recipe.connect((i64)Stage.exposure, (i64)Stage.lens))
     assert(recipe.connect((i64)Stage.lens, (i64)Stage.film) and recipe.active((i64)Stage.lens))
+
+test "a stage goes into the chain where it is put":
+    var recipe = mode(1)
+    recipe.insert_after((i64)Stage.lens, (i64)Stage.exposure)
+    assert(recipe.nodes[(usize)Stage.lens].input == (i64)Stage.exposure and recipe.nodes[(usize)Stage.film].input == (i64)Stage.lens)
+    assert(recipe.active((i64)Stage.lens) and recipe.path().count == 9)
 
 test "the text form round-trips":
     var recipe = mode(1)

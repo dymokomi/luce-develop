@@ -16,12 +16,15 @@ pub struct FilmPasses:
     var two: gpu.Texture?
     var width: u32
     var height: u32
+    ## The lens's veiling glare (lens.lucb), added in the expose pass.
+    var veil: f64
 
     ## Film `scene` (the camera's values, `width` × `height`): `matrix` into AP1,
     ## `tables` and `aspect` for the lens vignetting, `atlas` the film's. The
     ## filmed scene, a texture these passes own until the next run.
     pub func run(device: gpu.Device, scene: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture, source: const Film*,
-                 matrix: f64[9], aspect: f64, width: u32, height: u32) -> gpu.Texture!:
+                 matrix: f64[9], aspect: f64, width: u32, height: u32, veil: f64 = 0.0) -> gpu.Texture!:
+        self.veil = veil
         if self.pipeline == none:
             var shader = try gpu.Shader.create(device, film_frag_words, film_frag_msl)
             errdefer shader.destroy()
@@ -73,7 +76,7 @@ pub struct FilmPasses:
             (f32)matrix[0], (f32)matrix[1], (f32)matrix[2], 0.0f32,
             (f32)matrix[3], (f32)matrix[4], (f32)matrix[5], 0.0f32,
             (f32)matrix[6], (f32)matrix[7], (f32)matrix[8], 0.0f32,
-            (f32)aspect, blur.alpha, 0.0f32, 0.0f32]
+            (f32)aspect, blur.alpha, (f32)self.veil, 0.0f32]
         let images: gpu.Texture[4] = [first, second, tables, atlas]
         try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
         _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))

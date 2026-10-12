@@ -16,6 +16,7 @@ import scene
 import tables
 import view
 import film_print
+import lens
 import geometry
 import film
 import film_passes
@@ -42,8 +43,9 @@ struct Develop:
     var matrix: f64[9]
     var tables: Tables
     var shown: View
-    ## The print view's silver kept (0..1).
+    ## The print view's silver kept (0..1); the lens's veiling glare (lens.lucb).
     var silver: f64
+    var veil: f64
     var to_display: f64[9]
     var vibrance: f64
     var saturation: f64
@@ -60,14 +62,15 @@ func radius(u: f64, v: f64, aspect: f64) -> f64:
     let y = (v - 0.5) * 2.0
     return math.sqrt(x * x + y * y) / math.sqrt(aspect * aspect + 1.0)
 
+## The lens: vignetting corrected, then its veiling glare, an even light.
 func with_lens(d: const Develop*, c: f64[3], u: f64, v: f64) -> f64[3]:
     let value = d.tables.value(5)
-    if value[1] <= 0.0:
-        return c
-    let start = value[2] * 0.6
-    let t = math.clamp((radius(u, v, d.aspect) - start) / (1.0 - start), 0.0, 1.0)
-    let gain = 1.0 + value[1] * 2.0 * t * t
-    return [c[0] * gain, c[1] * gain, c[2] * gain]
+    var gain = 1.0
+    if value[1] > 0.0:
+        let start = value[2] * 0.6
+        let t = math.clamp((radius(u, v, d.aspect) - start) / (1.0 - start), 0.0, 1.0)
+        gain = 1.0 + value[1] * 2.0 * t * t
+    return [c[0] * gain + d.veil, c[1] * gain + d.veil, c[2] * gain + d.veil]
 
 func with_tone(d: const Develop*, c: f64[3]) -> f64[3]:
     let y = luminance(c)
@@ -199,9 +202,11 @@ struct Rendering:
         if not self.develop.film.active():
             return
         let aspect = (f64)self.source.width() / (f64)self.source.height()
-        self.filmed = try film_passes.filmed(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect)
+        self.filmed = try film_passes.filmed(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil)
         self.source = &self.filmed
         self.develop.matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        # The film took the lens's veil in.
+        self.develop.veil = 0.0
 
     func release():
         self.develop.film.release()
@@ -233,7 +238,12 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
     let width = (usize)out_width
     let height = (usize)out_height
     let camera = film.camera_settings(settings)
-    let develop = Develop(matrix = try source.matrix(&camera), tables = tables.build(settings),
+    let matrix = try source.matrix(&camera)
+    let mean = source.average()
+    let veil = lens.veil(settings, [matrix[0] * mean[0] + matrix[1] * mean[1] + matrix[2] * mean[2],
+                                    matrix[3] * mean[0] + matrix[4] * mean[1] + matrix[5] * mean[2],
+                                    matrix[6] * mean[0] + matrix[7] * mean[1] + matrix[8] * mean[2]])
+    let develop = Develop(matrix = matrix, tables = tables.build(settings), veil = veil,
                           shown = (View)(i64)settings.get(.view), silver = film_print.silver_kept(settings.get(.print_silver)), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))

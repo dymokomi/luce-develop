@@ -8,18 +8,22 @@
 ## where the record is silent, the setting is an inference; both are said below.
 ##
 ## Not modelled yet, though some pictures relied on them: Technicolor dye-transfer
-## prints (The Godfather), Tiffen Low Contrast and chocolate filters, uncoated
-## lenses (Saving Private Ryan), intermediate generations and 70 mm blow-ups.
+## prints (The Godfather), chocolate filters, intermediate generations and 70 mm
+## blow-ups.
 import interop
 from luce_std.collections import Buffer
 import settings
+import recipe
+from parameters import Parameter, parameters, parameter_count
 
 ## A look: its name, the mode it starts from (-1: the default Television
-## recipe, unnamed), and its settings over the mode's.
+## recipe, unnamed), its settings over the mode's, and whether it puts a Lens
+## stage into the chain (after Exposure).
 struct Look:
     var name: str
     var mode: i64
     var settings: str
+    var lens: bool = false
 
 ## Stocks are film_stock values (film_stocks.lucb's order, from 1): 1 EXR 500T
 ## 5298, 2 EXR 200T 5293, 3 Vision 500T 5279, 8 Vision3 200T 5213, 9 Vision3 250D
@@ -40,8 +44,10 @@ let looks: Look[20] = [
     # 1½ stops (ECN-2 pull 1 is 2:30; 1½ stops extrapolated, about 2:10).
     Look(name = "Munich (2005), bypassed negative", mode = 1, settings = "film_stock=3;film_format=1;develop_silver=100;develop_time=2.17;print_silver=0.7"),
     # EXR 200T 5293 pushed a stop (3:40), ½ Coral in place of the 85, 15 % flash
-    # (Panaflasher), ENR on the prints that the lab ran at IR 1.00.
-    Look(name = "Saving Private Ryan (1998)", mode = 1, settings = "film_stock=2;develop_time=3.67;film_filter=5;film_flash=15;print_silver=1.0"),
+    # (Panaflasher), ENR on the prints that the lab ran at IR 1.00, and lenses
+    # with their coatings stripped by Panavision.
+    Look(name = "Saving Private Ryan (1998)", mode = 1, lens = true,
+         settings = "film_stock=2;develop_time=3.67;film_filter=5;film_flash=15;print_silver=1.0;lens_coating=2"),
     # Khondji: interiors on 5293 at box speed, Super 35; Deluxe CCE on release
     # prints (IR about 1.85).
     Look(name = "Se7en (1995)", mode = 1, settings = "film_stock=2;film_format=1;print_silver=1.85"),
@@ -54,8 +60,9 @@ let looks: Look[20] = [
     # Technicolor dye-transfer prints are not modelled).
     Look(name = "The Godfather (1972)", mode = 1, settings = "film_stock=23;exposure=-0.5;develop_time=16;print_blue=3;print_green=1"),
     # Alcott: 5254, the whole film pushed a stop; no 85 on exteriors, the blue
-    # timed out in printing (so balanced here); Low Contrast No. 3 not modelled.
-    Look(name = "Barry Lyndon (1975)", mode = 1, settings = "film_stock=23;develop_time=16"),
+    # timed out in printing (so balanced here); a Tiffen Low Contrast No. 3 on
+    # every shot.
+    Look(name = "Barry Lyndon (1975)", mode = 1, lens = true, settings = "film_stock=23;develop_time=16;lens_diffusion=4"),
     # Almendros: 5247 (not here: EXR 200T stands in), magic hour pushed a stop
     # with the 85 pulled; 70 mm blow-up prints not modelled.
     Look(name = "Days of Heaven (1978)", mode = 1, settings = "film_stock=2;develop_time=3.67;film_filter=1"),
@@ -95,19 +102,43 @@ pub func count() -> i64:
 pub func name(at: i64) -> str:
     return looks[(usize)at].name
 
-## Look `at` as settings text to stack on a photo: its mode's recipe and stock
-## (settings.mode_text), then its own settings over them.
+## The sections a look sets whole: the film process, from the lens to the
+## print. The light on set, exposure, the grade and the framing stay the photo's.
+let process_sections: str[6] = ["Lens", "Filter", "Film", "Develop", "Scan", "Print"]
+
+## Look `at` as settings text to stack on a photo: its mode's recipe (with a Lens
+## put in if it wants one), its settings over the mode's, and every other
+## process parameter at its default, so a look never keeps another's.
 pub func text(at: i64) -> interop.Owned[str]!:
     let look = looks[(usize)at]
-    if look.mode < 0:
-        return try interop.copy_text(look.settings)
+    var made = settings.defaults()
+    if look.mode >= 0:
+        let start = try settings.mode_text(look.mode)
+        defer start.release()
+        made = settings.parse(start.value)
+    settings.parse_into(&made, look.settings)
+    let base = settings.defaults()
+    if look.lens:
+        made.recipe.insert_after((i64)recipe.Stage.lens, (i64)recipe.Stage.exposure)
     var out: Buffer
     defer out.destroy()
-    let start = try settings.mode_text(look.mode)
-    defer start.release()
-    try out.put_text(start.value)
-    try out.put_byte(';')
-    try out.put_text(look.settings)
+    try settings.text_of(&made, &out)
+    for index in 0..<parameter_count:
+        let parameter = parameters[index]
+        var process = false
+        for section in process_sections:
+            process = process or parameter.section == section
+        let which = (Parameter)(u8)index
+        if process and made.get(which) == base.get(which):
+            if out.length() > 0:
+                try out.put_byte(';')
+            try out.put_text(parameter.name)
+            try out.put_byte('=')
+            try settings.put_decimal(&out, base.get(which))
+    # The default recipe is not written: name it, so the look replaces a photo's.
+    if look.mode < 0 or look.mode == 0 and not look.lens:
+        try out.put_text(";recipe=")
+        try recipe.text_of(&made.recipe, &out)
     return try interop.copy_text(out.text())
 
 test "every look reads back, its stock and mode as it says":
@@ -126,3 +157,11 @@ test "every look reads back, its stock and mode as it says":
     defer munich.release()
     let read = settings.parse(munich.value)
     assert(read.get(.print_silver) == 0.7 and read.get(.film_stock) == 3.0)
+
+test "a look with a lens puts one in its chain":
+    let ryan = text(4) catch failure:
+        assert(false)
+        return
+    defer ryan.release()
+    let read = settings.parse(ryan.value)
+    assert(read.recipe.active((i64)recipe.Stage.lens) and read.get(.lens_coating) == 2.0)
