@@ -1,30 +1,36 @@
 ## Film: a color negative stock exposed to the scene, developed, and scanned back
 ## to scene light, the way a 1990s show went from camera negative to tape. It
-## sits after the white balance and exposure and before the tone tools, so
-## those work on the scan as a colorist would; the view stays the only tone
-## scale. Physically based, from each stock's published curves
-## (film_stocks.lucb):
+## works on the negative, at the scene's own size, before the develop: the
+## develop then grades the filmed scene as a colorist graded the transfer, and
+## the view stays the only tone scale. Physically based, from each stock's
+## published curves (film_stocks.lucb, modelled by film_model.lucb):
 ##
-## 1. Exposure. The color, in XYZ adapted to the stock's balance light (3200 K
-##    for tungsten stocks), gets a smooth spectrum: spectral.Upsampler's sigmoid
-##    surface for its chromaticity, lit by that light, times its luminance.
-##    Each layer's exposure is that spectrum through the layer's spectral
-##    sensitivity, relative to the light itself, so a neutral exposes all three
-##    layers alike. Middle grey (0.18) lands on the stock's normal exposure (the
-##    18% grey card Kodak marks on the curves), moved by Film Exposure.
-## 2. Development. Each layer's characteristic curve (Status M density over log
-##    exposure) is unmixed into the amount of its dye: the amounts of cyan,
-##    magenta and yellow dye whose spectra, over D-min, read the curve's three
-##    densities. Interimage: the dye one layer forms holds back development in
-##    its neighbours (DIR couplers), a 3×3 matrix in log exposure. The curves
-##    are corrected for it, so a neutral still develops to the datasheet's
-##    densities and only colors gain saturation and the film's hue shifts.
-##    Beyond what Kodak plots, a toe settles 0.015 under the first reading and
-##    a shoulder rolls off from 8 stops over grey: estimates.
-## 3. Grain. In dye amount, per layer, at the stock's rms granularity for that
+## 1. Exposure (`expose`). The color, in XYZ adapted to the stock's balance light
+##    (3200 K for tungsten stocks), gets a smooth spectrum: spectral.Upsampler's
+##    sigmoid surface for its chromaticity, lit by that light, times its
+##    luminance. Each layer's exposure is that spectrum through the layer's
+##    spectral sensitivity, relative to the light itself, so a neutral exposes
+##    all three layers alike. Middle grey (0.18) lands on the stock's normal
+##    exposure (the 18% grey card Kodak marks on the curves), moved by Film
+##    Exposure.
+## 2. Light in the emulsion (film_passes.lucb). Each layer's exposure scatters
+##    (a Gaussian fitted to the stock's MTF); halation adds light that passed
+##    through and came back off the base, mostly to the red layer, weak behind
+##    rem-jet backing.
+## 3. Development (`neutral`, `scan`). Each layer's characteristic curve (Status
+##    M density over log exposure) is unmixed into the amount of its dye.
+##    Development releases inhibitor (DIR couplers) that diffuses and holds back
+##    development nearby: in the layer itself, which develops edges harder
+##    (the MTF's rise above 100%), and in its neighbours, which saturates colors
+##    and shifts hues the way the stock does (interimage, an estimate: Kodak
+##    publishes none). The curves are corrected so a neutral still develops to
+##    the datasheet's densities. Beyond what Kodak plots, a toe settles 0.015
+##    under the first reading and a shoulder rolls off from 8 stops over grey:
+##    estimates.
+## 4. Grain. In dye amount, per layer, at the stock's rms granularity for that
 ##    exposure (48 µm aperture), scaled to the area a pixel covers on the
-##    negative (Format's frame width over the output's width).
-## 4. Scan. The developed dyes' spectral density over D-min, read by a
+##    negative (Format's frame width over the scene's width).
+## 5. Scan. The developed dyes' spectral density over D-min, read by a
 ##    densitometer with Status M's band centres (Gaussian bands: the standard's
 ##    tables are not public; unmixing and scanning use the same bands, so
 ##    neutrals round-trip), the orange mask subtracted. Each channel's density
@@ -34,35 +40,33 @@
 ##    toward AP1, and the telecine timing (Warmth, Tint, Contrast) applies.
 ##
 ## The GPU and the CPU read the same tables: one atlas texture (`Film.texels`,
-## half floats), sampled the same way by shaders/develop.frag and by `develop`.
-## Rows:
+## half floats), sampled the same way by shaders/film.frag and the functions
+## here. Rows:
 ##
 ##   0–32   scan: 33³ densities over dye amounts 0..top, slice b (yellow) at
 ##          columns b·33.., red (cyan) along a slice, green (magenta) by row
 ##   33–80  exposure: a 48×48 grid over CIE xy (x 0..0.8 across, y 0..0.9 down)
 ##          of the three layers' exposure at Y = 1
 ##   81     neutral development: dye amounts over log H (−4.5..2.5), 1024 samples
-##   82     development under interimage: amounts over the effective log H
+##   82     development under inhibition: amounts over the effective log H
 ##   83     rms granularity (48 µm) over log H
 ##   84     values: 0–2 the matrix from AP1 to XYZ at the stock's balance, by
-##          rows; 3–5 the interimage matrix; 6 grey's log H, top, the frame
+##          rows; 3–5 the inhibition matrix; 6 grey's log H, top, the frame
 ##          width in µm, grain amount; 7 grey's scanned densities, on; 8 the
 ##          inverse gammas times contrast, Black; 9 the floors; 10 the timing
-##          gains; 11–13 the scan's matrix to AP1
+##          gains; 11–13 the scan's matrix to AP1; 14 each layer's scatter
+##          (exponential length, µm); 15 halation per layer, its spread (µm);
+##          16 each layer's inhibitor spread (µm)
 import memory
 import time
 from luce_std import math
 from luce_color import spectral
-from luce_color import xyz
-from film_stocks import Stock
 import film_stocks
+from film_model import Model, build_model, invert3, log_h_at, lut_size, grid_size, curve_samples, log_low, log_high
 from settings import Settings, defaults
 
 # mark: Layout ================================================================
 
-pub let lut_size: usize = 33
-pub let grid_size: usize = 48
-pub let curve_samples: usize = 1024
 pub let atlas_width: usize = 1089
 pub let atlas_rows: usize = 85
 pub let exposure_row: usize = 33
@@ -70,56 +74,29 @@ pub let neutral_row: usize = 81
 pub let developed_row: usize = 82
 pub let grain_row: usize = 83
 pub let values_row: usize = 84
-## The curves' log H range.
-pub let log_low: f64 = -4.5
-pub let log_high: f64 = 2.5
 
 ## The negative's frame width in µm by the Format setting: 35 mm Academy (the
 ## 4:3 television frame), Super 35, 16 mm and 65 mm.
 pub let frame_widths: f64[4] = [21950.0, 24890.0, 10260.0, 52480.0]
 
-## The interimage matrix at 100%: how much each layer's development is held back,
-## in log exposure, per unit of dye its neighbours form (rows red, green, blue
-## receiving; columns cyan, magenta, yellow formed). Kodak publishes none for EXR;
-## an estimate of the strength ECN-2 stocks show.
+## Interimage at 100%: how much each layer's development is held back, in log
+## exposure, per unit of dye its neighbours form (rows red, green, blue
+## receiving; columns cyan, magenta, yellow formed). Kodak publishes none; an
+## estimate of the strength ECN-2 stocks show. The diagonal, a layer holding
+## itself back, comes from the stock's MTF (film_model.lucb).
 let interimage: f64[9] = [0.0, 0.18, 0.08, 0.15, 0.0, 0.15, 0.06, 0.18, 0.0]
 
-## Grain cells are at least this big on the negative (µm), about a cluster of
-## silver grains, so finer pixels see grain, not noise.
-let grain_cell: f64 = 8.0
+## Halation at 100%: the share of each layer's exposure that comes back off the
+## base, and its spread (σ, µm). Every stock here has rem-jet backing, which
+## absorbs most of it: estimates.
+let halation: f64[3] = [0.025, 0.008, 0.0005]
+let halation_spread: f64 = 70.0
 
-# mark: Densitometry ==========================================================
-
-## A densitometer's three bands, red, green, blue, each summing to 1.
-struct Densitometer:
-    var bands: f64[243]
-
-    ## The Status M-like densities (R, G, B) of `density` (spectral).
-    func read(density: const f64[81]) -> f64[3]:
-        var out: f64[3]
-        var transmitted: f64[81]
-        for at in 0..<spectral.samples:
-            transmitted[at] = math.pow(10.0, -density[at])
-        for channel in 0..<(usize)3:
-            var sum = 0.0
-            for at in 0..<spectral.samples:
-                sum += transmitted[at] * self.bands[channel * 81 + at]
-            out[channel] = -math.log10(math.max(sum, 1.0e-12))
-        return out
-
-func status_m() -> Densitometer:
-    var out: Densitometer
-    let centers: f64[3] = [650.0, 546.0, 447.0]
-    let widths: f64[3] = [16.0, 14.0, 14.0]
-    for channel in 0..<(usize)3:
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            let d = (spectral.wavelength(at) - centers[channel]) / widths[channel]
-            out.bands[channel * 81 + at] = math.exp(-0.5 * d * d)
-            sum += out.bands[channel * 81 + at]
-        for at in 0..<spectral.samples:
-            out.bands[channel * 81 + at] /= sum
-    return out
+## Grain cells are at least this big on the negative (µm): the dye clouds of a
+## fast negative, so finer pixels see clumps of grain, not pixel noise. The
+## grain's amplitude is calibrated so a 48 µm aperture reads the stock's rms
+## granularity whatever the cell (an estimate of their size).
+let grain_cell: f64 = 16.0
 
 ## How many stocks there are, and stock `at`'s name (0-based; the Film Stock
 ## setting is one more), for building a menu.
@@ -128,181 +105,6 @@ pub func stock_count() -> i64:
 
 pub func stock_name(at: i64) -> str:
     return film_stocks.stock_at((usize)at).name
-
-# mark: The stock's model =====================================================
-
-## Everything that depends on the stock alone, built once per stock.
-struct Model:
-    var stock: Stock
-    var meter: Densitometer
-    ## D-min's spectral density as the scan reads it.
-    var base: f64[3]
-    ## AP1 to XYZ adapted to the stock's balance light.
-    var to_film: f64[9]
-    ## Layer exposures over the xy grid, rows of y (48 × 48 × 3).
-    var exposure: f64[]
-    ## Neutral dye amounts over log H (1024 × 3), and rms granularity.
-    var neutral: f64[]
-    var grain: f64[]
-    ## The scan: densities over dye amounts 0..top (33³ × 3), r fastest.
-    var scan: f64[]
-    var top: f64
-    var grey_log_h: f64
-
-    func release():
-        release_table(&self.exposure)
-        release_table(&self.neutral)
-        release_table(&self.grain)
-        release_table(&self.scan)
-
-    ## The scan's densities over D-min of dye `amounts` (cyan, magenta, yellow).
-    func scanned(amounts: f64[3]) -> f64[3]:
-        var density: f64[81]
-        for at in 0..<spectral.samples:
-            density[at] = self.stock.d_min[at] + amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]
-        let read = self.meter.read(density)
-        return [read[0] - self.base[0], read[1] - self.base[1], read[2] - self.base[2]]
-
-func release_table(table: f64[]*):
-    if table.length > 0:
-        free(*table) in memory.heap
-    var empty: f64[]
-    *table = empty
-
-## Layer `channel`'s Status M density over its toe at `log_h`: the datasheet's
-## readings, a toe below them and a shoulder above (estimates: Kodak plots
-## neither), rolling off from 8 stops over normal exposure.
-func over_minimum(stock: const Stock*, channel: usize, log_h: f64) -> f64:
-    let n = stock.curve_count
-    let curve = stock.curves[channel * film_stocks.curve_most..<channel * film_stocks.curve_most + n]
-    let first = curve[0]
-    let toe = first - 0.015
-    let start_slope = math.max((curve[1] - curve[0]) / stock.curve_step, 0.01)
-    let last_x = stock.curve_first + (f64)(n - 1) * stock.curve_step
-    if log_h <= stock.curve_first:
-        # Approaches the toe exponentially, meeting the first reading's slope.
-        let k = start_slope / ((first - toe) * 2.302585092994046)
-        return (first - toe) * math.pow(10.0, k * (log_h - stock.curve_first))
-    if log_h >= last_x:
-        let end_slope = math.max((curve[n - 1] - curve[n - 5]) / (4.0 * stock.curve_step), 0.0)
-        let shoulder = stock.grey_log_h + 2.4
-        let width = 0.35
-        let run = (log_h - last_x) - width * (softplus((log_h - shoulder) / width) - softplus((last_x - shoulder) / width))
-        return curve[n - 1] - toe + end_slope * run
-    let position = (log_h - stock.curve_first) / stock.curve_step
-    let below = (usize)math.min(math.floor(position), (f64)(n - 2))
-    let t = position - (f64)below
-    return curve[below] + (curve[below + 1] - curve[below]) * t - toe
-
-func softplus(x: f64) -> f64:
-    return x + math.log(1.0 + math.exp(-x)) if x > 0.0 else math.log(1.0 + math.exp(x))
-
-## The dye amounts whose scan reads `target` (densities over D-min), by Newton
-## from `start`.
-func unmix(model: const Model*, target: f64[3], start: f64[3]) -> f64[3]:
-    var a = start
-    for _ in 0..<30:
-        let here = model.scanned(a)
-        let residual: f64[3] = [here[0] - target[0], here[1] - target[1], here[2] - target[2]]
-        if math.abs(residual[0]) + math.abs(residual[1]) + math.abs(residual[2]) < 1.0e-7:
-            break
-        var jacobian: f64[9]
-        for k in 0..<(usize)3:
-            var nudged = a
-            nudged[k] += 1.0e-4
-            let moved = model.scanned(nudged)
-            for row in 0..<(usize)3:
-                jacobian[row * 3 + k] = (moved[row] - here[row]) / 1.0e-4
-        let step = solve3(jacobian, residual) else break
-        for k in 0..<(usize)3:
-            a[k] -= step[k]
-    return a
-
-func solve3(m: f64[9], v: f64[3]) -> f64[3]?:
-    let inverse = invert3(m) else return none
-    return apply3(inverse, v)
-
-func invert3(m: f64[9]) -> f64[9]?:
-    let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6])
-    if math.abs(det) < 1.0e-14:
-        return none
-    return [(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
-            (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
-            (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det]
-
-func apply3(m: const f64[9], v: f64[3]) -> f64[3]:
-    return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]
-
-func log_h_at(at: usize) -> f64:
-    return log_low + (log_high - log_low) * (f64)at / (f64)(curve_samples - 1)
-
-## Build `stock`'s model: the spectral exposure grid, the unmixed curves, the scan.
-func build_model(stock: Stock) -> Model!:
-    var out = Model(stock = stock, meter = status_m())
-    errdefer out.release()
-    out.base = out.meter.read(stock.d_min)
-    # The balance light, and the matrix into XYZ adapted to it.
-    let light = spectral.planck(stock.kelvin)
-    let white = light.xyz()
-    let balance = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
-    out.to_film = xyz.multiply(xyz.adapt(xyz.aces_white, balance), xyz.rgb_to_xyz(xyz.aces_ap1)).m
-    # Each layer's sensitivity, linear, and its exposure to the light itself.
-    var sensitivity: f64[243]
-    var light_exposure: f64[3]
-    for layer in 0..<(usize)3:
-        var peak = -1.0e9
-        for at in 0..<spectral.samples:
-            peak = math.max(peak, stock.sensitivity[layer * 81 + at])
-        for at in 0..<spectral.samples:
-            sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            sum += light.values[at] * sensitivity[layer * 81 + at]
-        light_exposure[layer] = sum
-    var upsampler = try spectral.upsampler(light, grid_size)
-    defer upsampler.release()
-    out.exposure = try new f64[grid_size * grid_size * 3] --- in memory.heap
-    for i in 0..<grid_size:
-        for j in 0..<grid_size:
-            let spectrum = upsampler.spectrum(i, j)
-            for layer in 0..<(usize)3:
-                var sum = 0.0
-                for at in 0..<spectral.samples:
-                    sum += spectrum.values[at] * sensitivity[layer * 81 + at]
-                out.exposure[(j * grid_size + i) * 3 + layer] = sum / light_exposure[layer]
-    # Neutral development: the dye amounts that read each curve's densities.
-    out.neutral = try new f64[curve_samples * 3] --- in memory.heap
-    out.grain = try new f64[curve_samples * 3] --- in memory.heap
-    var start: f64[3] = [0.0, 0.0, 0.0]
-    for at in 0..<curve_samples:
-        let log_h = log_h_at(at)
-        let target: f64[3] = [over_minimum(&stock, 0, log_h), over_minimum(&stock, 1, log_h), over_minimum(&stock, 2, log_h)]
-        start = unmix(&out, target, start)
-        for layer in 0..<(usize)3:
-            out.neutral[at * 3 + layer] = math.max(start[layer], 0.0)
-            let last = (f64)(stock.granularity_count - 1)
-            let position = math.clamp((log_h - stock.granularity_first) / stock.granularity_step, 0.0, last)
-            let below = (usize)math.min(math.floor(position), last - 1.0)
-            let t = position - (f64)below
-            let row = layer * film_stocks.granularity_most
-            out.grain[at * 3 + layer] = stock.granularity[row + below] * (1.0 - t) + stock.granularity[row + below + 1] * t
-    out.grey_log_h = stock.grey_log_h
-    out.top = 0.0
-    for layer in 0..<(usize)3:
-        out.top = math.max(out.top, out.neutral[(curve_samples - 1) * 3 + layer] * 1.1)
-    # The scan over the dye amounts.
-    let n = lut_size
-    out.scan = try new f64[n * n * n * 3] --- in memory.heap
-    for b in 0..<n:
-        for g in 0..<n:
-            for r in 0..<n:
-                let amounts: f64[3] = [out.top * (f64)r / (f64)(n - 1), out.top * (f64)g / (f64)(n - 1), out.top * (f64)b / (f64)(n - 1)]
-                let read = out.scanned(amounts)
-                let at = ((b * n + g) * n + r) * 3
-                out.scan[at] = read[0]
-                out.scan[at + 1] = read[1]
-                out.scan[at + 2] = read[2]
-    return out
 
 # mark: Film ==================================================================
 
@@ -375,12 +177,14 @@ pub struct Film:
 
     func fill_settings(settings: const Settings*):
         let model = &self.model
-        # Interimage, and the development corrected for it: a neutral at log H x
+        # Inhibition, and the development corrected for it: a neutral at log H x
         # develops at x − D·a(x); tabulate the inverse so it still reaches a(x).
         let strength = settings.get(.film_interimage) / 100.0
         var dir: f64[9]
         for at in 0..<(usize)9:
             dir[at] = interimage[at] * strength
+        for layer in 0..<(usize)3:
+            dir[layer * 4] = model.self_inhibition[layer]
         for row in 0..<(usize)3:
             self.put(values_row, 3 + row, dir[row * 3], dir[row * 3 + 1], dir[row * 3 + 2], 0.0)
         for layer in 0..<(usize)3:
@@ -418,6 +222,10 @@ pub struct Film:
         let warmth = settings.get(.film_warmth) / 100.0
         let tint = settings.get(.film_tint) / 100.0
         self.put(values_row, 10, math.exp2(0.5 * warmth), math.exp2(-0.5 * tint), math.exp2(-0.5 * warmth), 0.0)
+        self.put(values_row, 14, model.scatter[0], model.scatter[1], model.scatter[2], 0.0)
+        self.put(values_row, 16, model.spread[0], model.spread[1], model.spread[2], 0.0)
+        let halo = settings.get(.film_halation) / 100.0
+        self.put(values_row, 15, halation[0] * halo, halation[1] * halo, halation[2] * halo, halation_spread)
         # The scan's matrix: identity while fitting, then fitted.
         for row in 0..<(usize)3:
             self.put(values_row, 11 + row, 1.0 if row == 0 else 0.0, 1.0 if row == 1 else 0.0, 1.0 if row == 2 else 0.0, 0.0)
@@ -442,7 +250,7 @@ pub struct Film:
                     for brightness in [0.5, 1.0, 2.0]:
                         let scale = 0.18 * brightness / lum
                         let scene: f64[3] = [r * scale, g * scale, b * scale]
-                        let shot = develop(&self, scene, 0.5, 0.5, 1.0, 1.0, false)
+                        let shot = develop(&self, scene, 0.5, 0.5, 1.0, false)
                         # Normal equations: Σ shot·shotᵀ and Σ shot·sceneᵀ.
                         for i in 0..<(usize)3:
                             for j in 0..<(usize)3:
@@ -475,7 +283,8 @@ pub struct Film:
         let at = (row * atlas_width + column) * 4
         return [(f64)(f16)self.texels[at], (f64)(f16)self.texels[at + 1], (f64)(f16)self.texels[at + 2]]
 
-    func value(column: usize) -> f64[4]:
+    ## Values texel `column`, as the GPU holds it.
+    pub func value(column: usize) -> f64[4]:
         let at = (values_row * atlas_width + column) * 4
         return [(f64)(f16)self.texels[at], (f64)(f16)self.texels[at + 1], (f64)(f16)self.texels[at + 2], (f64)(f16)self.texels[at + 3]]
 
@@ -547,42 +356,49 @@ func noise(x: f64, y: f64, seed: u32) -> f64:
     let bottom = hashed(cx, cy + 1) + (hashed(cx + 1, cy + 1) - hashed(cx, cy + 1)) * fx
     return (top + (bottom - top) * fy) * 2.0 - 1.0
 
-## Scene light `c` (AP1) through the film, at output position (`u`, `v`) of an
-## output `width` pixels wide with `aspect`: shaders/develop.frag's with_film.
-## `matrix` false skips the scan's matrix and the timing (for fitting them).
-pub func develop(film: const Film*, c: f64[3], u: f64, v: f64, aspect: f64, width: f64, matrix: bool = true) -> f64[3]:
+## The three layers' exposure to scene light `c` (AP1): relative, 0.18 for a
+## grey card at normal exposure (film.frag's `expose`).
+pub func expose(film: const Film*, c: f64[3]) -> f64[3]:
     let to_film = [film.value(0), film.value(1), film.value(2)]
     let x = to_film[0][0] * c[0] + to_film[0][1] * c[1] + to_film[0][2] * c[2]
     let y = to_film[1][0] * c[0] + to_film[1][1] * c[1] + to_film[1][2] * c[2]
     let z = to_film[2][0] * c[0] + to_film[2][1] * c[1] + to_film[2][2] * c[2]
     let sum = x + y + z
-    var exposure: f64[3] = [1.0e-8, 1.0e-8, 1.0e-8]
-    if sum > 1.0e-12 and y > 1.0e-12:
-        let gx = math.clamp(x / sum / spectral.x_span, 0.0, 1.0) * (f64)(grid_size - 1)
-        let gy = math.clamp(y / sum / spectral.y_span, 0.0, 1.0) * (f64)(grid_size - 1)
-        let per_y = film.bilinear(gx, (f64)exposure_row + gy)
-        for k in 0..<(usize)3:
-            exposure[k] = per_y[k] * y
-    let v6 = film.value(6)
-    var log_h: f64[3]
-    for k in 0..<(usize)3:
-        log_h[k] = math.log10(math.max(exposure[k] / 0.18, 1.0e-8)) + v6[0]
-    # Development, held back by the neighbours' dye.
-    let first: f64[3] = [film.curve(neutral_row, 0, log_h[0]), film.curve(neutral_row, 1, log_h[1]), film.curve(neutral_row, 2, log_h[2])]
+    if sum <= 1.0e-12 or y <= 1.0e-12:
+        return [1.0e-8, 1.0e-8, 1.0e-8]
+    let gx = math.clamp(x / sum / spectral.x_span, 0.0, 1.0) * (f64)(grid_size - 1)
+    let gy = math.clamp(y / sum / spectral.y_span, 0.0, 1.0) * (f64)(grid_size - 1)
+    let per_y = film.bilinear(gx, (f64)exposure_row + gy)
+    return [per_y[0] * y, per_y[1] * y, per_y[2] * y]
+
+func log_exposure(film: const Film*, e: f64[3]) -> f64[3]:
+    let grey = film.value(6)[0]
+    return [math.log10(math.max(e[0] / 0.18, 1.0e-8)) + grey, math.log10(math.max(e[1] / 0.18, 1.0e-8)) + grey,
+            math.log10(math.max(e[2] / 0.18, 1.0e-8)) + grey]
+
+## Each layer's dye if nothing held it back: the inhibitor's source.
+pub func neutral(film: const Film*, e: f64[3]) -> f64[3]:
+    let log_h = log_exposure(film, e)
+    return [film.curve(neutral_row, 0, log_h[0]), film.curve(neutral_row, 1, log_h[1]), film.curve(neutral_row, 2, log_h[2])]
+
+## Exposure `e` developed, held back by the inhibitor from `held` (the neutral
+## dye around, blurred by its spread), grained at pixel (`x`, `y`) (centres, in
+## scene pixels of `pitch` µm), and scanned back to AP1. `matrix` false skips
+## the scan's matrix and the timing (for fitting them). film.frag's stage 4.
+pub func scan(film: const Film*, e: f64[3], held: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
+    let log_h = log_exposure(film, e)
     var amounts: f64[3]
     var effective_h: f64[3]
     for k in 0..<(usize)3:
         let d = film.value(3 + k)
-        effective_h[k] = log_h[k] - (d[0] * first[0] + d[1] * first[1] + d[2] * first[2])
+        effective_h[k] = log_h[k] - (d[0] * held[0] + d[1] * held[1] + d[2] * held[2])
         amounts[k] = film.curve(developed_row, k, effective_h[k])
-    # Grain, per layer, sized to what a pixel covers on the negative.
+    let v6 = film.value(6)
     if v6[3] > 0.0:
-        let cell = math.max(grain_cell, v6[2] / width)
-        let gx = u * v6[2] / cell
-        let gy = v * v6[2] / aspect / cell
+        let cell = math.max(grain_cell, pitch)
         let scale = v6[3] * 80.0 / cell
         for k in 0..<(usize)3:
-            amounts[k] += noise(gx, gy, (u32)k) * film.curve(grain_row, k, effective_h[k]) * scale
+            amounts[k] += noise(x * pitch / cell, y * pitch / cell, (u32)k) * film.curve(grain_row, k, effective_h[k]) * scale
     let d = film.scanned_lut(amounts, v6[1])
     let v7 = film.value(7)
     let v8 = film.value(8)
@@ -600,6 +416,13 @@ pub func develop(film: const Film*, c: f64[3], u: f64, v: f64, aspect: f64, widt
     return [math.max((m0[0] * linear[0] + m0[1] * linear[1] + m0[2] * linear[2]) * gains[0], 0.0),
             math.max((m1[0] * linear[0] + m1[1] * linear[1] + m1[2] * linear[2]) * gains[1], 0.0),
             math.max((m2[0] * linear[0] + m2[1] * linear[1] + m2[2] * linear[2]) * gains[2], 0.0)]
+
+## Scene light `c` through the film where nothing around it differs (no
+## scatter, halation or edges): what a large even patch gives, grained at pixel
+## (`x`, `y`) of `pitch` µm.
+pub func develop(film: const Film*, c: f64[3], x: f64, y: f64, pitch: f64, matrix: bool = true) -> f64[3]:
+    let e = expose(film, c)
+    return scan(film, e, neutral(film, e), x, y, pitch, matrix)
 
 # mark: Tests =================================================================
 
@@ -626,17 +449,17 @@ test "grey comes back in place, and the ramp around it neutral with the film's t
         assert(false)
         return
     defer film.release()
-    let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 1.5, 1000.0)
+    let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 20.0)
     for k in 0..<(usize)3:
         assert(math.abs(grey[k] / 0.18 - 1.0) < 0.01)
     # Two stops either side stay within a quarter stop of themselves and of
     # neutral; four stops over, the shoulder holds them back.
     for value in [0.045, 0.72]:
-        let shot = develop(&film, [value, value, value], 0.5, 0.5, 1.5, 1000.0)
+        let shot = develop(&film, [value, value, value], 0.5, 0.5, 20.0)
         for k in 0..<(usize)3:
             assert(math.abs(math.log2(shot[k] / value)) < 0.35)
         assert(math.abs(math.log2(shot[0] / shot[1])) < 0.1 and math.abs(math.log2(shot[2] / shot[1])) < 0.1)
-    let bright = develop(&film, [2.88, 2.88, 2.88], 0.5, 0.5, 1.5, 1000.0)
+    let bright = develop(&film, [2.88, 2.88, 2.88], 0.5, 0.5, 20.0)
     assert(bright[1] < 2.88 and bright[1] > 1.8)
 
 test "every stock builds, returns grey in place and keeps neutrals neutral":
@@ -649,8 +472,8 @@ test "every stock builds, returns grey in place and keeps neutrals neutral":
             assert(false)
             return
         defer film.release()
-        let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 1.5, 1000.0)
-        let bright = develop(&film, [0.72, 0.72, 0.72], 0.5, 0.5, 1.5, 1000.0)
+        let grey = develop(&film, [0.18, 0.18, 0.18], 0.5, 0.5, 20.0)
+        let bright = develop(&film, [0.72, 0.72, 0.72], 0.5, 0.5, 20.0)
         print(f"{film_stocks.stock_at((usize)(choice - 1)).name}: grey {grey[0]} {grey[1]} {grey[2]}, +2 stops {bright[0]} {bright[1]} {bright[2]}")
         for k in 0..<(usize)3:
             assert(math.abs(grey[k] / 0.18 - 1.0) < 0.01)
@@ -666,7 +489,7 @@ test "film saturates warm colors and keeps their hue near":
     defer film.release()
     # A skin-like AP1 color at middle grey's luminance.
     let skin: f64[3] = [0.26, 0.16, 0.11]
-    let shot = develop(&film, skin, 0.5, 0.5, 1.5, 1000.0)
+    let shot = develop(&film, skin, 0.5, 0.5, 20.0)
     let spread_in = skin[0] - skin[2]
     let spread_out = shot[0] - shot[2]
     assert(spread_out > spread_in * 0.95)
@@ -683,9 +506,7 @@ test "grain averages out and follows the stock's granularity":
     var squares = 0.0
     let count = 4000
     for at in 0..<count:
-        let u = ((f64)(at % 200) + 0.5) / 200.0
-        let v = ((f64)(at // 200) + 0.5) / 200.0
-        let shot = develop(&film, [0.18, 0.18, 0.18], u, v, 1.0, 6000.0)
+        let shot = develop(&film, [0.18, 0.18, 0.18], (f64)(at % 200) + 0.5, (f64)(at // 200) + 0.5, 3.7)
         sum += shot[1]
         squares += shot[1] * shot[1]
     let mean = sum / (f64)count

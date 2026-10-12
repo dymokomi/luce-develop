@@ -1,0 +1,104 @@
+## Film on the negative, on the GPU: shaders/film.frag's passes, in the order
+## film_passes.lucb runs them on the CPU, into three half-float textures at the
+## scene's size. The renderer runs them when the scene or the settings change and
+## then draws the filmed scene in place of the camera's.
+from luce_gpu import gpu
+from film import Film
+import film_passes
+from film_passes import Plan, Blur
+from shaders import film_frag_words, film_frag_msl
+
+pub struct FilmPasses:
+    var shader: gpu.Shader?
+    var pipeline: gpu.Pipeline?
+    var exposed: gpu.Texture?
+    var one: gpu.Texture?
+    var two: gpu.Texture?
+    var width: u32
+    var height: u32
+
+    ## Film `scene` (the camera's values, `width` × `height`): `matrix` into AP1,
+    ## `tables` and `aspect` for the lens vignetting, `atlas` the film's. The
+    ## filmed scene, a texture these passes own until the next run.
+    pub func run(device: gpu.Device, scene: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture, source: const Film*,
+                 matrix: f64[9], aspect: f64, width: u32, height: u32) -> gpu.Texture!:
+        if self.pipeline == none:
+            var shader = try gpu.Shader.create(device, film_frag_words, film_frag_msl)
+            errdefer shader.destroy()
+            self.pipeline = try gpu.Pipeline.create(device, shader, gpu.Blend.replace, gpu.Format.rgba16_float)
+            self.shader = shader
+        if self.width != width or self.height != height or self.exposed == none:
+            self.release_textures()
+            self.exposed = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.one = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.two = try gpu.Texture.create(device, width, height, gpu.Format.rgba16_float)
+            self.width = width
+            self.height = height
+        let exposed = self.exposed else return scene
+        let one = self.one else return scene
+        let two = self.two else return scene
+        let plan = film_passes.plan_for(source, (usize)width)
+        let none_blur = Blur(sigma = [0.0f32, 0.0f32, 0.0f32], radius = 0, exponential = false)
+        try self.pass(exposed, 0, scene, scene, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        try self.pass(one, 1, exposed, exposed, tables, atlas, 1, 0, plan.scatter, plan, matrix, aspect)
+        try self.pass(two, 1, one, one, tables, atlas, 0, 1, plan.scatter, plan, matrix, aspect)
+        if film_passes.has_halation(&plan):
+            try self.pass(one, 1, exposed, exposed, tables, atlas, 1, 0, plan.halation, plan, matrix, aspect)
+            try self.pass(exposed, 2, one, two, tables, atlas, 0, 1, plan.halation, plan, matrix, aspect)
+        else:
+            # Unblurred, the scattered exposure is the exposure.
+            try self.pass(exposed, 1, two, two, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        try self.pass(one, 3, exposed, exposed, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        try self.pass(two, 1, one, one, tables, atlas, 1, 0, plan.spread, plan, matrix, aspect)
+        try self.pass(one, 1, two, two, tables, atlas, 0, 1, plan.spread, plan, matrix, aspect)
+        try self.pass(two, 4, exposed, one, tables, atlas, 0, 0, none_blur, plan, matrix, aspect)
+        return two
+
+    ## One stage into `target`.
+    func pass(target: gpu.Texture, stage: i64, first: gpu.Texture, second: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture,
+              dx: i64, dy: i64, blur: Blur, plan: Plan, matrix: f64[9], aspect: f64) -> !:
+        let pipeline = self.pipeline else return
+        let frame = try target.frame()
+        defer frame.release()
+        let area = try frame.value().target()
+        defer area.release()
+        let w = (f32)self.width
+        let h = (f32)self.height
+        let weights = plan.halation_weights
+        var uniforms: f32[32] = [
+            0.0f32, 0.0f32, w, h,
+            (f32)stage, (f32)dx, (f32)dy, (f32)blur.radius,
+            blur.sigma[0], blur.sigma[1], blur.sigma[2], 1.0f32 if blur.exponential else 0.0f32,
+            weights[0], weights[1], weights[2], plan.pitch,
+            (f32)matrix[0], (f32)matrix[1], (f32)matrix[2], 0.0f32,
+            (f32)matrix[3], (f32)matrix[4], (f32)matrix[5], 0.0f32,
+            (f32)matrix[6], (f32)matrix[7], (f32)matrix[8], 0.0f32,
+            (f32)aspect, 0.0f32, 0.0f32, 0.0f32]
+        let images: gpu.Texture[4] = [first, second, tables, atlas]
+        try gpu.shade(try area.get(), pipeline, gpu.Rect(0.0, 0.0, (f64)w, (f64)h), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
+        _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+
+    func release_textures():
+        if let held = self.exposed:
+            var gone = held
+            gone.destroy()
+        if let held = self.one:
+            var gone = held
+            gone.destroy()
+        if let held = self.two:
+            var gone = held
+            gone.destroy()
+        self.exposed = none
+        self.one = none
+        self.two = none
+
+    pub func release():
+        self.release_textures()
+        if let held = self.pipeline:
+            var gone = held
+            gone.destroy()
+        self.pipeline = none
+        if let held = self.shader:
+            var gone = held
+            gone.destroy()
+        self.shader = none

@@ -1,0 +1,324 @@
+## A film stock's model: everything that depends on the stock alone, built
+## once when it is chosen (film.lucb holds it for some settings). Its spectral
+## exposure grid, its characteristic curves unmixed into dye amounts, the scan of
+## every mix of dyes, and the sharpness its MTF curves show, fitted.
+import memory
+from luce_std import math
+from luce_color import spectral
+from luce_color import xyz
+from film_stocks import Stock
+import film_stocks
+
+## The tables' sizes: the scan's cube, the exposure grid, the curves' samples and
+## their log H range.
+pub let lut_size: usize = 33
+pub let grid_size: usize = 48
+pub let curve_samples: usize = 1024
+pub let log_low: f64 = -4.5
+pub let log_high: f64 = 2.5
+
+# mark: Densitometry ==========================================================
+
+## A densitometer's three bands, red, green, blue, each summing to 1.
+pub struct Densitometer:
+    var bands: f64[243]
+
+    ## The Status M-like densities (R, G, B) of `density` (spectral).
+    pub func read(density: const f64[81]) -> f64[3]:
+        var out: f64[3]
+        var transmitted: f64[81]
+        for at in 0..<spectral.samples:
+            transmitted[at] = math.pow(10.0, -density[at])
+        for channel in 0..<(usize)3:
+            var sum = 0.0
+            for at in 0..<spectral.samples:
+                sum += transmitted[at] * self.bands[channel * 81 + at]
+            out[channel] = -math.log10(math.max(sum, 1.0e-12))
+        return out
+
+pub func status_m() -> Densitometer:
+    var out: Densitometer
+    let centers: f64[3] = [650.0, 546.0, 447.0]
+    let widths: f64[3] = [16.0, 14.0, 14.0]
+    for channel in 0..<(usize)3:
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            let d = (spectral.wavelength(at) - centers[channel]) / widths[channel]
+            out.bands[channel * 81 + at] = math.exp(-0.5 * d * d)
+            sum += out.bands[channel * 81 + at]
+        for at in 0..<spectral.samples:
+            out.bands[channel * 81 + at] /= sum
+    return out
+
+# mark: The model =============================================================
+
+## Everything that depends on the stock alone, built once per stock.
+pub struct Model:
+    pub var stock: Stock
+    pub var meter: Densitometer
+    ## D-min's spectral density as the scan reads it.
+    pub var base: f64[3]
+    ## AP1 to XYZ adapted to the stock's balance light.
+    pub var to_film: f64[9]
+    ## Layer exposures over the xy grid, rows of y (48 × 48 × 3).
+    pub var exposure: f64[]
+    ## Neutral dye amounts over log H (1024 × 3), and rms granularity.
+    pub var neutral: f64[]
+    pub var grain: f64[]
+    ## The scan: densities over dye amounts 0..top (33³ × 3), r fastest.
+    pub var scan: f64[]
+    pub var top: f64
+    pub var grey_log_h: f64
+    ## Sharpness, fitted to the stock's MTF curves: each layer's light scatter (an
+    ## exponential's length, µm, the emulsion's classic spread of light), how strongly its development holds itself back
+    ## (self-inhibition, log H per unit of its dye), and how far its inhibitor
+    ## spreads (σ, µm). Together they give the curves' fall at high frequencies
+    ## and their rise above 100% where edges are developed harder.
+    pub var scatter: f64[3]
+    pub var self_inhibition: f64[3]
+    pub var spread: f64[3]
+
+    pub func release():
+        release_table(&self.exposure)
+        release_table(&self.neutral)
+        release_table(&self.grain)
+        release_table(&self.scan)
+
+    ## The scan's densities over D-min of dye `amounts` (cyan, magenta, yellow).
+    pub func scanned(amounts: f64[3]) -> f64[3]:
+        var density: f64[81]
+        for at in 0..<spectral.samples:
+            density[at] = self.stock.d_min[at] + amounts[0] * self.stock.dyes[at] + amounts[1] * self.stock.dyes[81 + at] + amounts[2] * self.stock.dyes[162 + at]
+        let read = self.meter.read(density)
+        return [read[0] - self.base[0], read[1] - self.base[1], read[2] - self.base[2]]
+
+func release_table(table: f64[]*):
+    if table.length > 0:
+        free(*table) in memory.heap
+    var empty: f64[]
+    *table = empty
+
+## Layer `channel`'s Status M density over its toe at `log_h`: the datasheet's
+## readings, a toe below them and a shoulder above (estimates: Kodak plots
+## neither), rolling off from 8 stops over normal exposure.
+func over_minimum(stock: const Stock*, channel: usize, log_h: f64) -> f64:
+    let n = stock.curve_count
+    let curve = stock.curves[channel * film_stocks.curve_most..<channel * film_stocks.curve_most + n]
+    let first = curve[0]
+    let toe = first - 0.015
+    let start_slope = math.max((curve[1] - curve[0]) / stock.curve_step, 0.01)
+    let last_x = stock.curve_first + (f64)(n - 1) * stock.curve_step
+    if log_h <= stock.curve_first:
+        # Approaches the toe exponentially, meeting the first reading's slope.
+        let k = start_slope / ((first - toe) * 2.302585092994046)
+        return (first - toe) * math.pow(10.0, k * (log_h - stock.curve_first))
+    if log_h >= last_x:
+        let end_slope = math.max((curve[n - 1] - curve[n - 5]) / (4.0 * stock.curve_step), 0.0)
+        let shoulder = stock.grey_log_h + 2.4
+        let width = 0.35
+        let run = (log_h - last_x) - width * (softplus((log_h - shoulder) / width) - softplus((last_x - shoulder) / width))
+        return curve[n - 1] - toe + end_slope * run
+    let position = (log_h - stock.curve_first) / stock.curve_step
+    let below = (usize)math.min(math.floor(position), (f64)(n - 2))
+    let t = position - (f64)below
+    return curve[below] + (curve[below + 1] - curve[below]) * t - toe
+
+func softplus(x: f64) -> f64:
+    return x + math.log(1.0 + math.exp(-x)) if x > 0.0 else math.log(1.0 + math.exp(x))
+
+## The dye amounts whose scan reads `target` (densities over D-min), by Newton
+## from `start`.
+func unmix(model: const Model*, target: f64[3], start: f64[3]) -> f64[3]:
+    var a = start
+    for _ in 0..<30:
+        let here = model.scanned(a)
+        let residual: f64[3] = [here[0] - target[0], here[1] - target[1], here[2] - target[2]]
+        if math.abs(residual[0]) + math.abs(residual[1]) + math.abs(residual[2]) < 1.0e-7:
+            break
+        var jacobian: f64[9]
+        for k in 0..<(usize)3:
+            var nudged = a
+            nudged[k] += 1.0e-4
+            let moved = model.scanned(nudged)
+            for row in 0..<(usize)3:
+                jacobian[row * 3 + k] = (moved[row] - here[row]) / 1.0e-4
+        let step = solve3(jacobian, residual) else break
+        for k in 0..<(usize)3:
+            a[k] -= step[k]
+    return a
+
+func solve3(m: f64[9], v: f64[3]) -> f64[3]?:
+    let inverse = invert3(m) else return none
+    return apply3(inverse, v)
+
+pub func invert3(m: f64[9]) -> f64[9]?:
+    let det = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6]) + m[2] * (m[3] * m[7] - m[4] * m[6])
+    if math.abs(det) < 1.0e-14:
+        return none
+    return [(m[4] * m[8] - m[5] * m[7]) / det, (m[2] * m[7] - m[1] * m[8]) / det, (m[1] * m[5] - m[2] * m[4]) / det,
+            (m[5] * m[6] - m[3] * m[8]) / det, (m[0] * m[8] - m[2] * m[6]) / det, (m[2] * m[3] - m[0] * m[5]) / det,
+            (m[3] * m[7] - m[4] * m[6]) / det, (m[1] * m[6] - m[0] * m[7]) / det, (m[0] * m[4] - m[1] * m[3]) / det]
+
+func apply3(m: const f64[9], v: f64[3]) -> f64[3]:
+    return [m[0] * v[0] + m[1] * v[1] + m[2] * v[2], m[3] * v[0] + m[4] * v[1] + m[5] * v[2], m[6] * v[0] + m[7] * v[1] + m[8] * v[2]]
+
+## Curve sample `at`'s log H.
+pub func log_h_at(at: usize) -> f64:
+    return log_low + (log_high - log_low) * (f64)at / (f64)(curve_samples - 1)
+
+## Build `stock`'s model: the spectral exposure grid, the unmixed curves, the scan.
+pub func build_model(stock: Stock) -> Model!:
+    var out = Model(stock = stock, meter = status_m())
+    errdefer out.release()
+    out.base = out.meter.read(stock.d_min)
+    # The balance light, and the matrix into XYZ adapted to it.
+    let light = spectral.planck(stock.kelvin)
+    let white = light.xyz()
+    let balance = xyz.Chromaticity(white.x / (white.x + white.y + white.z), white.y / (white.x + white.y + white.z))
+    out.to_film = xyz.multiply(xyz.adapt(xyz.aces_white, balance), xyz.rgb_to_xyz(xyz.aces_ap1)).m
+    # Each layer's sensitivity, linear, and its exposure to the light itself.
+    var sensitivity: f64[243]
+    var light_exposure: f64[3]
+    for layer in 0..<(usize)3:
+        var peak = -1.0e9
+        for at in 0..<spectral.samples:
+            peak = math.max(peak, stock.sensitivity[layer * 81 + at])
+        for at in 0..<spectral.samples:
+            sensitivity[layer * 81 + at] = math.pow(10.0, stock.sensitivity[layer * 81 + at] - peak)
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            sum += light.values[at] * sensitivity[layer * 81 + at]
+        light_exposure[layer] = sum
+    var upsampler = try spectral.upsampler(light, grid_size)
+    defer upsampler.release()
+    out.exposure = try new f64[grid_size * grid_size * 3] --- in memory.heap
+    for i in 0..<grid_size:
+        for j in 0..<grid_size:
+            let spectrum = upsampler.spectrum(i, j)
+            for layer in 0..<(usize)3:
+                var sum = 0.0
+                for at in 0..<spectral.samples:
+                    sum += spectrum.values[at] * sensitivity[layer * 81 + at]
+                out.exposure[(j * grid_size + i) * 3 + layer] = sum / light_exposure[layer]
+    # Neutral development: the dye amounts that read each curve's densities.
+    out.neutral = try new f64[curve_samples * 3] --- in memory.heap
+    out.grain = try new f64[curve_samples * 3] --- in memory.heap
+    var start: f64[3] = [0.0, 0.0, 0.0]
+    for at in 0..<curve_samples:
+        let log_h = log_h_at(at)
+        let target: f64[3] = [over_minimum(&stock, 0, log_h), over_minimum(&stock, 1, log_h), over_minimum(&stock, 2, log_h)]
+        start = unmix(&out, target, start)
+        for layer in 0..<(usize)3:
+            out.neutral[at * 3 + layer] = math.max(start[layer], 0.0)
+            let last = (f64)(stock.granularity_count - 1)
+            let position = math.clamp((log_h - stock.granularity_first) / stock.granularity_step, 0.0, last)
+            let below = (usize)math.min(math.floor(position), last - 1.0)
+            let t = position - (f64)below
+            let row = layer * film_stocks.granularity_most
+            out.grain[at * 3 + layer] = stock.granularity[row + below] * (1.0 - t) + stock.granularity[row + below + 1] * t
+    out.grey_log_h = stock.grey_log_h
+    out.top = 0.0
+    for layer in 0..<(usize)3:
+        out.top = math.max(out.top, out.neutral[(curve_samples - 1) * 3 + layer] * 1.1)
+    # The scan over the dye amounts.
+    let n = lut_size
+    out.scan = try new f64[n * n * n * 3] --- in memory.heap
+    for b in 0..<n:
+        for g in 0..<n:
+            for r in 0..<n:
+                let amounts: f64[3] = [out.top * (f64)r / (f64)(n - 1), out.top * (f64)g / (f64)(n - 1), out.top * (f64)b / (f64)(n - 1)]
+                let read = out.scanned(amounts)
+                let at = ((b * n + g) * n + r) * 3
+                out.scan[at] = read[0]
+                out.scan[at + 1] = read[1]
+                out.scan[at + 2] = read[2]
+    fit_sharpness(&out)
+    return out
+
+# mark: Sharpness ===============================================================
+
+## Fit the scatter, self-inhibition and spread to the stock's MTF. Linearized
+## about grey, a layer whose neutral development rises by g dye per log H answers
+## a sine of frequency f with S(f)·(1 − d·g·G(f)) / (1 − d·g): S the scatter's
+## transfer (an exponential of length b: 1 / (1 + (2πbf)²)), G the spread's (a
+## Gaussian), d the self-inhibition. Where G has fallen and S has not, the
+## edges' answer exceeds 1: Kodak's curves rise above 100% there. One spread for
+## the stock (the inhibitor diffuses alike in every layer), each layer's b and d
+## by search, least squares in log response; d·g stays at most 0.5, so edges
+## never gain more than twofold. Kodak's red curves fall early and slowly (the
+## bottom layer sees light already spread by the two above it), which this
+## follows to within about 20%.
+func fit_sharpness(model: Model*):
+    let grey_at = (model.grey_log_h - log_low) / (log_high - log_low) * (f64)(curve_samples - 1)
+    let low = (usize)math.floor(grey_at) - 20
+    let high = (usize)math.floor(grey_at) + 20
+    var slopes: f64[3]
+    for layer in 0..<(usize)3:
+        slopes[layer] = (model.neutral[high * 3 + layer] - model.neutral[low * 3 + layer]) / (log_h_at(high) - log_h_at(low))
+    var best_total = 1.0e30
+    var spread = 10.0
+    while spread <= 40.0:
+        var total = 0.0
+        var lengths: f64[3]
+        var inhibitions: f64[3]
+        for layer in 0..<(usize)3:
+            var best = 1.0e30
+            var d = 0.0
+            while d * slopes[layer] <= 0.5:
+                var length = 0.0
+                while length <= 10.0:
+                    let err = mtf_miss(&model.stock, layer, slopes[layer], length, d, spread)
+                    if err < best:
+                        best = err
+                        lengths[layer] = length
+                        inhibitions[layer] = d
+                    length += 0.2
+                d += 0.02
+            total += best
+        if total < best_total:
+            best_total = total
+            model.scatter = lengths
+            model.self_inhibition = inhibitions
+            model.spread = [spread, spread, spread]
+        spread += 1.0
+
+## The squared log misses of a layer's modelled MTF against the datasheet's.
+func mtf_miss(stock: const Stock*, layer: usize, slope: f64, length: f64, d: f64, spread: f64) -> f64:
+    var err = 0.0
+    for at in 0..<stock.mtf_count:
+        let f = stock.mtf_frequencies[at] / 1000.0
+        let s = 1.0 / (1.0 + (2.0 * math.pi * length * f) * (2.0 * math.pi * length * f))
+        let g = math.exp(-2.0 * math.pi * math.pi * spread * spread * f * f)
+        let response = s * (1.0 - d * slope * g) / (1.0 - d * slope)
+        let miss = math.log(response) - math.log(stock.mtf[layer * film_stocks.mtf_most + at] / 100.0)
+        err += miss * miss
+    return err
+
+# mark: Tests ===================================================================
+
+## The fitted model's MTF for `layer` at `cycles` per mm.
+func modelled_mtf(model: const Model*, layer: usize, cycles: f64, slope: f64) -> f64:
+    let f = cycles / 1000.0
+    let b = model.scatter[layer]
+    let s = 1.0 / (1.0 + (2.0 * math.pi * b * f) * (2.0 * math.pi * b * f))
+    let g = math.exp(-2.0 * math.pi * math.pi * model.spread[layer] * model.spread[layer] * f * f)
+    let d = model.self_inhibition[layer] * slope
+    return s * (1.0 - d * g) / (1.0 - d)
+
+test "each stock's sharpness follows its datasheet MTF":
+    for at in 0..<film_stocks.stock_count:
+        var model = build_model(film_stocks.stock_at(at)) catch failure:
+            assert(false)
+            return
+        defer model.release()
+        let grey_at = (usize)math.floor((model.grey_log_h - log_low) / (log_high - log_low) * (f64)(curve_samples - 1))
+        print(f"{model.stock.name}: scatter {model.scatter[0]} {model.scatter[1]} {model.scatter[2]} µm, self {model.self_inhibition[0]} {model.self_inhibition[1]} {model.self_inhibition[2]}, spread {model.spread[0]} {model.spread[1]} {model.spread[2]} µm")
+        var worst = 0.0
+        for layer in 0..<(usize)3:
+            let slope = (model.neutral[(grey_at + 20) * 3 + layer] - model.neutral[(grey_at - 20) * 3 + layer]) / (log_h_at(grey_at + 20) - log_h_at(grey_at - 20))
+            for point in 0..<model.stock.mtf_count:
+                let wanted = model.stock.mtf[layer * film_stocks.mtf_most + point] / 100.0
+                let got = modelled_mtf(&model, layer, model.stock.mtf_frequencies[point], slope)
+                worst = math.max(worst, math.abs(math.log(got / wanted)))
+        print(f"  worst miss {worst}")
+        assert(worst < 0.22)

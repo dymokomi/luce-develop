@@ -73,6 +73,11 @@ pub struct Scene:
             out[at] = top + (bottom - top) * fy
         return out
 
+    ## A scene of `pixels` (RGBA half floats, `width` × `height`, rows packed),
+    ## already scene light in AP1, which it owns: film's output.
+    pub static func from_pixels(width: usize, height: usize, pixels: f16[]) -> Scene:
+        return Scene(columns = width, rows = height, pixels = pixels, shot_temperature = 6500.0)
+
     ## The pixels as bytes, for a texture upload.
     pub func bytes() -> const u8[]:
         return u8[]((u8*)self.pixels.data, self.pixels.length * 2)

@@ -9,15 +9,15 @@
 //            64×64 side by side, over a log2 shaper of 24 stops about 0.18
 //            (view.lucb), read with tetrahedral interpolation. The Standard and
 //            Linear views are computed here exactly as view.lucb does.
-//   image 4  the film atlas (film.lucb): the stock's scan, spectral exposure grid,
-//            development curves, granularity and values, RGBA half floats
+//   image 4  the film atlas (film.lucb), for whether film is on: then image 1 is
+//            the filmed scene (film.frag), already in AP1 with its vignetting
 //
 // First the output position is mapped to the photo through the geometry's frame
 // map (perspective, rotation, aspect, scale, crop to fit); outside the photo is
-// black. Order: the matrix (white balance, camera color, exposure) into ACES AP1, scene
-// linear; lens vignetting; film (film.lucb: exposed, developed and scanned
-// back to AP1, when a stock is chosen); the tone curve on luminance, keeping each pixel's
-// ratios; in Oklab vibrance and saturation, the Color Mixer, Color Grading and
+// black. Order: the matrix (white balance, camera color, exposure) into ACES
+// AP1, scene linear; lens vignetting (with film, both are done on the negative
+// by film.frag, which hands this the filmed scene); the tone curve on
+// luminance, keeping each pixel's ratios; in Oklab vibrance and saturation, the Color Mixer, Color Grading and
 // Black & White; the view transform to display-linear sRGB; Levels and Curves on
 // encoded values; the vignette and grain. The window's sRGB framebuffer encodes.
 #version 450
@@ -235,67 +235,10 @@ vec3 with_grain(vec3 c, vec2 uv, float aspect) {
     return max(c * (1.0 + amount * 0.6 * noise * 4.0 * luma * (1.0 - luma)), 0.0);
 }
 
-// Film: film.lucb's develop, step for step, reading its atlas.
-const float film_width = 1089.0;
-const float film_rows = 85.0;
-const float film_lut = 33.0;
-const float film_grid = 48.0;
-
-vec3 film_texels(float x, float y) {
-    return texture(film, vec2((x + 0.5) / film_width, (y + 0.5) / film_rows)).rgb;
-}
-vec4 film_value(float at) {
-    return texture(film, vec2((at + 0.5) / film_width, 84.5 / film_rows));
-}
-// A curve row at log H, all three channels at that place.
-vec3 film_along(float row, float log_h) {
-    return film_texels(clamp((log_h + 4.5) / 7.0, 0.0, 1.0) * 1023.0, row);
-}
-vec3 film_scan(vec3 a, float top) {
-    vec3 s = clamp(a / top, 0.0, 1.0) * (film_lut - 1.0);
-    float slice = min(floor(s.b), film_lut - 2.0);
-    vec3 near_slice = film_texels(slice * film_lut + s.r, s.g);
-    vec3 far_slice = film_texels((slice + 1.0) * film_lut + s.r, s.g);
-    return mix(near_slice, far_slice, s.b - slice);
-}
-float film_noise(vec2 p, uint seed) {
-    uvec2 cell = uvec2(floor(p)) + seed * uvec2(7919u, 104729u);
-    vec2 f = p - floor(p);
-    f = f * f * (3.0 - 2.0 * f);
-    float top = mix(hashed(cell), hashed(cell + uvec2(1u, 0u)), f.x);
-    float bottom = mix(hashed(cell + uvec2(0u, 1u)), hashed(cell + uvec2(1u, 1u)), f.x);
-    return mix(top, bottom, f.y) * 2.0 - 1.0;
-}
-
-vec3 with_film(vec3 c, vec2 uv, float aspect, float width) {
-    vec4 v7 = film_value(7.0);
-    if (v7.w < 0.5) return c;
-    vec3 xyz = vec3(dot(film_value(0.0).rgb, c), dot(film_value(1.0).rgb, c), dot(film_value(2.0).rgb, c));
-    float sum = xyz.x + xyz.y + xyz.z;
-    vec3 exposure = vec3(1e-8);
-    if (sum > 1e-12 && xyz.y > 1e-12) {
-        vec2 g = clamp(vec2(xyz.x / sum / 0.8, xyz.y / sum / 0.9), 0.0, 1.0) * (film_grid - 1.0);
-        exposure = film_texels(g.x, 33.0 + g.y) * xyz.y;
-    }
-    vec4 v6 = film_value(6.0);
-    vec3 log_h = log(max(exposure / 0.18, vec3(1e-8))) / log(10.0) + v6.x;
-    vec3 first = vec3(film_along(81.0, log_h.r).r, film_along(81.0, log_h.g).g, film_along(81.0, log_h.b).b);
-    vec3 effective = log_h - vec3(dot(film_value(3.0).rgb, first), dot(film_value(4.0).rgb, first), dot(film_value(5.0).rgb, first));
-    vec3 amounts = vec3(film_along(82.0, effective.r).r, film_along(82.0, effective.g).g, film_along(82.0, effective.b).b);
-    if (v6.w > 0.0) {
-        float cell = max(8.0, v6.z / width);
-        vec2 p = vec2(uv.x * v6.z, uv.y * v6.z / aspect) / cell;
-        float scale = v6.w * 80.0 / cell;
-        vec3 sigma = vec3(film_along(83.0, effective.r).r, film_along(83.0, effective.g).g, film_along(83.0, effective.b).b);
-        amounts += vec3(film_noise(p, 0u), film_noise(p, 1u), film_noise(p, 2u)) * sigma * scale;
-    }
-    vec3 d = film_scan(amounts, v6.y);
-    vec4 v8 = film_value(8.0);
-    vec3 floors = film_value(9.0).rgb;
-    vec3 shown = 0.18 * pow(vec3(10.0), (d - v7.rgb) * v8.rgb);
-    vec3 linear_light = (shown - v8.w * floors) / (1.0 - v8.w * floors / 0.18);
-    vec3 scene = vec3(dot(film_value(11.0).rgb, linear_light), dot(film_value(12.0).rgb, linear_light), dot(film_value(13.0).rgb, linear_light));
-    return max(scene * film_value(10.0).rgb, 0.0);
+// Whether film is on: the scene is then the filmed one (film.frag), its lens
+// vignetting already applied, and the matrix the identity.
+bool filmed() {
+    return texture(film, vec2(7.5 / 1089.0, 84.5 / 85.0)).w > 0.5;
 }
 
 void main() {
@@ -309,8 +252,7 @@ void main() {
     }
     vec3 camera = texture(scene, source).rgb;
     vec3 c = vec3(dot(params.row0.xyz, camera), dot(params.row1.xyz, camera), dot(params.row2.xyz, camera));
-    c = with_lens(max(c, vec3(0.0)), source, aspect);
-    c = with_film(c, uv, aspect, params.rect.z);
+    if (!filmed()) c = with_lens(max(c, vec3(0.0)), source, aspect);
     c = with_tone(c);
     c = with_color(c);
     c = through_view(c);

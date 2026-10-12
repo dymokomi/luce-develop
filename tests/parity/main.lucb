@@ -4,8 +4,8 @@
 ## both ways with several settings into 8-bit sRGB, and the pictures
 ## must agree: the mean difference under 1 level and fewer than 0.1% of values
 ## off by more than 6. The Standard and Linear views are computed the same way on
-## both, so no value may be off by 3; ACES goes through a table on the GPU, so
-## its limit is 40.
+## both, so no value may be off by 3 (6 with film, which runs nine half-float
+## passes first); ACES goes through a table on the GPU, so its limit is 40.
 import c
 import memory
 import strings
@@ -18,7 +18,7 @@ from luce_develop import process
 from luce_develop import renderer
 from luce_develop.settings import parse
 
-let cases: str[12] = [
+let cases: str[13] = [
     "",
     "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50",
@@ -30,7 +30,8 @@ let cases: str[12] = [
     "view=1;geometry_vertical=40;geometry_rotate=4;geometry_aspect=20;guides=0.1,0.1,0.12,0.9",
     "view=1;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40",
     "view=1;film_stock=1;film_grain=0",
-    "view=1;film_stock=1;film_exposure=1;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2"]
+    "view=1;film_stock=1;film_exposure=1;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2",
+    "view=1;film_stock=3;film_halation=300;film_grain=0;exposure=2"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
@@ -80,7 +81,10 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         # Interpolating the view's table across a sharp corner (the Linear
         # view's clip, the gamut's edge) misses by a few levels, rarely.
         let share = (f64)outliers / (f64)(shown.length // 4 * 3)
-        let good = mean < 1.0 and share < 0.001 and largest < (40 if settings.get(.view) == 0.0 else 3)
+        # Film goes through nine half-float passes on the negative first, grain
+        # included, so it may differ by a few levels more.
+        let limit = 40 if settings.get(.view) == 0.0 else (6 if settings.get(.film_stock) > 0.0 else 3)
+        let good = mean < 1.0 and share < 0.001 and largest < limit
         print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [{wanted}]  mean {mean}  over 6: {outliers}  largest {largest}")
         if not good:
             failed += 1

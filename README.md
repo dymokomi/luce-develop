@@ -96,29 +96,42 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 
 The Film section turns the develop into a color negative and its transfer, the
 way television shot on film reached the screen: Kodak negative, developed,
-scanned on a telecine and graded on tape. It sits after the white balance and
-exposure, so the tone and color tools grade the scan, and the view stays the
-only tone scale. Everything comes from the stock's datasheet
-(`film_stocks.lucb`):
+scanned on a telecine and graded on tape. Film works on the negative, at the
+scene's own size and before the develop, so the tone and color tools grade the
+scan and the view stays the only tone scale. Everything comes from the stock's
+datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
 
 1. **Exposure.** A color gets a smooth spectrum (luce-color's `spectral`
    upsampler, under the stock's balance light, 3200 K for tungsten stocks), and
    each layer is exposed to it through its spectral sensitivity. Middle grey
-   lands on the stock's normal exposure; Film Exposure over- or underexposes the negative, and the
-   transfer brings grey back.
-2. **Development.** The characteristic curves (Status M) are unmixed into
-   cyan, magenta and yellow dye amounts. Interimage effects (DIR couplers) hold
-   a layer back by the dye its neighbours form, which saturates colors and
-   shifts hues the way the stock does; the curves are corrected so neutrals
-   keep the datasheet's densities.
-3. **Grain**, per layer in dye density at the stock's rms granularity, scaled
-   from Kodak's 48 µm aperture to what a pixel covers on the negative (Format's
-   frame width over the output's width), and calibrated so a 48 µm aperture
-   over the rendered grain reads Kodak's number.
-4. **Scan.** The dyes' spectral density over D-min (the orange mask removed),
+   lands on the stock's normal exposure; Film Exposure over- or underexposes
+   the negative, and the transfer brings grey back.
+2. **Light in the emulsion.** Each layer's exposure scatters (an exponential,
+   the emulsion's classic spread of light); Halation adds light that came back
+   off the base, mostly to the red layer, weak behind rem-jet backing.
+3. **Development.** The characteristic curves (Status M) are unmixed into
+   cyan, magenta and yellow dye amounts. Developing releases inhibitor (DIR
+   couplers) that diffuses and holds development back nearby: in the layer
+   itself, which develops edges harder, and in its neighbours, which saturates
+   colors and shifts hues (Interimage). The curves are corrected so neutrals
+   keep the datasheet's densities. Each layer's scatter and self-inhibition and
+   the inhibitor's spread are fitted to the stock's MTF curves, within about
+   20% everywhere (`film_model.lucb`).
+4. **Grain**, per layer in dye density at the stock's rms granularity, in dye
+   clouds of 16 µm on the negative, calibrated so a 48 µm aperture over the
+   rendered grain reads Kodak's number; Format sets how much negative a pixel
+   covers.
+5. **Scan.** The dyes' spectral density over D-min (the orange mask removed),
    inverted per channel at grey, the clear negative's floor taken out by Black,
    a matrix fitted per stock back to AP1, then the telecine's Warmth, Tint and
    Contrast.
+
+The passes on the negative (`film_passes.lucb` on the CPU, `film_gpu.lucb` and
+`shaders/film.frag` on the GPU) are: expose, scatter (across, down),
+halation (across, down), the neutral development, the inhibitor's spread
+(across, down), and develop with grain and scan. The renderer runs them when the
+photo or the settings change and draws the filmed scene; export runs them at
+full size (about 18 s for a 48-megapixel raw on the CPU, demosaic included).
 
 Stocks, the tungsten negatives American television shot through the 1990s:
 Kodak EXR 500T 5298 and EXR 200T 5293, Vision 500T 5279 and Vision 320T 5277.
@@ -131,7 +144,7 @@ on its curves. `dev/film` holds the readings, the scripts that took them, and
 `make_stocks.py`, which writes `film_stocks.lucb`. Kodak publishes nothing above log H 0, no interimage numbers and no
 Status M tables: the shoulder, the interimage matrix and the densitometer's
 bands (Gaussians at Status M's band centres) are estimates, labelled where
-they are made. The model builds in about 0.1 s when a stock is first chosen;
+they are made. The model builds in about 0.2 s when a stock is first chosen;
 after that a settings change only recomputes the development and the timing.
 
 ## Tests

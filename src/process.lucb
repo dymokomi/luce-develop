@@ -16,6 +16,7 @@ import tables
 import view
 import geometry
 import film
+import film_passes
 from film import Film
 
 ## AP1's luminance weights, and AP1 (D60) to and from Oklab's LMS (D65): the
@@ -47,10 +48,8 @@ struct Develop:
     var map: geometry.Matrix
     ## The display the view renders for (its primaries; sRGB's curve encodes either).
     var output: view.Output
-    ## The film stock's model and tables, when one is chosen; the output's width
-    ## in pixels, which sizes its grain.
+    ## The film stock's model and tables, when one is chosen.
     var film: Film
-    var width: f64
 
 func radius(u: f64, v: f64, aspect: f64) -> f64:
     let x = (u - 0.5) * 2.0 * aspect
@@ -203,9 +202,9 @@ func develop_pixel(d: const Develop*, source: const Scene*, u: f64, v: f64) -> f
     var c = apply(d.matrix, source.sample(su, sv))
     for at in 0..<(usize)3:
         c[at] = math.max(c[at], 0.0)
-    c = with_lens(d, c, su, sv)
-    if d.film.active():
-        c = film.develop(&d.film, c, u, v, d.aspect, d.width)
+    # With film the scene is the filmed one, its lens vignetting done on the negative.
+    if not d.film.active():
+        c = with_lens(d, c, su, sv)
     c = with_tone(d, c)
     c = with_color(d, c)
     c = view.display(d.shown, c, d.to_display, d.output)
@@ -222,6 +221,22 @@ struct Rendering:
     var height: usize
     var bytes: u8[]
     var words: u16[]
+    ## With film, the filmed scene the develop reads instead.
+    var filmed: Scene
+
+    ## Film the scene, when film is on: from here the develop reads the filmed
+    ## scene through the identity. Call it where the rendering stays.
+    func film_scene() -> !:
+        if not self.develop.film.active():
+            return
+        let aspect = (f64)self.source.width() / (f64)self.source.height()
+        self.filmed = try film_passes.filmed(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect)
+        self.source = &self.filmed
+        self.develop.matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+
+    func release():
+        self.develop.film.release()
+        self.filmed.close()
 
 func render_row(context: void*, y: usize, worker: usize) -> !:
     let job = (Rendering*)context
@@ -248,8 +263,7 @@ func rendering(source: const Scene*, settings: const Settings*, output: view.Out
     let develop = Develop(matrix = try source.matrix(settings), tables = tables.build(settings),
                           shown = (View)(i64)settings.get(.view), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
-                          aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()),
-                          width = out_width)
+                          aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
     var out = Rendering(develop = develop, source = source, width = width, height = height)
     out.develop.film.prepare(settings) catch failure:
         out.develop.film.release()
@@ -261,7 +275,8 @@ func rendering(source: const Scene*, settings: const Settings*, output: view.Out
 ## every processor.
 pub func render(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> Picture!:
     var job = try rendering(source, &settings, output)
-    defer job.develop.film.release()
+    defer job.release()
+    try job.film_scene()
     var out = try Picture.create(job.width, job.height)
     errdefer out.close()
     job.bytes = out.bytes()
@@ -272,7 +287,8 @@ pub func render(source: const Scene*, settings: Settings, output: view.Output = 
 ## packed, on every processor; the caller frees it.
 pub func render16(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb) -> u16[]!:
     var job = try rendering(source, &settings, output)
-    defer job.develop.film.release()
+    defer job.release()
+    try job.film_scene()
     job.words = try new u16[job.width * job.height * 4] --- in memory.heap
     errdefer free(job.words) in memory.heap
     try parallel.for_each(job.height, (void*)&job, render_row)

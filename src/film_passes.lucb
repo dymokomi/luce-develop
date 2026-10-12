@@ -1,0 +1,202 @@
+## Film on the negative, on the CPU: shaders/film.frag's passes step for step, at
+## the scene's own size, each pass's output rounded to half floats as the GPU's
+## textures hold it. `filmed` turns a scene into the filmed one, which the
+## develop then draws with the identity for its matrix and no lens vignetting
+## (film did both). `plan_for` sizes the blurs for both paths.
+##
+## The passes: expose (the develop's matrix and lens vignetting, then each
+## layer's exposure); scatter (each layer's exponential, across then down);
+## halation (the exposure blurred by halation's spread, across, then down while
+## adding it to the scattered exposure); the neutral development; the
+## inhibitor's spread (across, down); develop, grain and scan.
+import memory
+from luce_std import math
+from luce_std import parallel
+from film import Film
+import film
+from scene import Scene
+from tables import Tables
+
+## Blurs are never wider than this many pixels a side.
+let widest: f64 = 64.0
+
+## A pass's blur: its size per channel in pixels (a Gaussian's σ, or an
+## exponential's length), which kind, and how many pixels a side it reads.
+pub struct Blur:
+    pub var sigma: f32[3]
+    pub var radius: i32
+    pub var exponential: bool
+
+## The blurs and grain for a scene `width` pixels wide, in the values the GPU is
+## handed (single floats).
+pub struct Plan:
+    ## µm of negative per scene pixel.
+    pub var pitch: f32
+    pub var scatter: Blur
+    pub var halation: Blur
+    pub var halation_weights: f32[3]
+    pub var spread: Blur
+
+## Gaussians are cut at 3σ, exponentials at 6 lengths.
+func blur_of(sigmas: f64[3], exponential: bool = false) -> Blur:
+    let most = math.max(sigmas[0], math.max(sigmas[1], sigmas[2]))
+    let reach = 6.0 if exponential else 3.0
+    return Blur(sigma = [(f32)sigmas[0], (f32)sigmas[1], (f32)sigmas[2]], radius = (i32)math.min(math.ceil(reach * most), widest),
+                exponential = exponential)
+
+pub func plan_for(source: const Film*, width: usize) -> Plan:
+    let pitch = source.value(6)[2] / (f64)width
+    let sharp = source.value(14)
+    let halo = source.value(15)
+    let spread = source.value(16)
+    return Plan(pitch = (f32)pitch,
+                scatter = blur_of([sharp[0] / pitch, sharp[1] / pitch, sharp[2] / pitch], true),
+                halation = blur_of([halo[3] / pitch, halo[3] / pitch, halo[3] / pitch]),
+                halation_weights = [(f32)halo[0], (f32)halo[1], (f32)halo[2]],
+                spread = blur_of([spread[0] / pitch, spread[1] / pitch, spread[2] / pitch]))
+
+## Whether halation adds anything.
+pub func has_halation(blurs: const Plan*) -> bool:
+    return blurs.halation_weights[0] > 0.0f32 or blurs.halation_weights[1] > 0.0f32 or blurs.halation_weights[2] > 0.0f32
+
+# mark: Passes ================================================================
+
+## One pass over the rows: its stage, inputs and output, all RGBA half floats.
+struct Pass:
+    var stage: i64
+    var film: const Film*
+    var width: usize
+    var height: usize
+    var first: const f16[]
+    var second: const f16[]
+    var out: f16[]
+    ## Stage 0: the scene, its matrix into AP1, the tables (lens vignetting) and
+    ## the output's aspect.
+    var source: const Scene*
+    var matrix: f64[9]
+    var tables: const Tables*
+    var aspect: f64
+    ## Blurs: the step between taps, and the blur.
+    var dx: i64
+    var dy: i64
+    var blur: Blur
+    var weights: f32[3]
+    var pitch: f64
+
+func texel(image: const f16[], width: usize, height: usize, x: i64, y: i64) -> f64[3]:
+    let cx = (usize)(0 if x < 0 else (x if x < (i64)width else (i64)width - 1))
+    let cy = (usize)(0 if y < 0 else (y if y < (i64)height else (i64)height - 1))
+    let at = (cy * width + cx) * 4
+    return [(f64)image[at], (f64)image[at + 1], (f64)image[at + 2]]
+
+func blurred(pass: const Pass*, image: const f16[], x: i64, y: i64) -> f64[3]:
+    var sum: f64[3] = [0.0, 0.0, 0.0]
+    var weights: f64[3] = [0.0, 0.0, 0.0]
+    let r = (i64)pass.blur.radius
+    for i in -r..=r:
+        let d = (f64)i
+        let value = texel(image, pass.width, pass.height, x + pass.dx * i, y + pass.dy * i)
+        for k in 0..<(usize)3:
+            let sigma = (f64)pass.blur.sigma[k]
+            var w = 1.0 if i == 0 else 0.0
+            if sigma > 1.0e-3:
+                w = math.exp(-math.abs(d) / sigma) if pass.blur.exponential else math.exp(-0.5 * d * d / (sigma * sigma))
+            sum[k] += w * value[k]
+            weights[k] += w
+    return [sum[0] / weights[0], sum[1] / weights[1], sum[2] / weights[2]]
+
+func run_row(context: void*, row: usize, worker: usize) -> !:
+    let pass = (Pass*)context
+    let y = (i64)row
+    for column in 0..<pass.width:
+        let x = (i64)column
+        var out: f64[3]
+        if pass.stage == 0:
+            let camera = pass.source.value_at(row * pass.width + column)
+            var c: f64[3]
+            for k in 0..<(usize)3:
+                c[k] = math.max(pass.matrix[k * 3] * camera[0] + pass.matrix[k * 3 + 1] * camera[1] + pass.matrix[k * 3 + 2] * camera[2], 0.0)
+            let v = pass.tables.value(5)
+            if v[1] > 0.0:
+                let u = ((f64)column + 0.5) / (f64)pass.width
+                let w = ((f64)row + 0.5) / (f64)pass.height
+                let px = (u - 0.5) * 2.0 * pass.aspect
+                let py = (w - 0.5) * 2.0
+                let radius = math.sqrt(px * px + py * py) / math.sqrt(pass.aspect * pass.aspect + 1.0)
+                let start = v[2] * 0.6
+                let t = math.clamp((radius - start) / (1.0 - start), 0.0, 1.0)
+                for k in 0..<(usize)3:
+                    c[k] *= 1.0 + v[1] * 2.0 * t * t
+            out = film.expose(pass.film, c)
+        elif pass.stage == 1:
+            out = blurred(pass, pass.first, x, y)
+        elif pass.stage == 2:
+            let scattered = texel(pass.second, pass.width, pass.height, x, y)
+            let halo = blurred(pass, pass.first, x, y)
+            for k in 0..<(usize)3:
+                out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
+        elif pass.stage == 3:
+            out = film.neutral(pass.film, texel(pass.first, pass.width, pass.height, x, y))
+        else:
+            let e = texel(pass.first, pass.width, pass.height, x, y)
+            let held = texel(pass.second, pass.width, pass.height, x, y)
+            out = film.scan(pass.film, e, held, (f64)column + 0.5, (f64)row + 0.5, pass.pitch)
+        let at = (row * pass.width + column) * 4
+        pass.out[at] = (f16)out[0]
+        pass.out[at + 1] = (f16)out[1]
+        pass.out[at + 2] = (f16)out[2]
+        pass.out[at + 3] = (f16)1.0
+
+## `source` (camera values) through the film: the filmed scene, scene light in
+## AP1 at the same size, which the caller closes. `matrix` takes the scene into
+## AP1 (the develop's white balance and exposure); `tables` and `aspect` (the
+## scene's) give the lens vignetting, done here on the negative.
+pub func filmed(source: const Film*, scene: const Scene*, matrix: f64[9], tables: const Tables*, aspect: f64) -> Scene!:
+    let width = (usize)scene.width()
+    let height = (usize)scene.height()
+    let size = width * height * 4
+    let plan = plan_for(source, width)
+    let exposed = try new f16[size] --- in memory.heap
+    defer free(exposed) in memory.heap
+    let one = try new f16[size] --- in memory.heap
+    defer free(one) in memory.heap
+    let two = try new f16[size] --- in memory.heap
+    defer free(two) in memory.heap
+    let out = try new f16[size] --- in memory.heap
+    errdefer free(out) in memory.heap
+    var pass = Pass(stage = 0, film = source, width = width, height = height, first = exposed, second = exposed, out = exposed,
+                    source = scene, matrix = matrix, tables = tables, aspect = aspect, pitch = (f64)plan.pitch)
+    try parallel.for_each(height, (void*)&pass, run_row)
+    # Scatter, across then down: exposed → one → two.
+    try run_blur(&pass, exposed, exposed, one, 1, 1, 0, plan.scatter)
+    try run_blur(&pass, one, one, two, 1, 0, 1, plan.scatter)
+    # Halation, across from the exposure, then down while adding to the scatter.
+    if has_halation(&plan):
+        try run_blur(&pass, exposed, exposed, one, 1, 1, 0, plan.halation)
+        pass.weights = plan.halation_weights
+        try run_blur(&pass, one, two, exposed, 2, 0, 1, plan.halation)
+    else:
+        memory.copy(exposed, two, size)
+    # The neutral development, and the inhibitor's spread: exposed → one → two → one.
+    pass.stage = 3
+    pass.first = exposed
+    pass.out = one
+    try parallel.for_each(height, (void*)&pass, run_row)
+    try run_blur(&pass, one, one, two, 1, 1, 0, plan.spread)
+    try run_blur(&pass, two, two, one, 1, 0, 1, plan.spread)
+    pass.stage = 4
+    pass.first = exposed
+    pass.second = one
+    pass.out = out
+    try parallel.for_each(height, (void*)&pass, run_row)
+    return Scene.from_pixels(width, height, out)
+
+func run_blur(pass: Pass*, first: const f16[], second: const f16[], out: f16[], stage: i64, dx: i64, dy: i64, blur: Blur) -> !:
+    pass.stage = stage
+    pass.first = first
+    pass.second = second
+    pass.out = out
+    pass.dx = dx
+    pass.dy = dy
+    pass.blur = blur
+    try parallel.for_each(pass.height, (void*)pass, run_row)
