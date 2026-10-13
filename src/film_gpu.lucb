@@ -120,8 +120,9 @@ pub struct FilmPasses:
         var scratch = three
         let n = film.chemistry_steps
         for step in 1..=n:
-            let shares: f32[4] = [(f32)(step - 1) / (f32)n, (f32)step / (f32)n, (f32)math.pow(plan.keep, (f64)(n - step)), 0.0f32]
-            try self.pass(scratch, 8, exposed, exposed, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shares)
+            let shares: f32[4] = [(f32)(step - 1) / (f32)n, (f32)step / (f32)n, (f32)math.pow(plan.keep, (f64)(n - step)),
+                                  1.0f32 if step == 1 else 0.0f32]
+            try self.pass(scratch, 8, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shares)
             let spread = film_passes.spread_at(&plan, step, n)
             try self.pass(spare, 1, scratch, scratch, tables, atlas, 1, 0, spread, plan, matrix, aspect)
             let first: f32[4] = [0.0f32, 0.0f32, 0.0f32, 1.0f32 if step == 1 else 0.0f32]

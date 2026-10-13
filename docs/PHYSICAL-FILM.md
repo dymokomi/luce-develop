@@ -116,8 +116,10 @@ pixel size only decides how finely the film is sampled.
    developer missing beyond what an even field of the same exposure misses,
    so even areas keep the published curve exactly. Watching development
    shows the image part-way (the kinetics' progress) over 2.5 s. Still open:
-   halide (bromide) as its own field, the inhibitor's release proportional to
-   dye actually formed (not the uninhibited curve).
+   halide (bromide) as its own field. Each step releases inhibitor with the
+   dye it forms under the inhibitor already released (DIR couplers react as
+   dye forms); the developed curve is solved so an even field still develops
+   to the published one (fixed point, damped; cached per development).
 
 5. **Grain populations** (done in a first form: three populations per layer
    fitted to the curve, their strengths to the published RMS, an exact
@@ -140,8 +142,10 @@ pixel size only decides how finely the film is sampled.
    stock with a published curve; two-scale noise power spectrum; Print Grain
    Index ordering for Portra 400. *Status:* every stock's fitted grains make
    its granularity from toe to shoulder within 0.05 % (each population's clouds
-   at least as large as its share of the toe needs); Portra 160 < 400 < 800 in
-   the render. The two-scale spectrum waits on cluster data (dye cloud sizes,
+   at least as large as its share of the toe needs), but one: Vision 500T
+   5279's green toe, 18 % shy since the release follows the dye formed (its
+   populations develop out of order there); Portra 160 < 400 < 800 in the
+   render at net density 1.0, where Kodak gives their figures. The two-scale spectrum waits on cluster data (dye cloud sizes,
    noise power spectra).
 
 6. **Halation** (done: 256 samples drawn from the computed distribution,

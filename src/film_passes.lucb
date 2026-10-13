@@ -269,7 +269,9 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             for k in 0..<(usize)3:
                 out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
         elif pass.stage == 8:
-            let stepped = film.release(pass.film, texel(pass.first, pass.width, pass.height, x, y), pass.begun, pass.reached, pass.keep)
+            # The inhibitor the steps before released around here (none yet at the first).
+            let held = [0.0, 0.0, 0.0] if pass.first_step else texel(pass.second, pass.width, pass.height, x, y)
+            let stepped = film.release(pass.film, texel(pass.first, pass.width, pass.height, x, y), held, pass.begun, pass.reached, pass.keep)
             out = [stepped[0], stepped[1], stepped[2]]
             spent = stepped[3]
         elif pass.stage == 10:
@@ -547,8 +549,9 @@ func develop_steps(pass: Pass*, exposed: const f32[], field: f32[], spare: f32[]
     for step in 1..=n:
         pass.stage = 8
         pass.first = exposed
-        pass.second = exposed
+        pass.second = field
         pass.out = scratch
+        pass.first_step = step == 1
         pass.begun = (f64)(step - 1) / (f64)n
         pass.reached = (f64)step / (f64)n
         pass.keep = math.pow(plan.keep, (f64)(n - step))
@@ -739,8 +742,7 @@ test "part of the way through, a negative is thinner":
         return
     defer negative.release()
     let e = film.expose(&negative, [0.36, 0.36, 0.36])
-    let held = film.neutral(&negative, e)
-    let spent = film.exhaustion(&negative, held)
+    let (held, spent) = film.even_field(&negative, e)
     let half = film.developed(&negative, e, held, spent, 0.5)
     let whole = film.developed(&negative, e, held, spent, 1.0)
     for k in 0..<(usize)3:
@@ -750,8 +752,8 @@ test "part of the way through, a negative is thinner":
 ## by its own inhibitor, as film.lucb's `develop` has it).
 func even_effective(source: const Film*, light: f64 = 0.18) -> f64[3]:
     let e = film.expose(source, [light, light, light])
-    let held = film.neutral(source, e)
-    return film.developed(source, e, held, film.exhaustion(source, held) * source.value(54)[3]).effective
+    let (held, missing) = film.even_field(source, e)
+    return film.developed(source, e, held, missing).effective
 
 ## A patch of `size` × `size` pixels of `pitch` µm, developed evenly at grey
 ## (its effective log H the stock's grey), read by the stochastic render with
@@ -857,10 +859,25 @@ func patch_statistics(source: Film*, size: usize, pitch: f64, samples: usize, tr
     beside /= (f64)(size * (size - 1))
     return (variance, beside / variance)
 
+## The light (relative, 0.18 grey) that develops layer `layer` of `source` to
+## `net` dye over its unexposed film's.
+func light_for(source: const Film*, layer: usize, net: f64) -> f64:
+    let floor = source.curve_amount(layer, -4.5)
+    var low = 0.0005
+    var high = 50.0
+    for _ in 0..<50:
+        let middle = math.sqrt(low * high)
+        let dye = source.curve_amount(layer, even_effective(source, middle)[layer]) - floor
+        if dye < net:
+            low = middle
+        else:
+            high = middle
+    return math.sqrt(low * high)
+
 test "Portra 160, 400 and 800 grain in Kodak's order, rendered":
-    # Kodak's Print Grain Index rises from Portra 160 through 400 to 800; the
-    # stochastic render of a grey patch (10 µm pixels) keeps that order in
-    # each channel.
+    # Kodak gives their rms granularity at a net density of 1.0 (8, 9 and
+    # 10.5); the stochastic render of a patch developed there (10 µm pixels)
+    # keeps that order in each channel.
     var rms: f64[9]
     let stocks: str[3] = ["film_stock=11", "film_stock=12", "film_stock=13"]
     for (index, text) in stocks.indexed():
@@ -868,12 +885,12 @@ test "Portra 160, 400 and 800 grain in Kodak's order, rendered":
             assert(false)
             return
         defer portra.release()
-        let (_, _, spread) = even_reading(&portra, 24, 10.0, 64) catch failure:
+        let (_, _, spread) = even_reading(&portra, 24, 10.0, 64, light_for(&portra, 1, 1.0)) catch failure:
             assert(false)
             return
         for c in 0..<(usize)3:
             rms[index * 3 + c] = spread[c]
-    print(f"Portra 160 / 400 / 800 green rms at 10 µm: {rms[1]} {rms[4]} {rms[7]}")
+    print(f"Portra 160 / 400 / 800 green rms at net density 1.0, 10 µm: {rms[1]} {rms[4]} {rms[7]}")
     for c in 0..<(usize)3:
         assert(rms[c] < rms[3 + c] and rms[3 + c] < rms[6 + c])
 

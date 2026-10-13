@@ -416,7 +416,7 @@ func fit_layer(out: Fit*, layer: usize, curves: const f64[], granularity: const 
             let variance = granularity[at3 * 3 + layer] * granularity[at3 * 3 + layer] * aperture_area
             let needed = math.sqrt(variance / math.max(dye * densest_taken * fourth_over_second, 1.0e-12))
             radii[dominant] = math.max(radii[dominant], needed)
-        at3 += 4
+        at3 += 1
     # At each exposure, how far the populations have developed and how strong
     # their clouds are, so the field's density is the curve's and its rms the
     # granularity's. The populations develop along their own logistics at a

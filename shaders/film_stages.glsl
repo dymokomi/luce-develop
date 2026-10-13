@@ -250,6 +250,16 @@ vec3 progress(vec3 log_h, float share) {
     return out_share;
 }
 
+// The inhibitor each layer releases with its dye at log H `log_h` held back by
+// `held` (film.lucb's `inhibiting`): its dye once developed (on a slide, the
+// first developer's image: what the dye is not).
+vec3 inhibiting(vec3 log_h, vec3 held) {
+    vec3 held_back = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held));
+    vec3 dye = film_curve(34.0, held_back);
+    vec4 v17 = film_value(17.0);
+    return v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
+}
+
 // The developed negative at texel `at`: each layer's dye, and the effective log
 // H it developed at (film.lucb's `developed`), `share` of the way through.
 void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
@@ -258,18 +268,20 @@ void developed(ivec2 at, out vec3 amounts, out vec3 effective) {
     vec3 held = around.rgb;
     // The edge effects: developer missing beyond what an even field of this
     // exposure would miss (film.lucb's `developed`).
-    vec3 dye = film_curve(33.0, log_h);
-    vec4 v17 = film_value(17.0);
-    vec3 neutral_held = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
     // The developer an even field of this exposure still misses at the end
-    // (film.lucb's `even_exhaustion`): each step's use, less the bath's renewal.
+    // (film.lucb's `even_field`): each step's dye formed under the inhibitor
+    // the steps before released, its use, less the bath's renewal.
+    vec4 v17 = film_value(17.0);
     vec4 v55 = film_value(55.0);
     int steps = int(v55.x + 0.5);
     float even = 0.0;
+    vec3 even_held = vec3(0.0);
     vec3 before = vec3(0.0);
     for (int step = 1; step <= steps; step++) {
         vec3 now = progress(log_h, float(step) / float(steps));
-        even += pow(v55.y, float(steps - step)) * dot(neutral_held / max(v17.rgb, vec3(1e-9)), now - before) / 3.0;
+        vec3 forms = inhibiting(log_h, even_held);
+        even_held += forms * (now - before);
+        even += pow(v55.y, float(steps - step)) * dot(forms / max(v17.rgb, vec3(1e-9)), now - before) / 3.0;
         before = now;
     }
     effective = log_h - vec3(dot(film_value(3.0).rgb, held), dot(film_value(4.0).rgb, held), dot(film_value(5.0).rgb, held))
@@ -568,16 +580,17 @@ vec4 film_stage(ivec2 at) {
         out_color = fetch(second_image, at) + params.halo.rgb * bilinear(first_image, low);
     } else if (stage == 8) {
         // A step of development (film.lucb's `release`): what each layer
-        // releases as it develops from share row0.x to row0.y of the way (the
-        // dye on a negative, the first developer's image on a slide), and in
-        // alpha the developer it uses, row0.z of it still missing at the end.
+        // releases with the dye it forms from share row0.x to row0.y of the way,
+        // held back by the inhibitor the steps before released (image 2; none
+        // at the first, row0.w), and in alpha the developer it uses, row0.z of
+        // it still missing at the end.
         vec3 log_h = log_exposure(fetch(first_image, at));
-        vec3 dye = film_curve(33.0, log_h);
+        vec3 held = params.row0.w > 0.5 ? vec3(0.0) : fetch(second_image, at);
+        vec3 forms = inhibiting(log_h, held);
         vec4 v17 = film_value(17.0);
-        vec3 held = v17.w > 0.5 && v17.w < 1.5 ? v17.rgb - dye : dye;
         vec3 grown = progress(log_h, params.row0.y) - progress(log_h, params.row0.x);
-        out_color = held * grown;
-        spent = params.row0.z * dot(held / max(v17.rgb, vec3(1e-9)), grown) / 3.0;
+        out_color = forms * grown;
+        spent = params.row0.z * dot(forms / max(v17.rgb, vec3(1e-9)), grown) / 3.0;
     } else if (stage == 9) {
         // The step's release spread down and added to what earlier steps left
         // (row0.w: none yet).
