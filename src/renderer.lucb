@@ -122,7 +122,8 @@ struct Developing:
 func view_key(settings: const Settings*) -> i64:
     var key = (i64)settings.get(.view)
     for parameter in [Parameter.print_silver, Parameter.paper_stock, Parameter.paper_grade, Parameter.paper_enlarger, Parameter.paper_exposure,
-                      Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan, Parameter.film_stock, Parameter.print_material]:
+                      Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan, Parameter.film_stock, Parameter.print_material,
+                      Parameter.paper_surface]:
         key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 100.0)
     return key
 

@@ -25,6 +25,14 @@
 ##    with Williams and Clapper's multiple internal reflection, its curves
 ##    unmixed into dye amounts through it) under D50, the paper white the
 ##    display's white.
+## 5. The surface and the room. A matte surface scatters part of the light
+##    straight back, before it reaches the image: Kodak's Polycontrast IV RC
+##    curves read a D-max near 1.7 on its matte N surface against 2.1 on glossy
+##    F in the same developer (2.2 against 1.7 in Polymax RT): 1.3 % of white
+##    reflected flat. Its lustre E reads as glossy F. The papers' curves are
+##    glossy; the surface adds its reflection to them, and the room's light
+##    glancing off any surface 1 % more (viewing flare: an estimate, Hunt's
+##    typical figure for prints). Both lift the blacks, not the whites.
 import sync
 from luce_std import math
 from luce_color import xyz
@@ -36,6 +44,19 @@ from film_stocks import PaperStock, PrintStock
 let negative_gamma: f64 = 0.6
 ## Where grey prints: a print's mid-grey reflection density.
 let grey_density: f64 = 0.7
+## What a surface reflects before the image (glossy, lustre, matte: share of
+## white), and the room's viewing flare on any surface.
+let surface_reflection: f64[3] = [0.0, 0.0, 0.0131]
+let viewing_flare: f64 = 0.01
+
+## The light a print's surface and its room add to it (share of white).
+pub func surface_and_room(chosen: const PaperSettings*) -> f64:
+    return surface_reflection[(usize)math.clamp((f64)chosen.surface, 0.0, 2.0)] + viewing_flare
+
+## Reflectance `r` (of white) as seen with `extra` added by surface and room.
+pub func with_surface(r: f64, extra: f64) -> f64:
+    return (r + extra) / (1.0 + extra)
+
 ## The Callier coefficient of a condenser enlarger for a silver negative.
 let callier: f64 = 1.3
 ## Enlarger flare, a share of grey's exposure, by enlarger: diffusion,
@@ -50,6 +71,8 @@ pub struct PaperSettings:
     pub var paper: usize = 0
     pub var grade: f64 = 2.0
     pub var enlarger: i64 = 0
+    ## 0 glossy, 1 lustre, 2 matte.
+    pub var surface: i64 = 0
     pub var stops: f64 = 0.0
     pub var filtration: f64[3] = [0.0, 0.0, 0.0]
     pub var silver: bool = true
@@ -126,7 +149,10 @@ pub func printed(rgb: f64[3], chosen: const PaperSettings*) -> xyz.XYZ:
             let d = negative_gamma * math.log10(math.max(rgb[layer], 1.0e-6) / 0.18)
             let grey_at = film_print.printer_of(model, layer)
             amounts[layer] = film_print.amount_in(model, layer, exposure(d, grey_at, chosen, filters[layer]))
-        return film_print.seen(model, amounts)
+        let shown = film_print.seen(model, amounts)
+        # The surface and the room add light the white of D65's color.
+        let extra = surface_and_room(chosen)
+        return xyz.XYZ((shown.x + extra * 0.95047) / (1.0 + extra), (shown.y + extra) / (1.0 + extra), (shown.z + extra * 1.08883) / (1.0 + extra))
     # Black and white: the negative's density from the light's luminance; the
     # grades around the chosen one, each at its own speed.
     let luminance = 0.272228717 * rgb[0] + 0.674081766 * rgb[1] + 0.053689517 * rgb[2]
@@ -140,7 +166,7 @@ pub func printed(rgb: f64[3], chosen: const PaperSettings*) -> xyz.XYZ:
     let t = math.clamp((chosen.grade - paper.grades[below]) / span, 0.0, 1.0) if span > 0.0 else 0.0
     let low = density(&paper, below, exposure(d, grey_exposure(&paper, below), chosen, 0.0))
     let high = density(&paper, above, exposure(d, grey_exposure(&paper, above), chosen, 0.0))
-    let reflectance = math.pow(10.0, -(low * (1.0 - t) + high * t))
+    let reflectance = with_surface(math.pow(10.0, -(low * (1.0 - t) + high * t)), surface_and_room(chosen))
     return xyz.XYZ(reflectance * 0.95047, reflectance, reflectance * 1.08883)
 
 ## The paper view's data for the GPU (film_print.lucb's layout, then row 2: 10
@@ -171,12 +197,14 @@ pub func pack(chosen: const PaperSettings*, out: f32[]):
         for grade in [below, above]:
             for at in 0..<paper.curve_count:
                 film_print.put(out, 3 + grade, at, density(&paper, grade, paper.curve_first + paper.curve_step * (f64)at), 0.0, 0.0, 0.0)
-    film_print.put(out, 2, 10, q, flare, chosen.stops * 0.30103, 0.0)
+    film_print.put(out, 2, 10, q, flare, chosen.stops * 0.30103, surface_and_room(chosen))
 
 ## The paper settings `settings` choose (paper_* and the film stock's kind).
-pub func chosen_by(paper: f64, grade: f64, enlarger: f64, stops: f64, yellow: f64, magenta: f64, cyan: f64, silver: bool) -> PaperSettings:
+pub func chosen_by(paper: f64, grade: f64, enlarger: f64, stops: f64, yellow: f64, magenta: f64, cyan: f64, silver: bool,
+                   surface: f64 = 0.0) -> PaperSettings:
     return PaperSettings(paper = (usize)math.clamp(paper, 0.0, (f64)(film_stocks.paper_count - 1)), grade = grade,
-                         enlarger = (i64)math.clamp(enlarger, 0.0, 2.0), stops = stops, filtration = [yellow, magenta, cyan], silver = silver)
+                         enlarger = (i64)math.clamp(enlarger, 0.0, 2.0), stops = stops, filtration = [yellow, magenta, cyan], silver = silver,
+                         surface = (i64)math.clamp(surface, 0.0, 2.0))
 
 test "grey prints at the paper's mid-grey; a harder grade is steeper":
     var chosen = PaperSettings()
@@ -202,3 +230,17 @@ test "a color paper prints grey neutral and filtration moves its color":
     let yellowed = printed([0.18, 0.18, 0.18], &chosen)
     # Less blue exposure: less yellow dye, the print bluer.
     assert(yellowed.z / yellowed.y > grey.z / grey.y)
+
+test "a matte print's blacks are lighter than a glossy one's, as Kodak measured":
+    # Polycontrast IV RC's black: glossy F reads about 2.1, matte N 1.7 (the
+    # sheet's curves); seen in a room each takes 1 % more white. Matte comes out
+    # 0.15–0.35 lighter in its deepest black than glossy.
+    var glossy = PaperSettings(paper = 2, grade = 3.0)
+    var matte = PaperSettings(paper = 2, grade = 3.0, surface = 2)
+    let black: f64[3] = [0.0002, 0.0002, 0.0002]
+    let glossy_black = -math.log10(printed(black, &glossy).y)
+    let matte_black = -math.log10(printed(black, &matte).y)
+    assert(glossy_black - matte_black > 0.15 and glossy_black - matte_black < 0.35)
+    # The whites stay where they were.
+    let white: f64[3] = [50.0, 50.0, 50.0]
+    assert(math.abs(printed(white, &glossy).y - printed(white, &matte).y) < 0.02)

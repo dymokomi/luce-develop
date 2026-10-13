@@ -171,9 +171,12 @@ pixel size only decides how finely the film is sampled.
    checked against colour-science): the print shows flatter (mid grey
    18 → 21.7), the paper harder (18 → 13.5). The print and paper views run
    per pixel on the GPU (no 64³ table), within the film's parity limits.
-   Still open: viewing flare in the room, the paper's own surface texture
-   (gloss, lustre, matte), and the observer's Hunt and Stevens effects,
-   which a relative match leaves out.
+   A paper's surface (Glossy, Lustre, Matte) adds the light it reflects
+   before the image, from Kodak's Polycontrast IV curves per surface (matte N
+   1.3 % of white; lustre E as glossy), and the room 1 % more (viewing flare,
+   an estimate). Still open: the surface's texture (sheen, lustre's pattern),
+   and the observer's Hunt and Stevens effects, which a relative match leaves
+   out.
 
 ## Rendering: progressive and stochastic
 

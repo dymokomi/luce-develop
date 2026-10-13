@@ -233,7 +233,7 @@ pub func paper_settings(settings: const Settings*) -> film_paper.PaperSettings:
     let silvered = stock < 1 or film_stocks.stock_at((usize)(stock - 1)).kind == 2
     return film_paper.chosen_by(settings.get(.paper_stock), settings.get(.paper_grade), settings.get(.paper_enlarger),
                                 settings.get(.paper_exposure), settings.get(.paper_yellow), settings.get(.paper_magenta),
-                                settings.get(.paper_cyan), silvered)
+                                settings.get(.paper_cyan), silvered, settings.get(.paper_surface))
 
 ## The papers (film_stocks.paper_at): how many, paper `at`'s name, and whether
 ## it is a color paper.

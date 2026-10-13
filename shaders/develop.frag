@@ -301,6 +301,9 @@ vec3 printed(vec3 c) {
             amounts[layer] = print_amount(layer, enlarged(d, printer[layer], filters[layer]));
         }
         shown = print_seen(amounts, 0.0);
+        // The surface and the room (film_paper.lucb's `surface_and_room`).
+        float extra = print_value(2, 10).w;
+        shown = (shown + extra * vec3(0.95047, 1.0, 1.08883)) / (1.0 + extra);
     } else {
         // A black-and-white paper: the grades around the chosen one.
         float luminance = dot(lifted, vec3(0.272228717, 0.674081766, 0.053689517));
@@ -309,7 +312,8 @@ vec3 printed(vec3 c) {
         vec4 greys = print_value(2, 13);
         float low = paper_density(int(grades.x), enlarged(d, greys.x, 0.0));
         float high = paper_density(int(grades.y), enlarged(d, greys.y, 0.0));
-        float reflectance = pow(10.0, -mix(low, high, grades.z));
+        float extra = print_value(2, 10).w;
+        float reflectance = (pow(10.0, -mix(low, high, grades.z)) + extra) / (1.0 + extra);
         shown = reflectance * vec3(0.95047, 1.0, 1.08883);
     }
     shown = as_displayed(shown);
