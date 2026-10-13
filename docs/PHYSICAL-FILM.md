@@ -53,8 +53,11 @@ pixel size only decides how finely the film is sampled.
    (±40 s around 3:15); D-76 time series for Acros, Tri-X and HP5; E-6 push
    speeds of EI 320/640/1000 at 8/11/14 min. *Status:* C-41 ±40 s met; Tri-X
    D-76 6/10/12 min within 0.08; Acros II D-76 4/10 min within 0.1 (one rate per
-   exposure: Fujifilm's 4 minutes is slower in the midtones than that allows;
-   per-population kinetics would separate it); HP5 has no published series
+   exposure: Fujifilm's 4 minutes is slower in the midtones than that allows.
+   Per-population rates were tried, fast, mid and slow each its own: they fit
+   Acros better, rms 0.025 against 0.044, but only with the fast and slow
+   populations twenty times slower than the mid one, which is not chemistry,
+   so they are not used; series at more times would settle it); HP5 has no published series
    (it borrows Tri-X's); Ektachrome E100's E-6 pushes: the layers' mean within
    0.15 stop of Kodak's, blue up to 0.4 more (one rate shared by the layers).
    The black-and-white kinetics are fitted in exactly the form they develop in.
@@ -178,6 +181,25 @@ pixel size only decides how finely the film is sampled.
    (CAM16 M: the Hunt effect, so the cinema's dim print shows a little less
    saturated). Still open: the surface's texture (sheen, lustre's pattern),
    and the Stevens effect beyond what CAM16's lightness carries.
+
+## Open: what waits on data
+
+- Dye cloud sizes, or noise power spectra, per stock: they set the clouds'
+  size (now from an estimated peak density) and with it the grain's texture,
+  and the two-scale clusters real negatives show.
+- Measured edge traces per stock (adjacency): Portra 400's MTF and Nelson's
+  Gold 200 fit disagree on strength.
+- Interimage matrices measured for ECN-2 and C-41 stocks (now an estimate).
+- Halation: measured spread and strength, rem-jet against removed backing.
+- E-6 push speeds per layer (Kodak gives one per film; the blue gains more).
+- Development series at more times (per-population kinetics; HP5).
+- ISO 5-3's Status M table (Gaussians, checked within 0.004 D) and a Status A
+  check (tabulated from python-colormath, provenance unstated).
+- Printing density in the blue (0.04–0.08 below Kodak's 5203 tables).
+- High-intensity reciprocity failure (no stock in the set publishes it).
+- Bromide as a field of its own and coupler saturation: the published curves
+  and MTFs already hold their effects; separating them needs per-developer
+  data.
 
 ## Rendering: progressive and stochastic
 
