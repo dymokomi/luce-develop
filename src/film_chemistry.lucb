@@ -8,8 +8,8 @@
 ## State is kept as amounts per film area (µmol/m²) in each cell, so a layer
 ## swelling changes concentrations (mM = amount / wet thickness in µm) without
 ## making or losing anything. Mobile species: developer R, oxidized developer O
-## (quinonediimine), bromide B, the DIR coupler's timed precursor P and free
-## inhibitor F. Fixed in place: developable silver halide A, developed silver
+## (quinonediimine), bromide B, and for each of two inhibitors (each its own
+## strength) a DIR coupler's timed precursor P and the free inhibitor F. Fixed in place: developable silver halide A, developed silver
 ## S, image coupler Q, DIR coupler G, dye Y and inhibitor bound to the grains
 ## H. The reactions, per cell:
 ##
@@ -42,7 +42,10 @@ pub let oxidized: usize = 1
 pub let bromide: usize = 2
 pub let precursor: usize = 3
 pub let inhibitor: usize = 4
-pub let mobile_count: usize = 5
+## A second inhibitor (its own strength): its precursor and free inhibitor.
+pub let precursor_b: usize = 5
+pub let inhibitor_b: usize = 6
+pub let mobile_count: usize = 7
 
 ## The fixed species, in this order in `Grid.fixed`.
 pub let halide: usize = 0
@@ -51,7 +54,8 @@ pub let coupler: usize = 2
 pub let dir_coupler: usize = 3
 pub let dye: usize = 4
 pub let bound: usize = 5
-pub let fixed_count: usize = 6
+pub let bound_b: usize = 6
+pub let fixed_count: usize = 7
 
 ## One layer of the coating, top (bath side) first.
 pub struct Layer:
@@ -78,6 +82,9 @@ pub struct Layer:
     pub var halide: f64 = 0.0
     ## An interlayer's scavenger of oxidized developer, a first-order rate (1/s).
     pub var scavenger: f64 = 0.0
+    ## Which inhibitor its DIR coupler releases: 0 or 1 (each its own
+    ## strength, `Chemistry.restraints`).
+    pub var inhibitor_kind: usize = 0
     ## Sites that bind inhibitor (µmol/m²): the grains' surface.
     pub var sites: f64 = 0.0
     ## Cells it is cut into.
@@ -86,13 +93,13 @@ pub struct Layer:
 ## The rates and transport (wet gelatin, at the bath's temperature).
 pub struct Chemistry:
     ## Diffusion coefficients (µm²/s), mobile species in order.
-    pub var diffusion: f64[5] = [100.0, 100.0, 1100.0, 100.0, 100.0]
+    pub var diffusion: f64[7] = [100.0, 100.0, 1100.0, 100.0, 100.0, 100.0, 100.0]
     ## Development (1/s), its half-saturation in developer (mM) and its
     ## restraint by bromide and bound inhibitor (1/mM).
     pub var k_develop: f64 = 0.01
     pub var half_developer: f64 = 2.0
     pub var bromide_restraint: f64 = 0.02
-    pub var inhibitor_restraint: f64 = 1.0
+    pub var restraints: f64[2] = [1.0, 1.0]
     ## Coupling (1/(mM·s)), where a layer does not give its own: Kodak
     ## US 5,104,776's effective rates for milled dispersions with CD-4 (a
     ## magenta image coupler 4.45, a DIR coupler 7.3; the assay's temperature
@@ -119,14 +126,14 @@ pub struct Chemistry:
 ## The bath: what it holds (mM, mobile species in order) and how fast it
 ## exchanges with the film's surface (µm/s).
 pub struct Bath:
-    pub var holds: f64[5] = [15.0, 0.0, 11.0, 0.0, 0.0]
+    pub var holds: f64[7] = [15.0, 0.0, 11.0, 0.0, 0.0, 0.0, 0.0]
     pub var exchange: f64 = 10.0
 
 ## Every amount that entered the film through its surface, per mobile species
 ## (µmol/m² summed over the columns, over the column count), and what the
 ## reactions made and used, for checking that nothing is created or lost.
 pub struct Books:
-    pub var entered: f64[5] = [0.0, 0.0, 0.0, 0.0, 0.0]
+    pub var entered: f64[7] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     pub var developed: f64 = 0.0
     pub var coupled: f64 = 0.0
     pub var dir_coupled: f64 = 0.0
@@ -271,20 +278,19 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             let r_amount = grid.mobile[developer * n + at]
             let o_amount = grid.mobile[oxidized * n + at]
             let b_amount = grid.mobile[bromide * n + at]
-            let p_amount = grid.mobile[precursor * n + at]
-            let f_amount = grid.mobile[inhibitor * n + at]
             let a_amount = grid.fixed[halide * n + at]
             let q_amount = grid.fixed[coupler * n + at]
             let g_amount = grid.fixed[dir_coupler * n + at]
             let h_amount = grid.fixed[bound * n + at]
+            let h_b_amount = grid.fixed[bound_b * n + at]
             let c_r = r_amount / wet
             let c_o = o_amount / wet
             let c_b = b_amount / wet
-            let c_f = f_amount / wet
             let c_h = h_amount / wet
+            let c_h_b = h_b_amount / wet
             # Development, limited by the halide left and by the developer
             # (half a molecule per silver).
-            let restraint = 1.0 + chemistry.bromide_restraint * c_b + chemistry.inhibitor_restraint * c_h
+            let restraint = 1.0 + chemistry.bromide_restraint * c_b + chemistry.restraints[0] * c_h + chemistry.restraints[1] * c_h_b
             # First order in the halide left: integrated exactly over the step.
             let rate = chemistry.k_develop * started * c_r / (chemistry.half_developer + c_r) / restraint
             var r_dev = a_amount * (1.0 - math.exp(-rate * dt)) / dt
@@ -309,13 +315,8 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             let r_lost = used * by_loss / using / dt
             r_cpl = math.min(r_cpl, q_amount / dt)
             r_dir = math.min(r_dir, g_amount / dt)
-            # The precursor's release (or the DIR's own, with no timing group).
-            let r_release = chemistry.k_release * p_amount
-            # Binding to the grains' sites, and back.
-            let free_sites = math.max(layer.sites * grid.row_dry[row] / math.max(layer.dry, 1.0e-12) / wet - c_h, 0.0)
-            var r_on = chemistry.k_on * c_f * free_sites * wet
-            r_on = math.min(r_on, f_amount / dt)
-            let r_off = chemistry.k_off * h_amount
+            # The sites both inhibitors share.
+            let free_sites = math.max(layer.sites * grid.row_dry[row] / math.max(layer.dry, 1.0e-12) / wet - c_h - c_h_b, 0.0)
             grid.fixed[halide * n + at] = a_amount - r_dev * dt
             grid.fixed[silver * n + at] += r_dev * dt
             grid.fixed[coupler * n + at] = q_amount - r_cpl * dt
@@ -324,11 +325,25 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             grid.mobile[developer * n + at] = r_amount - 0.5 * r_dev * dt
             grid.mobile[oxidized * n + at] = math.max(o_amount + (making - 0.5 * layer.equivalence * r_cpl - r_dir - r_lost) * dt, 0.0)
             grid.mobile[bromide * n + at] = b_amount + r_dev * dt
-            let to_precursor = r_dir if layer.timed else 0.0
-            let to_inhibitor = 0.0 if layer.timed else r_dir
-            grid.mobile[precursor * n + at] = math.max(p_amount + (to_precursor - r_release) * dt, 0.0)
-            grid.mobile[inhibitor * n + at] = f_amount + (to_inhibitor + r_release - r_on + r_off) * dt
-            grid.fixed[bound * n + at] = h_amount + (r_on - r_off) * dt
+            # Each inhibitor: its precursor's release (or the DIR's own, with
+            # no timing group), binding to the grains' sites and back.
+            for kind in 0..<(usize)2:
+                let p_index = (precursor if kind == 0 else precursor_b) * n + at
+                let f_index = (inhibitor if kind == 0 else inhibitor_b) * n + at
+                let h_index = (bound if kind == 0 else bound_b) * n + at
+                let p_amount = grid.mobile[p_index]
+                let f_amount = grid.mobile[f_index]
+                let held = grid.fixed[h_index]
+                let mine = r_dir if layer.inhibitor_kind == kind else 0.0
+                let r_release = chemistry.k_release * p_amount
+                var r_on = chemistry.k_on * (f_amount / wet) * free_sites * wet
+                r_on = math.min(r_on, f_amount / dt)
+                let r_off = chemistry.k_off * held
+                let to_precursor = mine if layer.timed else 0.0
+                let to_inhibitor = 0.0 if layer.timed else mine
+                grid.mobile[p_index] = math.max(p_amount + (to_precursor - r_release) * dt, 0.0)
+                grid.mobile[f_index] = f_amount + (to_inhibitor + r_release - r_on + r_off) * dt
+                grid.fixed[h_index] = held + (r_on - r_off) * dt
             let share = 1.0 / (f64)grid.columns
             grid.books.developed += r_dev * dt * share
             grid.books.coupled += r_cpl * dt * share
@@ -427,7 +442,7 @@ func test_layers() -> Layer[7]:
 ## A film `columns` wide, its records given `left` µmol/m² of developable
 ## halide left of `split` and `right` after, developed 195 s (C-41's 3:15).
 func developed_test(columns: usize, split: usize, left: f64, right: f64, exchange: f64 = 10.0, step: f64 = 0.05,
-                    cells: usize = 2, width: f64 = 4.0, holds: f64[5] = [15.0, 0.0, 11.0, 0.0, 0.0]) -> Grid!:
+                    cells: usize = 2, width: f64 = 4.0, holds: f64[7] = [15.0, 0.0, 11.0, 0.0, 0.0, 0.0, 0.0]) -> Grid!:
     var layers = test_layers()
     for at in 0..<(usize)7:
         if layers[at].record >= 0:
@@ -519,7 +534,7 @@ test "less agitation develops less; in a dilute developer the dense areas most (
         var dense: f64[2]
         var thin: f64[2]
         for k in 0..<(usize)2:
-            let holds: f64[5] = [baths[b * 2], 0.0, baths[b * 2 + 1], 0.0, 0.0]
+            let holds: f64[7] = [baths[b * 2], 0.0, baths[b * 2 + 1], 0.0, 0.0, 0.0, 0.0]
             var heavy = developed_test(1, 1, 1000.0, 1000.0, exchange = exchanges[k], holds = holds) catch failure:
                 assert(false)
                 return

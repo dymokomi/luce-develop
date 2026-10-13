@@ -199,10 +199,24 @@ pixel size only decides how finely the film is sampled.
    its fringe: the inhibitor alone cannot make it. Something acting on the
    dense side, the supply of developer or of oxidized developer to the
    couplers, is underweighted. The fast path's edge (fitted to MTF) is 18 %.
-   Next: Kodak's disclosed interimage coatings as validation packages
-   (US 6,190,848's bilayer, R_γ 1.23 with no modifier; US 6,309,811's
-   twelve layers ML-1–4), then fitting the restraint on Gold's edge with
-   interimage held out. Each step releases inhibitor with the
+   Kodak's disclosed interimage coatings (film_chemistry_patents.lucb,
+   dev/film/constructions). US 6,190,848's Table I measures each DIR's
+   strength alone in one green layer: fitting it gives each inhibitor's
+   restraint (IDIR-2 24 /mM for its 25.3 % cut, CDIR-2 62 /mM for 67.1 %;
+   two inhibitors now carried, each its own strength). Its bilayer then
+   predicts R = γ(green)/γ(blue + green): 0.99 as printed (the receiver's
+   coupler, 0.045 g/m², runs out at 0.2 density, both exposures alike), 1.04
+   and 1.07 with 0.45 and 0.692 g/m², against the measured 1.23 (Table II)
+   and 1.45 (Table III).
+
+   Three checks now agree: cross-layer and lateral inhibition are too weak
+   (this bilayer, Portra's single-colour gammas, Gold's border). Two causes
+   to test next: the inhibitor here only slows development, so areas that
+   develop nearly to completion barely notice it, where a real DIR inhibitor
+   adsorbs and stops a grain from developing at all; and about 85 % of what
+   is released escapes to the bath. Then US 6,309,811's twelve layers
+   (ML-1–4: IDIR-6 against IDIR-2, with and without IEH-A) as the held-out
+   test of the change. Each step releases inhibitor with the
    dye it forms under the inhibitor already released (DIR couplers react as
    dye forms); the developed curve is solved so an even field still develops
    to the published one (fixed point, damped; cached per development).

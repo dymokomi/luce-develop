@@ -80,20 +80,20 @@ pub func reference_of(process: i64, minutes: f64, celsius: f64, agitation: i64 =
         layers = try new Layer[coating.length] --- in memory.heap
         for (at, layer) in coating.indexed():
             layers[at] = layer
-        bath.holds = [8.9, 0.0, 11.7, 0.0, 0.0]
+        bath.holds = [8.9, 0.0, 11.7, 0.0, 0.0, 0.0, 0.0]
     else:
         let coating = film_constructions.us6680165_example_6_1()
         layers = try new Layer[coating.length] --- in memory.heap
         for (at, layer) in coating.indexed():
             layers[at] = layer
-        bath.holds = [15.4, 0.0, 10.9, 0.0, 0.0]
+        bath.holds = [15.4, 0.0, 10.9, 0.0, 0.0, 0.0, 0.0]
     for at in 0..<layers.length:
         layers[at].swell = swelling
     let seconds = minutes * 60.0
     bath.exchange = exchange_of(agitation if agitation > 0 else standard.agitation, seconds)
     var chemistry = Chemistry()
     let developer = 14.6 * swelling * swelling
-    chemistry.diffusion = [developer, developer, 1100.0, developer, 100.0]
+    chemistry.diffusion = [developer, developer, 1100.0, developer, 100.0, developer, 100.0]
     chemistry.swelling = 20.0
     # Development's rate and its delay: fitted to Kodak Z-131's C-41 control
     # chart (HD − LD for 40 s more and less around 3:15: two constants to six

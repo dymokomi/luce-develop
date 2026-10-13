@@ -1,0 +1,1704 @@
+{
+ "reference": "US6309811B2 photographic examples (bilayer BL-1..BL-25, Tables II-III; twelve-layer ML-1..ML-4, second Table III)",
+ "label": "Kodak patent test coatings US6309811 (C-41 color negative test formats) - NOT commercial stocks",
+ "title": "US 6,309,811 B2 (Eastman Kodak, 30 Oct 2001) - Color photographic element containing nitrogen heterocycle derivative and inhibitor releasing coupler",
+ "sources": [
+  "https://patents.google.com/patent/US6309811B2/en",
+  "https://patentimages.storage.googleapis.com/35/74/aa/ec5c30339bc677/US6309811.pdf"
+ ],
+ "verification": "Checked against scanned PDF p.17 (bilayer), p.19 (Tables II-III, ML layers 1-12), p.22 (ML-2..4), p.23 (multilayer Table III). The patent has two tables both titled 'TABLE III' (bilayer speed table and multilayer table) - as printed.",
+ "units": {
+  "coverages": "g/m2 as printed ('coverages are in g/m2'); converted x1000 to laydown_mg_m2",
+  "emulsion": "g/m2 as printed; basis taken as g Ag/m2 (see notes.md: the patent's own 0.96 mmol IEM per mol Ag = 7.2e-3 mmol/m2 / (0.81/107.87) )",
+  "grain": "multilayer only: Diameter x Thickness in microns by disc centrifuge; mole % iodide",
+  "IEM, DIR in bilayer": "mmol/m2 as printed"
+ },
+ "bilayer_test": {
+  "layers": [
+   {
+    "position": 0,
+    "name": "Support",
+    "role": "support",
+    "components": [
+     {
+      "kind": "support",
+      "name_printed": "cellulose triacetate film support"
+     }
+    ]
+   },
+   {
+    "position": 1,
+    "layer_number": 1,
+    "name": "Antihalation Layer",
+    "role": "antihalation",
+    "components": [
+     {
+      "kind": "silver",
+      "laydown_mg_m2": 340.0,
+      "laydown_printed": "0.34 g/m2",
+      "name_printed": "black colloidal elemental silver"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2410.0,
+      "laydown_printed": "2.41 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 2,
+    "layer_number": 2,
+    "name": "Receiver Layer",
+    "role": "green-sensitive receiver (magenta)",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2790.0,
+      "laydown_printed": "2.79 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "CDIR-2",
+      "laydown_mg_m2": 30.0,
+      "laydown_printed": "0.03 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "M-1",
+      "laydown_mg_m2": 45.0,
+      "laydown_printed": "0.045 g/m2",
+      "dispersion": "'dispersed as described previously' = 80% tricresyl phosphate / 20% N,N-dibutyl-2-butoxy-5-t-octylaniline by weight (from the single-layer DIR test description)"
+     },
+     {
+      "kind": "compound",
+      "id": "IEH or CIEH (variable)",
+      "laydown_mmol_m2": 0.0072,
+      "laydown_printed": "7.2x10^-3 mmol/m2",
+      "ratio_printed": "0.96 mmol per mole silver",
+      "dispersion": "twice its own weight of N,N-dibutyllauramide",
+      "laydown_mg_m2_by_compound": {
+       "IEH-A": 1.99,
+       "IEH-B": 2.192,
+       "IEH-E": 2.106,
+       "IEH-G": 2.625,
+       "IEH-H": 2.827,
+       "IEH-I": 2.625,
+       "IEH-X": 3.151
+      },
+      "note": "omitted in BL-1; Table III varies the ratio (0.96, 4.8, 9.6 mmol/mol Ag)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "receiver-emulsion",
+      "laydown_mg_m2": 810.0,
+      "laydown_printed": "0.81 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": null,
+       "thickness_um": null,
+       "iodide_mol_pct": null,
+       "morphology": "tabular",
+       "size_method": null
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)",
+      "note": "no grain size, iodide or sensitizing dye printed for the bilayer emulsions"
+     }
+    ]
+   },
+   {
+    "position": 3,
+    "layer_number": 3,
+    "name": "Interlayer",
+    "role": "interlayer",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 640.0,
+      "laydown_printed": "0.64 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "ILS-1",
+      "laydown_mg_m2": 110.0,
+      "laydown_printed": "0.11 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "FD-1",
+      "laydown_mg_m2": 110.0,
+      "laydown_printed": "0.11 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 4,
+    "layer_number": 4,
+    "name": "Causer Layer",
+    "role": "blue-sensitive causer (yellow)",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2790.0,
+      "laydown_printed": "2.79 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "Y-1",
+      "laydown_mg_m2": 910.0,
+      "laydown_printed": "0.91 g/m2"
+     },
+     {
+      "kind": "emulsion",
+      "id": "causer-emulsion",
+      "laydown_mg_m2": 790.0,
+      "laydown_printed": "0.79 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": null,
+       "thickness_um": null,
+       "iodide_mol_pct": null,
+       "morphology": "tabular",
+       "size_method": null
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)",
+      "note": "no grain size/iodide printed"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-2",
+      "laydown_mmol_m2": 0.11,
+      "laydown_printed": "0.11 mmol/m2 ('the DIR')",
+      "laydown_mg_m2": 107.8,
+      "laydown_mg_m2_status": "computed from 0.11 mmol/m2 x RDKit MW",
+      "identity_basis": "US6309811 text: 'IDIR-2 at 0.11 mmol/m2'",
+      "dispersion": "twice its own weight of N,N-dibutyllauramide (default statement)"
+     }
+    ]
+   },
+   {
+    "position": 5,
+    "layer_number": 5,
+    "name": "Overcoat",
+    "role": "overcoat",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2790.0,
+      "laydown_printed": "2.79 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "bis-vinylsulfonemethylether",
+      "laydown_mg_m2": 20.0,
+      "laydown_printed": "0.02 g/m2",
+      "role": "hardener (name as printed; elsewhere 'bis(vinylsulfonyl)methane')"
+     }
+    ]
+   }
+  ],
+  "note": "Identical format to US6190848 bilayer (same numbers); additive class is IEH (purines) instead of IEM (triazoles).",
+  "exposure": {
+   "printed": "Samples of each element were given a stepped exposure of either green light only or blue and green light combined",
+   "green_only": "green light, stepped (filter not specified)",
+   "blue_plus_green": "blue and green light combined, stepped (filters, relative B:G balance not specified)",
+   "light_source": null,
+   "filters": null,
+   "step_tablet": null,
+   "exposure_time_s": null,
+   "note": "No source, filter, step increment, or exposure time is printed in this patent"
+  },
+  "process": {
+   "name": "KODAK FLEXICOLOR (C-41) process as described in British Journal of Photography Annual, 1988, pp 196-198 (printed 'C-4 1')",
+   "steps_printed": null,
+   "context_printed": "Description cites 'The British Journal of Photography Annual of 1988, pages 191-198' for C-41 and states 'Color negative development times are typically 3' 15\" or less and desirably 90 or even 60 seconds or less.'"
+  },
+  "measurement": {
+   "contrast": "Contrast of the elements was determined using the maximum slope between any two density points (of the measured sensitometric curve)",
+   "density_type": null,
+   "density_note": "green (magenta) density of the receiver is implied; status M / densitometer not stated",
+   "interimage_metric": "Cg/Cb+g = contrast of the green-only exposure / contrast of the green record of the blue+green exposure. Higher ratio = more inhibition from the blue (causer) affecting the green (receiver).",
+   "speed_metric_table_III": "Relative green sensitivity (Table III); method stated for multilayers: speed point +0.15 density units above Dmin normalized to the check"
+  },
+  "results_table_II": {
+   "title": "TABLE II Interimage in Bilayer Formats-IDIR-2 in Blue Layer (IEH/CIEH at 7.2e-3 mmol/m2)",
+   "rows": [
+    {
+     "sample": "BL-1",
+     "type": "Comp",
+     "ieh": null,
+     "Cg_over_Cbg": 1.23,
+     "clogp": null
+    },
+    {
+     "sample": "BL-2",
+     "type": "Comp",
+     "ieh": "CIEH-1",
+     "Cg_over_Cbg": 1.19,
+     "clogp": 5.52
+    },
+    {
+     "sample": "BL-3",
+     "type": "Comp",
+     "ieh": "CIEH-2",
+     "Cg_over_Cbg": 1.27,
+     "clogp": 8.18
+    },
+    {
+     "sample": "BL-4",
+     "type": "Comp",
+     "ieh": "CIEH-3",
+     "Cg_over_Cbg": 1.23,
+     "clogp": 8.05
+    },
+    {
+     "sample": "BL-5",
+     "type": "Comp",
+     "ieh": "CIEH-4",
+     "Cg_over_Cbg": 1.29,
+     "clogp": 3.81
+    },
+    {
+     "sample": "BL-6",
+     "type": "Comp",
+     "ieh": "CIEH-5",
+     "Cg_over_Cbg": 1.33,
+     "clogp": 3.6
+    },
+    {
+     "sample": "BL-7",
+     "type": "Comp",
+     "ieh": "CIEH-6",
+     "Cg_over_Cbg": 1.21,
+     "clogp": 11.35
+    },
+    {
+     "sample": "BL-8",
+     "type": "Comp",
+     "ieh": "CIEH-7",
+     "Cg_over_Cbg": 1.22,
+     "clogp": 7.26
+    },
+    {
+     "sample": "BL-9",
+     "type": "Comp",
+     "ieh": "CIEH-8",
+     "Cg_over_Cbg": 1.17,
+     "clogp": 0.2
+    },
+    {
+     "sample": "BL-10",
+     "type": "Comp",
+     "ieh": "CIEH-9",
+     "Cg_over_Cbg": 1.19,
+     "clogp": 0.83
+    },
+    {
+     "sample": "BL-11",
+     "type": "Comp",
+     "ieh": "CIEH-10",
+     "Cg_over_Cbg": 1.22,
+     "clogp": 8.03
+    },
+    {
+     "sample": "BL-12",
+     "type": "Inv",
+     "ieh": "IEH-A",
+     "Cg_over_Cbg": 1.45,
+     "clogp": 4.8
+    },
+    {
+     "sample": "BL-13",
+     "type": "Inv",
+     "ieh": "IEH-B",
+     "Cg_over_Cbg": 1.47,
+     "clogp": 5.86
+    },
+    {
+     "sample": "BL-14",
+     "type": "Inv",
+     "ieh": "IEH-E",
+     "Cg_over_Cbg": 1.51,
+     "clogp": 5.15
+    },
+    {
+     "sample": "BL-15",
+     "type": "Inv",
+     "ieh": "IEH-G",
+     "Cg_over_Cbg": 1.85,
+     "clogp": 4.75
+    },
+    {
+     "sample": "BL-16",
+     "type": "Inv",
+     "ieh": "IEH-H",
+     "Cg_over_Cbg": 1.51,
+     "clogp": 5.8
+    },
+    {
+     "sample": "BL-17",
+     "type": "Inv",
+     "ieh": "IEH-I",
+     "Cg_over_Cbg": 1.63,
+     "clogp": 4.7
+    },
+    {
+     "sample": "BL-18",
+     "type": "Inv",
+     "ieh": "IEH-X",
+     "Cg_over_Cbg": 1.35,
+     "clogp": 6.98
+    }
+   ]
+  },
+  "results_table_III_bilayer": {
+   "title": "TABLE III Speed and Interimage",
+   "speed_metric": "exposure point +0.15 density above Dmin normalized to the check",
+   "rows": [
+    {
+     "sample": "BL-19",
+     "type": "Comp",
+     "ieh": null,
+     "ieh_mmol_per_mol_Ag": null,
+     "Cg_over_Cbg": 1.23,
+     "relative_speed": 1.0
+    },
+    {
+     "sample": "BL-20",
+     "type": "Inv",
+     "ieh": "IEH-A",
+     "ieh_mmol_per_mol_Ag": 0.96,
+     "Cg_over_Cbg": 1.56,
+     "relative_speed": 0.94
+    },
+    {
+     "sample": "BL-21",
+     "type": "Inv",
+     "ieh": "IEH-A",
+     "ieh_mmol_per_mol_Ag": 4.8,
+     "Cg_over_Cbg": 1.72,
+     "relative_speed": 0.81
+    },
+    {
+     "sample": "BL-22",
+     "type": "Inv",
+     "ieh": "IEH-A",
+     "ieh_mmol_per_mol_Ag": 9.6,
+     "Cg_over_Cbg": 1.67,
+     "relative_speed": 0.43
+    },
+    {
+     "sample": "BL-23",
+     "type": "Inv",
+     "ieh": "IEH-B",
+     "ieh_mmol_per_mol_Ag": 0.96,
+     "Cg_over_Cbg": 1.51,
+     "relative_speed": 0.97
+    },
+    {
+     "sample": "BL-24",
+     "type": "Inv",
+     "ieh": "IEH-B",
+     "ieh_mmol_per_mol_Ag": 4.8,
+     "Cg_over_Cbg": 1.55,
+     "relative_speed": 0.92
+    },
+    {
+     "sample": "BL-25",
+     "type": "Inv",
+     "ieh": "IEH-B",
+     "ieh_mmol_per_mol_Ag": 9.6,
+     "Cg_over_Cbg": 1.57,
+     "relative_speed": 0.91
+    }
+   ],
+   "caution": "BL-20 (IEH-A 0.96) = 1.56 vs BL-12 (same) = 1.45: separate coating set"
+  }
+ },
+ "single_layer_dir_strength_test": {
+  "purpose": "Classifies DIRs as mild (<45%, preferably <40% gamma reduction) or strong",
+  "layers_support_upward": [
+   {
+    "name": "Support",
+    "components": [
+     {
+      "kind": "support",
+      "name_printed": "cellulose triacetate film support"
+     }
+    ]
+   },
+   {
+    "name": "Imaging Layer",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2790.0,
+      "laydown_printed": "2.79 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "M-1",
+      "laydown_mg_m2": 692.0,
+      "laydown_printed": "0.692 g/m2",
+      "dispersion": "80% by weight tricresyl phosphate and 20% by weight N,N-dibutyl-2-butoxy-5-t-octylaniline"
+     },
+     {
+      "kind": "compound",
+      "id": "DIR being tested",
+      "laydown_mmol_m2": 0.055,
+      "dispersion": "twice its weight in N,N-dibutyllauramide"
+     },
+     {
+      "kind": "emulsion",
+      "id": "green sensitized AgBrI",
+      "laydown_mg_m2": 1080.0,
+      "laydown_printed": "1.08 g/m2",
+      "halide": "AgIBr",
+      "grain": null
+     }
+    ]
+   },
+   {
+    "name": "Overcoat",
+    "components": [
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2790.0,
+      "laydown_printed": "2.79 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "bis-vinylsulfonemethylether",
+      "laydown_mg_m2": 20.0,
+      "laydown_printed": "0.02 g/m2"
+     }
+    ]
+   }
+  ],
+  "exposure": "stepped exposure (light not specified)",
+  "process": "KODAK FLEXICOLOR (C-41), BJPA 1988 pp196-198",
+  "metric": "% contrast (max slope between any two density points) reduction vs a check without DIR",
+  "table_I": {
+   "CDIR-1": -55.4,
+   "CDIR-2": -67.1,
+   "CDIR-3": -75.7,
+   "CDIR-4": -77.1,
+   "CDIR-5": -70.5,
+   "CDIR-6": -75.4,
+   "CDIR-7": -63.9,
+   "CDIR-8": -49.2,
+   "CDIR-9": -50.1,
+   "CDIR-10": -53.8,
+   "CDIR-11": -58.6,
+   "IDIR-1": -34.5,
+   "IDIR-2": -25.3,
+   "IDIR-3": -24.5,
+   "IDIR-4": -22.6,
+   "IDIR-5": -42.0,
+   "IDIR-6": -24.9,
+   "IDIR-7": -20.0,
+   "IDIR-8": -2.4
+  },
+  "note": "Only compounds used in the interimage coatings have structures in 'compounds'; CDIR-3..11, IDIR-3/4/7/8 drawn on PDF p.7-10 but not transcribed."
+ },
+ "multilayer_test": {
+  "description": "Twelve-layer color negative (ML-1 base) on cellulose triacetate; g/m2; DxT um by disc centrifuge",
+  "layers_ML_1": [
+   {
+    "position": 0,
+    "name": "Support",
+    "components": [
+     {
+      "kind": "support",
+      "name_printed": "cellulose triacetate film support"
+     }
+    ]
+   },
+   {
+    "position": 1,
+    "layer_number": 1,
+    "name": "Antihalation layer",
+    "components": [
+     {
+      "kind": "silver",
+      "laydown_mg_m2": 135.0,
+      "laydown_printed": "0.135 g/m2",
+      "name_printed": "black colloidal silver sol"
+     },
+     {
+      "kind": "compound",
+      "id": "ILS-1",
+      "laydown_mg_m2": 162.0,
+      "laydown_printed": "0.162 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "DYE-1[811]",
+      "laydown_mg_m2": 18.0,
+      "laydown_printed": "0.018 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "DYE-2[811]_inferred_N",
+      "laydown_mg_m2": 25.0,
+      "laydown_printed": "0.025 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "DYE-3[811]",
+      "laydown_mg_m2": 35.0,
+      "laydown_printed": "0.035 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "UV-1",
+      "laydown_mg_m2": 60.0,
+      "laydown_printed": "0.06 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "UV-2",
+      "laydown_mg_m2": 15.0,
+      "laydown_printed": "0.015 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 2050.0,
+      "laydown_printed": "2.05 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 2,
+    "layer_number": 2,
+    "name": "Slow cyan layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L2-i",
+      "laydown_mg_m2": 302.0,
+      "laydown_printed": "0.302 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "red sensitized (RSD-1 + RSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.66,
+       "thickness_um": 0.12,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L2-ii",
+      "laydown_mg_m2": 464.0,
+      "laydown_printed": "0.464 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "red sensitized (RSD-1 + RSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.55,
+       "thickness_um": 0.08,
+       "iodide_mol_pct": 1.5,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "C-1",
+      "laydown_mg_m2": 535.0,
+      "laydown_printed": "0.535 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "CDIR-1",
+      "laydown_mg_m2": 27.0,
+      "laydown_printed": "0.027 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "B-1[811]",
+      "laydown_mg_m2": 57.0,
+      "laydown_printed": "0.057 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-1",
+      "laydown_mg_m2": 32.0,
+      "laydown_printed": "0.032 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1680.0,
+      "laydown_printed": "1.68 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 3,
+    "layer_number": 3,
+    "name": "Mid cyan layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L3-i",
+      "laydown_mg_m2": 194.0,
+      "laydown_printed": "0.194 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "red sensitized (RSD-1 + RSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.22,
+       "thickness_um": 0.11,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)",
+      "note": "diameter printed '0.1.22' - read 1.22 (typo)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L3-ii",
+      "laydown_mg_m2": 238.0,
+      "laydown_printed": "0.238 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "red sensitized (RSD-1 + RSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.07,
+       "thickness_um": 0.11,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "C-1",
+      "laydown_mg_m2": 171.0,
+      "laydown_printed": "0.171 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "CDIR-1",
+      "laydown_mg_m2": 19.0,
+      "laydown_printed": "0.019 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-1",
+      "laydown_mg_m2": 32.0,
+      "laydown_printed": "0.032 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "B-1[811]",
+      "laydown_mg_m2": 8.0,
+      "laydown_printed": "0.008 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1080.0,
+      "laydown_printed": "1.08 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 4,
+    "layer_number": 4,
+    "name": "Fast cyan layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L4",
+      "laydown_mg_m2": 594.0,
+      "laydown_printed": "0.594 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "red sensitized (RSD-1 + RSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.33,
+       "thickness_um": 0.12,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "C-1",
+      "laydown_mg_m2": 184.0,
+      "laydown_printed": "0.184 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "CDIR-1",
+      "laydown_mg_m2": 27.0,
+      "laydown_printed": "0.027 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-1",
+      "laydown_mg_m2": 22.0,
+      "laydown_printed": "0.022 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 918.0,
+      "laydown_printed": "0.918 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 5,
+    "layer_number": 5,
+    "name": "Interlayer",
+    "components": [
+     {
+      "kind": "compound",
+      "id": "ILS-1",
+      "laydown_mg_m2": 86.0,
+      "laydown_printed": "0.086 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 540.0,
+      "laydown_printed": "0.54 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 6,
+    "layer_number": 6,
+    "name": "Slow magenta layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L6-i",
+      "laydown_mg_m2": 346.0,
+      "laydown_printed": "0.346 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized (GSD-1 + GSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.81,
+       "thickness_um": 0.12,
+       "iodide_mol_pct": 2.6,
+       "morphology": null,
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)",
+      "note": "'silver iodobromide emulsions' (tabular not stated for L6)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L6-ii",
+      "laydown_mg_m2": 130.0,
+      "laydown_printed": "0.13 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized (GSD-1 + GSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.55,
+       "thickness_um": 0.08,
+       "iodide_mol_pct": 1.5,
+       "morphology": null,
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "M-1",
+      "laydown_mg_m2": 270.0,
+      "laydown_printed": "0.27 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-2",
+      "laydown_mg_m2": 86.0,
+      "laydown_printed": "0.086 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-5",
+      "laydown_mg_m2": 11.0,
+      "laydown_printed": "0.011 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1080.0,
+      "laydown_printed": "1.08 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 7,
+    "layer_number": 7,
+    "name": "Mid magenta layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L7-i",
+      "laydown_mg_m2": 248.0,
+      "laydown_printed": "0.248 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized (GSD-1 + GSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.22,
+       "thickness_um": 0.11,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L7-ii",
+      "laydown_mg_m2": 248.0,
+      "laydown_printed": "0.248 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized (GSD-1 + GSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.07,
+       "thickness_um": 0.11,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "M-1",
+      "laydown_mg_m2": 124.0,
+      "laydown_printed": "0.124 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-2",
+      "laydown_mg_m2": 119.0,
+      "laydown_printed": "0.119 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-5",
+      "laydown_mg_m2": 43.0,
+      "laydown_printed": "0.043 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "OxDS-2[811]",
+      "laydown_mg_m2": 16.0,
+      "laydown_printed": "0.016 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1220.0,
+      "laydown_printed": "1.22 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IEH-A",
+      "laydown_mg_m2": 1.2,
+      "laydown_printed": "0.0012 g/m2",
+      "present_in": [
+       "ML-3",
+       "ML-4"
+      ]
+     }
+    ]
+   },
+   {
+    "position": 8,
+    "layer_number": 8,
+    "name": "Fast magenta layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L8",
+      "laydown_mg_m2": 486.0,
+      "laydown_printed": "0.486 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "green sensitized (GSD-1 + GSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.33,
+       "thickness_um": 0.12,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "M-1",
+      "laydown_mg_m2": 76.0,
+      "laydown_printed": "0.076 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "MC-2",
+      "laydown_mg_m2": 54.0,
+      "laydown_printed": "0.054 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "B-1[811]",
+      "laydown_mg_m2": 3.0,
+      "laydown_printed": "0.003 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-1",
+      "laydown_mg_m2": 30.0,
+      "laydown_printed": "0.03 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "OxDS-2[811]",
+      "laydown_mg_m2": 9.0,
+      "laydown_printed": "0.009 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1020.0,
+      "laydown_printed": "1.02 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IEH-A",
+      "laydown_mg_m2": 1.2,
+      "laydown_printed": "0.0012 g/m2",
+      "present_in": [
+       "ML-3",
+       "ML-4"
+      ]
+     }
+    ]
+   },
+   {
+    "position": 9,
+    "layer_number": 9,
+    "name": "Yellow filter layer",
+    "components": [
+     {
+      "kind": "compound",
+      "id": "YFD-1",
+      "laydown_mg_m2": 54.0,
+      "laydown_printed": "0.054 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "ILS-1",
+      "laydown_mg_m2": 86.0,
+      "laydown_printed": "0.086 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 648.0,
+      "laydown_printed": "0.648 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 10,
+    "layer_number": 10,
+    "name": "Slow yellow layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L10-i",
+      "laydown_mg_m2": 270.0,
+      "laydown_printed": "0.27 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized (BSD-1 + BSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.55,
+       "thickness_um": 0.08,
+       "iodide_mol_pct": 1.5,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L10-ii",
+      "laydown_mg_m2": 248.0,
+      "laydown_printed": "0.248 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized (BSD-1 + BSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 0.77,
+       "thickness_um": 0.14,
+       "iodide_mol_pct": 1.5,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)",
+      "note": "diameter printed '0.0.77' - read 0.77 (typo)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L10-iii",
+      "laydown_mg_m2": 400.0,
+      "laydown_printed": "0.4 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized (BSD-1 + BSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.25,
+       "thickness_um": 0.14,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "Y-2[811]",
+      "laydown_mg_m2": 1080.0,
+      "laydown_printed": "1.08 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-6",
+      "laydown_mg_m2": 76.0,
+      "laydown_printed": "0.076 g/m2",
+      "replaced_in": {
+       "ML-2": "IDIR-2 at 0.097",
+       "ML-4": "IDIR-2 at 0.097"
+      }
+     },
+     {
+      "kind": "compound",
+      "id": "CDIR-1",
+      "laydown_mg_m2": 32.0,
+      "laydown_printed": "0.032 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "B-1[811]",
+      "laydown_mg_m2": 22.0,
+      "laydown_printed": "0.022 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1879.0,
+      "laydown_printed": "1.879 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 11,
+    "layer_number": 11,
+    "name": "Fast yellow layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "L11-i",
+      "laydown_mg_m2": 108.0,
+      "laydown_printed": "0.108 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized (BSD-1 + BSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 1.25,
+       "thickness_um": 0.14,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "emulsion",
+      "id": "L11-ii",
+      "laydown_mg_m2": 378.0,
+      "laydown_printed": "0.378 g/m2",
+      "halide": "AgIBr",
+      "sensitization": "blue sensitized (BSD-1 + BSD-2)",
+      "spectral_sensitizing_dyes": null,
+      "grain": {
+       "ecd_um": 2.67,
+       "thickness_um": 0.13,
+       "iodide_mol_pct": 4.1,
+       "morphology": "tabular",
+       "size_method": "disc centrifuge (as printed for the multilayers)"
+      },
+      "laydown_basis": "g/m2 as printed; Kodak convention = g silver/m2 (supported by the patent's own mmol/mol-Ag arithmetic, see notes)"
+     },
+     {
+      "kind": "compound",
+      "id": "Y-2[811]",
+      "laydown_mg_m2": 238.0,
+      "laydown_printed": "0.238 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "IDIR-6",
+      "laydown_mg_m2": 76.0,
+      "laydown_printed": "0.076 g/m2",
+      "replaced_in": {
+       "ML-2": "IDIR-2 at 0.097",
+       "ML-4": "IDIR-2 at 0.097"
+      }
+     },
+     {
+      "kind": "compound",
+      "id": "B-1[811]",
+      "laydown_mg_m2": 5.0,
+      "laydown_printed": "0.005 g/m2"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 810.0,
+      "laydown_printed": "0.81 g/m2"
+     }
+    ]
+   },
+   {
+    "position": 12,
+    "layer_number": 12,
+    "name": "Protective overcoat and UV filter layer",
+    "components": [
+     {
+      "kind": "emulsion",
+      "id": "Lippmann AgBr",
+      "laydown_mg_m2": 216.0,
+      "laydown_printed": "0.216 g/m2",
+      "halide": "AgBr",
+      "note": "silver bromide Lippman emulsion"
+     },
+     {
+      "kind": "compound",
+      "id": "UV-1",
+      "laydown_mg_m2": 108.0,
+      "laydown_printed": "0.108 g/m2 ('UV-1 at a total of 0.108')"
+     },
+     {
+      "kind": "gelatin",
+      "laydown_mg_m2": 1242.0,
+      "laydown_printed": "1.242 g/m2"
+     },
+     {
+      "kind": "compound",
+      "id": "bis(vinylsulfonyl)methane",
+      "amount_printed": "1.75% of total gelatin weight"
+     }
+    ]
+   }
+  ],
+  "additives_not_quantified": "Surfactants, coating aids, emulsion addenda, sequestrants, thickeners, lubricants, matte and tinting dyes were added to the appropriate layers as is common in the art.",
+  "variants": {
+   "ML-1": "base (comparative): IDIR-6 in L10/L11, CDIR-1 in red layers (and L10), no IEH",
+   "ML-2": "like ML-1 except IDIR-6 in Layers 10 and 11 replaced with IDIR-2 at 0.097 (equimolar to 0.076 IDIR-6 within 1% using RDKit MWs)",
+   "ML-3": "like ML-1 except IEH-A added to Layers 7 and 8 at 0.0012 (printed: 'corresponding to 0.8 mmol IEH-A to mole of silver in that layer')",
+   "ML-4": "like ML-2 except IEH-A added to Layers 7 and 8 at 0.0012"
+  },
+  "ieh_ratio_check": {
+   "IEH-A_mmol_m2_per_layer_if_g_m2": 0.00434,
+   "L7_mmol_per_mol_Ag": 0.944,
+   "L8_mmol_per_mol_Ag": 0.964,
+   "printed": 0.8,
+   "note": "g/m2 reading gives ~0.94-0.96 mmol/mol, not 0.8; unexplained (would fit if silver were ~1.17x higher). Value kept as printed."
+  },
+  "exposure_protocol": {
+   "printed": "These multilayer coatings were given a stepped exposure in one color record but only flashed (non-imagewise exposure) in the other two records and processed as described for the bilayer experiments.",
+   "stepped_record": "causer: blue record (for B->G) or red record (for R->G)",
+   "flashed_records": "the other two records, uniform non-imagewise flash; flash level / resulting receiver density NOT printed",
+   "light_source": null,
+   "filters": null,
+   "step_tablet": null
+  },
+  "process": "as for the bilayers: KODAK FLEXICOLOR (C-41), BJPA 1988 pp 196-198; no times printed",
+  "interimage_metric": "Take the causer step nearest density 1.5; dD = receiver (green) density at that step minus receiver density at the causer's no-exposure step. More negative = larger drop = more interimage.",
+  "results_table_III_multilayer": {
+   "title": "TABLE III Interimage in Multilayer Formats",
+   "rows": [
+    {
+     "sample": "ML-1",
+     "type": "Comp",
+     "iem_in_green": null,
+     "dir_in_blue": "IDIR-6",
+     "dir_in_red": "CDIR-1",
+     "B_to_G": -0.101,
+     "R_to_G": -0.273
+    },
+    {
+     "sample": "ML-2",
+     "type": "Comp",
+     "iem_in_green": null,
+     "dir_in_blue": "IDIR-2",
+     "dir_in_red": "CDIR-1",
+     "B_to_G": -0.131,
+     "R_to_G": -0.287
+    },
+    {
+     "sample": "ML-3",
+     "type": "Inv",
+     "iem_in_green": "IEH-A",
+     "dir_in_blue": "IDIR-6",
+     "dir_in_red": "CDIR-1",
+     "B_to_G": -0.106,
+     "R_to_G": -0.236
+    },
+    {
+     "sample": "ML-4",
+     "type": "Inv",
+     "iem_in_green": "IEH-A",
+     "dir_in_blue": "IDIR-2",
+     "dir_in_red": "CDIR-1",
+     "B_to_G": -0.164,
+     "R_to_G": -0.268
+    }
+   ],
+   "patent_reading": "IEH-A increases B->G interimage (mild DIR in blue) - ML-1 vs ML-3, ML-2 vs ML-4 - but not R->G (strong CDIR-1 in red)."
+  },
+  "missing": "RSD-1/2, GSD-1/2, BSD-1/2 drawn (PDF p.22) but not transcribed; IDIR-1/IDIR-5/IDIR-6/CDIR-1/ILS-1/YFD-1/M-1 are not redrawn in the multilayer structure list (taken from the description and bilayer lists)."
+ },
+ "compounds": {
+  "M-1": {
+   "role": "magenta image coupler (receiver); also the coupler in the DIR-strength single-layer test",
+   "dye_color": "magenta",
+   "equivalence": "2-equivalent",
+   "coupling_site": "pyrazolone C-4 carries an arylthio coupling-off group",
+   "coupling_off_group": "2-[2-(2,4-di-t-pentylphenoxy)butanamido]phenylthio",
+   "structure_description": "1-(2,4,6-trichlorophenyl)-3-(2-chloro-5-tetradecanamidoanilino)-4-[2-(2-(2,4-di-t-pentylphenoxy)butanamido)phenylthio]-2-pyrazolin-5-one",
+   "uncertainty": "anilino substitution read as 2-Cl / 5-NHCOC13H27 from the drawing",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "O=C1C(Sc2ccccc2NC(=O)C(CC)Oc9ccc(C(C)(C)CC)cc9C(C)(C)CC)C(Nc2cc(NC(=O)CCCCCCCCCCCCC)ccc2Cl)=NN1c1c(Cl)cc(Cl)cc1Cl",
+   "formula": "C55H71Cl4N5O4S",
+   "mw_g_mol": 1040.08,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "Y-1": {
+   "role": "yellow image coupler (causer layer)",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_site": "active methine carries aryloxy",
+   "coupling_off_group": "4-(4-hydroxyphenylsulfonyl)phenoxy",
+   "structure_description": "alpha-pivaloyl-alpha-[4-(4-hydroxyphenylsulfonyl)phenoxy]-2-chloro-5-(hexadecylsulfonamido)acetanilide",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(Oc1ccc(cc1)S(=O)(=O)c1ccc(O)cc1)C(=O)Nc1cc(NS(=O)(=O)CCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C41H57ClN2O8S2",
+   "mw_g_mol": 805.5,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "ILS-1": {
+   "role": "interlayer oxidized-developer scavenger",
+   "structure_description": "2,5-di-t-octylhydroquinone (t-octyl drawn as C8H17-t; 1,1,3,3-tetramethylbutyl assumed, matches OxDS-1 skeletal drawing)",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "Oc1cc(C(C)(C)CC(C)(C)C)c(O)cc1C(C)(C)CC(C)(C)C",
+   "formula": "C22H38O2",
+   "mw_g_mol": 334.54,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CDIR-2": {
+   "role": "strong DIR coupler in the receiver layer (also comparative strong DIR in Table I: -67.1%)",
+   "dye_color": "magenta",
+   "equivalence": "2-equivalent",
+   "timing_group": null,
+   "coupling_off_group": "1-phenyl-1H-tetrazol-5-ylthio (released directly)",
+   "inhibitor_fragment": "1-phenyl-5-mercaptotetrazole (PMT) - strong, non-hydrolyzable",
+   "structure_description": "1-[4-(2-(2,4-di-t-pentylphenoxy)butanamido)phenyl]-3-pyrrolidino-4-(1-phenyltetrazol-5-ylthio)-2-pyrazolin-5-one",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "O=C1C(Sc2nnnn2-c2ccccc2)C(N2CCCC2)=NN1c1ccc(NC(=O)C(CC)Oc9ccc(C(C)(C)CC)cc9C(C)(C)CC)cc1",
+   "formula": "C40H50N8O3S",
+   "mw_g_mol": 722.96,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IDIR-2": {
+   "role": "the 'weak/mild' DIR of the invention in the causer layer (Table II header 'IDIR-2 in Blue Layer')",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "aryloxy: 4-nitro-2-[(N-ethyl-N-(tetrazolylthio)carbonyl)aminomethyl]phenoxy",
+   "timing_group": "o-(N-ethylaminomethyl)phenoxy carbamate: after coupling the released 4-nitrophenoxide attacks the S-tetrazolyl thiocarbamate carbonyl (intramolecular nucleophilic displacement, ring closure to a 3-ethyl-6-nitro-benzoxazin-2-one) and releases the inhibitor. Mechanism inferred from structure class (Kodak 'IND' timing); not stated in this patent",
+   "inhibitor_fragment": "1-(propoxycarbonylmethyl)-5-mercaptotetrazole (drawn CH2CO2C3H7, n not printed in IDIR-2; IDIR-1/3/4 print n-propyl) - mild, hydrolyzable ester (patent: hydrolysis half-life in developer desirably >5 min, <24 h)",
+   "structure_description": "alpha-pivaloyl-alpha-[aryloxy as above]-2-chloro-5-(hexadecylsulfonamido)acetanilide",
+   "single_layer_contrast_reduction_pct": -25.3,
+   "mw_check": "US6309811 ML-2: IDIR-2 0.097 g/m2 'replaces IDIR-6 0.076' (equimolar per US6190848 ML-C-1 wording) -> 0.0990 vs 0.1001 mmol/m2 with these MWs: consistent",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(Oc1ccc([N+](=O)[O-])cc1CN(CC)C(=O)Sc1nnnn1CC(=O)OCCC)C(=O)Nc1cc(NS(=O)(=O)CCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C45H67ClN8O10S2",
+   "mw_g_mol": 979.66,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IDIR-6": {
+   "role": "mild DIR (alternative causer DIR, Table III BL-25..27; multilayer ML-C-1, ML-I-4, ML-I-6)",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "timing_group": null,
+   "coupling_off_group": "benzotriazol-1-yl bearing CO2C6H5 (benzo-ring position not specified: drawn as a floating bond)",
+   "inhibitor_fragment": "phenoxycarbonyl-benzotriazole (hydrolyzable ester); released directly",
+   "structure_description": "alpha-pivaloyl-alpha-(x-phenoxycarbonylbenzotriazol-1-yl)-2-chloro-5-(hexadecyloxycarbonyl)acetanilide; SMILES places CO2Ph at C-5 arbitrarily (MW unaffected)",
+   "single_layer_contrast_reduction_pct": -24.9,
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(n1nnc2cc(C(=O)Oc3ccccc3)ccc21)C(=O)Nc1cc(C(=O)OCCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C43H55ClN4O6",
+   "mw_g_mol": 759.39,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IDIR-1": {
+   "role": "mild DIR (multilayer ML-C-2/ML-I-5/6 green layer 6)",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "aryloxy: 2-(hexadecylsulfonamido)-4-[(tetrazol-5-ylthio)methyl]phenoxy",
+   "timing_group": "p-(thiomethyl)phenoxy: quinone-methide (1,6-elimination) release - mechanism inferred",
+   "inhibitor_fragment": "1-(n-propoxycarbonylmethyl)-5-mercaptotetrazole (mild, hydrolyzable)",
+   "structure_description": "1-hydroxy-2-naphthamide (primary CONH2) with the above aryloxy at C-4",
+   "uncertainty": "US6309811 p.9 draws aryl-S-CH2-tetrazole whereas US6190848 draws aryl-CH2-S-tetrazole; SMILES follows US6190848",
+   "single_layer_contrast_reduction_pct": -34.5,
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "NC(=O)c1cc(Oc2ccc(CSc3nnnn3CC(=O)OCCC)cc2NS(=O)(=O)CCCCCCCCCCCCCCCC)c2ccccc2c1O",
+   "formula": "C40H56N6O7S2",
+   "mw_g_mol": 797.06,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IDIR-5": {
+   "role": "mild DIR in green layer 6 of ML-C-0",
+   "dye_color": "yellow (malondianilide; inferred)",
+   "equivalence": "2-equivalent",
+   "timing_group": null,
+   "coupling_off_group": "benzotriazolyl (N-1 vs N-2 attachment drawn as floating bond) with 5(6)-phenoxycarbonyl",
+   "inhibitor_fragment": "phenoxycarbonylbenzotriazole (hydrolyzable)",
+   "structure_description": "bis[2-chloro-5-(1-(dodecyloxycarbonyl)ethoxycarbonyl)phenyl] malonamide, alpha-benzotriazolyl; the '2' subscript on the bracket is legible in US6309811 p.9 (cut off in US6190848 scan)",
+   "single_layer_contrast_reduction_pct": -42.0,
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "O=C(Nc1cc(C(=O)OC(C)C(=O)OCCCCCCCCCCCC)ccc1Cl)C(n1nnc2cc(C(=O)Oc3ccccc3)ccc21)C(=O)Nc1cc(C(=O)OC(C)C(=O)OCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C60H75Cl2N5O12",
+   "mw_g_mol": 1129.19,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CDIR-1": {
+   "role": "strong DIR (comparative; Table I -55.4%); used in red layers of multilayers",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "2-nitro-4-[(tetrazol-5-ylthio)methyl]phenoxy",
+   "timing_group": "p-(thiomethyl)phenoxy with o-nitro: quinone-methide (1,6-elimination) release - mechanism inferred",
+   "inhibitor_fragment": "1-(4-methoxybenzyl)-5-mercaptotetrazole (text lists p-methoxybenzylmercaptotetrazole as a strong inhibitor not of the invention)",
+   "structure_description": "N-(2-tetradecyloxyphenyl)-1-hydroxy-2-naphthamide, 4-aryloxy as above (ortho alkoxy printed 'O14H29' - read OC14H29)",
+   "single_layer_contrast_reduction_pct": -55.4,
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "Oc1c(C(=O)Nc2ccccc2OCCCCCCCCCCCCCC)cc(Oc2ccc(CSc3nnnn3Cc3ccc(OC)cc3)cc2[N+](=O)[O-])c2ccccc12",
+   "formula": "C47H54N6O7S",
+   "mw_g_mol": 847.05,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "C-1": {
+   "role": "cyan image coupler",
+   "dye_color": "cyan",
+   "equivalence": "4-equivalent",
+   "coupling_site": "phenol C-4 (para to OH) is H",
+   "structure_description": "2-[3-(4-cyanophenyl)ureido]-5-[2-(2,4-di-t-pentylphenoxy)hexanamido]phenol",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "Oc1cc(NC(=O)C(CCCC)Oc9ccc(C(C)(C)CC)cc9C(C)(C)CC)ccc1NC(=O)Nc1ccc(C#N)cc1",
+   "formula": "C36H46N4O4",
+   "mw_g_mol": 598.79,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "MC-1": {
+   "role": "cyan-forming masking coupler (releases a magenta/red azo dye) - role inferred from structure",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "structure_description": "naphthol coupler with 4-[4-(H-acid-type azo)phenoxy] coupling-off group; bis-pyridinium salt",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "Oc1c(C(=O)NCCCCOc9ccc(C(C)(C)CC)cc9C(C)(C)CC)cc(Oc2ccc(cc2)N=Nc2c(S(=O)(=O)[O-])cc3cc(S(=O)(=O)[O-])cc(NC(C)=O)c3c2O)c2ccccc12.c1cc[nH+]cc1.c1cc[nH+]cc1",
+   "formula": "C59H64N6O12S2",
+   "mw_g_mol": 1113.33,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "MC-2": {
+   "role": "magenta-forming yellow-colored masking coupler (4-arylazo pyrazolone)",
+   "dye_color": "magenta",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "3,4-dimethoxyphenylazo",
+   "structure_description": "1-(2,4,6-trichlorophenyl)-3-anilino-4-(3,4-dimethoxyphenylazo)pyrazolone; anilide alpha-(4-hydroxy-3-t-butylphenoxy)tetradecanamido",
+   "source": "drawn identically in US6309811 (bilayer p.17-18, DIRs p.7-9, ML p.21-22); transcription shared with US6190848 file",
+   "smiles_as_transcribed": "Clc1cc(Cl)c(N2N=C(Nc3cc(NC(=O)C(CCCCCCCCCCCC)Oc4ccc(O)c(C(C)(C)C)c4)ccc3Cl)C(N=Nc3ccc(OC)c(OC)c3)C2=O)c(Cl)c1",
+   "formula": "C47H56Cl4N6O6",
+   "mw_g_mol": 942.81,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "FD-1": {
+   "role": "yellow filter dye in interlayer (absorbs blue; protects green receiver from blue light) - role inferred",
+   "structure_description": "5-(2-furylmethylene)-3-cyano-4-[4-(butylsulfonamido)phenyl]-2(5H)-furanone",
+   "source": "PDF p.18",
+   "smiles_as_transcribed": "O=C1OC(=Cc2ccco2)C(c2ccc(NS(=O)(=O)CCCC)cc2)=C1C#N",
+   "formula": "C20H18N2O5S",
+   "mw_g_mol": 398.44,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "note": "text calls it FD-1 (bilayer) and YFD-1 (multilayer L9); the bilayer structure list labels the drawing 'YFD-1' - same compound"
+  },
+  "IEH-A": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 4.8,
+   "structure_description": "6-decyloxypurine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCOc1ncnc2[nH]cnc12",
+   "formula": "C15H24N4O",
+   "mw_g_mol": 276.38,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "note": "Synthesis: 3.29 g = 11.9 mmol -> 276.5 g/mol, RDKit 276.38: structure confirmed. Patent gives Medchem SMILES CCCCCCCCCCOC1=C2N=CNC2=NC=N1 -> ClogP 4.80"
+  },
+  "IEH-B": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 5.86,
+   "structure_description": "6-dodecyloxypurine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCOc1ncnc2[nH]cnc12",
+   "formula": "C17H28N4O",
+   "mw_g_mol": 304.44,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IEH-E": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 5.15,
+   "structure_description": "6-(decylthio)purine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCSc1ncnc2[nH]cnc12",
+   "formula": "C15H24N4S",
+   "mw_g_mol": 292.45,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IEH-G": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 4.75,
+   "structure_description": "6-(tetradecylsulfinyl)purine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCCCS(=O)c1ncnc2[nH]cnc12",
+   "formula": "C19H32N4OS",
+   "mw_g_mol": 364.56,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "note": "IEH-G and IEH-I are drawn identically (both n-C14H29 sulfoxide, PDF p.5) but have different ClogP (4.75/4.70) and Cg/Cb+g (1.85/1.63); one drawing is probably wrong - unresolved"
+  },
+  "IEH-H": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 5.8,
+   "structure_description": "6-(hexadecylsulfinyl)purine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCCCCCS(=O)c1ncnc2[nH]cnc12",
+   "formula": "C21H36N4OS",
+   "mw_g_mol": 392.61,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "IEH-I": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 4.7,
+   "structure_description": "6-(tetradecylsulfinyl)purine (as drawn; see IEH-G)",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCCCS(=O)c1ncnc2[nH]cnc12",
+   "formula": "C19H32N4OS",
+   "mw_g_mol": 364.56,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "note": "see IEH-G"
+  },
+  "IEH-X": {
+   "role": "interimage-enhancing heterocycle (IEH) of the invention: non-coupling aromatic bicyclic N-H heterocycle (purine), ClogP 2.0-7.2; raises the receiver's sensitivity to mild inhibitor",
+   "clogp_printed": 6.98,
+   "structure_description": "6-[2-(2,4-di-t-pentylphenoxy)butanamido]purine",
+   "source": "PDF p.4-6 (cols. 6-10)",
+   "smiles_as_transcribed": "CCC(Oc9ccc(C(C)(C)CC)cc9C(C)(C)CC)C(=O)Nc1ncnc2[nH]cnc12",
+   "formula": "C25H35N5O2",
+   "mw_g_mol": 437.59,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-1": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 5.52,
+   "structure_description": "2-n-octylbenzimidazole",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCCCCCc1nc2ccccc2[nH]1",
+   "formula": "C15H22N2",
+   "mw_g_mol": 230.36,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-2": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 8.18,
+   "structure_description": "2-(dodecylthio)benzimidazole",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCSc1nc2ccccc2[nH]1",
+   "formula": "C19H30N2S",
+   "mw_g_mol": 318.53,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-3": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 8.05,
+   "structure_description": "2-[(N-(4-(2,4-di-t-pentylphenoxy)butyl)carbamoyl)methylthio]benzimidazole (= US6190848 CIEM-17)",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "O=C(CSc1nc2ccccc2[nH]1)NCCCCOc9ccc(C(C)(C)CC)cc9C(C)(C)CC",
+   "formula": "C29H41N3O2S",
+   "mw_g_mol": 495.73,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-4": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 3.81,
+   "structure_description": "2-(butylthio)benzimidazole",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCSc1nc2ccccc2[nH]1",
+   "formula": "C11H14N2S",
+   "mw_g_mol": 206.31,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "note": "structure label prints (3.95); Table II prints 3.81"
+  },
+  "CIEH-5": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 3.6,
+   "structure_description": "2-substituted benzimidazole printed '-SCH4SC4H9-n' (garbled formula)",
+   "source": "PDF p.18 (cols. 33-34)",
+   "note": "structure label prints (3.81); Table II prints 3.60; substituent unreadable as a valid formula -> no SMILES/MW"
+  },
+  "CIEH-6": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 11.35,
+   "structure_description": "2-(octadecylthio)benzimidazole",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCCCCCCCSc1nc2ccccc2[nH]1",
+   "formula": "C25H42N2S",
+   "mw_g_mol": 402.69,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-7": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 7.26,
+   "structure_description": "6-(tetradecylthio)purine",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCCCCCCCCCCCSc1ncnc2[nH]cnc12",
+   "formula": "C19H32N4S",
+   "mw_g_mol": 348.56,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-8": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 0.2,
+   "structure_description": "hypoxanthine drawn as 6-hydroxypurine",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "Oc1ncnc2[nH]cnc12",
+   "formula": "C5H4N4O",
+   "mw_g_mol": 136.11,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-9": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 0.83,
+   "structure_description": "propyl (purin-6-ylthio)acetate",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCOC(=O)CSc1ncnc2[nH]cnc12",
+   "formula": "C10H12N4O2S",
+   "mw_g_mol": 252.3,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "CIEH-10": {
+   "role": "comparative heterocycle (CIEH)",
+   "clogp_printed": 8.03,
+   "structure_description": "6-[2-(2,4-di-t-pentylphenoxy)hexanamido]purine",
+   "source": "PDF p.18 (cols. 33-34)",
+   "smiles_as_transcribed": "CCCCC(Oc9ccc(C(C)(C)CC)cc9C(C)(C)CC)C(=O)Nc1ncnc2[nH]cnc12",
+   "formula": "C27H39N5O2",
+   "mw_g_mol": 465.64,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "Y-2[811]": {
+   "role": "yellow image coupler (L10, L11)",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "5,5-dimethyl-2,4-dioxo-oxazolidin-3-yl",
+   "structure_description": "pivaloylacetanilide, 2-Cl-5-CO2C16H33-n anilide (differs from US6190848 Y-2)",
+   "source": "PDF p.20",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(N1C(=O)OC(C)(C)C1=O)C(=O)Nc1cc(C(=O)OCCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C35H53ClN2O7",
+   "mw_g_mol": 649.27,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "B-1[811]": {
+   "role": "bleach-accelerator-releasing coupler (BARC)",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_off_group": "2-carboxyethylthio",
+   "structure_description": "N-(2-dodecyloxy-5-methylphenyl)-1-hydroxy-2-naphthamide, 4-S(CH2)2CO2H (differs from US6190848 B-1)",
+   "source": "PDF p.21",
+   "smiles_as_transcribed": "OC(=O)CCSc1cc(C(=O)Nc2cc(C)ccc2OCCCCCCCCCCCC)c(O)c2ccccc12",
+   "formula": "C33H43NO5S",
+   "mw_g_mol": 565.78,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "OxDS-2[811]": {
+   "role": "oxidized developer scavenger (L7, L8)",
+   "structure_description": "2-(1-methylheptadecyl)-5-sulfohydroquinone (alkyl drawn CH(CH3)C16H33-n)",
+   "source": "PDF p.20",
+   "smiles_as_transcribed": "Oc1cc(S(=O)(=O)O)c(O)cc1C(C)CCCCCCCCCCCCCCCC",
+   "formula": "C24H42O5S",
+   "mw_g_mol": 442.66,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "DYE-1[811]": {
+   "role": "antihalation filter dye (L1); preformed magenta azomethine (pyrazolone-imine) dye",
+   "source": "PDF p.20",
+   "smiles_as_transcribed": "Clc1cc(Cl)c(N2N=C(NC(=O)c3cccc(NC(=O)COc9ccc(C(C)(C)CC)cc9C(C)(C)CC)c3)C(=Nc3ccc(N(CC)CCO)cc3C)C2=O)c(Cl)c1",
+   "formula": "C45H51Cl3N6O5",
+   "mw_g_mol": 862.3,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "DYE-2[811]_inferred_N": {
+   "role": "antihalation filter dye (L1); preformed cyan naphthoquinone-imine dye",
+   "note": "drawn with C4=C(aryl) (no N) which is not a valid structure; SMILES uses =N- as in US6190848 Dye-3 (inferred)",
+   "source": "PDF p.20",
+   "smiles_as_transcribed": null,
+   "formula": "C42H55N3O4",
+   "mw_g_mol": 665.92,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)",
+   "smiles_inferred": "O=C1C(C(=O)NCCCCOc9ccc(C(C)(C)CC)cc9C(C)(C)CC)=CC(=Nc2ccc(N(CC)CCO)cc2C)c2ccccc12"
+  },
+  "DYE-3[811]": {
+   "role": "antihalation filter dye (L1); yellow 4-(4-methoxyphenylazo)pyrazolone",
+   "source": "PDF p.21",
+   "smiles_as_transcribed": "Clc1cc(Cl)c(N2N=C(NC(=O)c3cccc(NC(=O)COc9ccc(C(C)(C)CC)cc9C(C)(C)CC)c3)C(N=Nc3ccc(OC)cc3)C2=O)c(Cl)c1",
+   "formula": "C41H43Cl3N6O5",
+   "mw_g_mol": 806.19,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "UV-1": {
+   "role": "UV absorber (L1, L12)",
+   "structure_description": "(dicyanobutadienyl)di-n-hexylamine",
+   "source": "PDF p.21",
+   "smiles_as_transcribed": "N#CC(C#N)=CC=CN(CCCCCC)CCCCCC",
+   "formula": "C18H29N3",
+   "mw_g_mol": 287.45,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "UV-2": {
+   "role": "UV absorber (L1)",
+   "structure_description": "propyl 2-cyano-3-(4-methoxyphenyl)acrylate",
+   "source": "PDF p.21",
+   "smiles_as_transcribed": "CCCOC(=O)C(C#N)=Cc1ccc(OC)cc1",
+   "formula": "C14H15NO3",
+   "mw_g_mol": 245.28,
+   "mw_status": "estimated: RDKit on a SMILES hand-transcribed from the drawn structure (neutral form unless noted)"
+  },
+  "YFD-1": {
+   "same_as": "FD-1",
+   "role": "yellow filter dye (L9)"
+  }
+ }
+}

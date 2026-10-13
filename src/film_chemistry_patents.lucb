@@ -1,0 +1,173 @@
+## The reference chemistry against Kodak's disclosed interimage experiments
+## (research_notes/Physical film process simulation/owner_supplied_chemistry_data.md;
+## the coatings transcribed in dev/film/constructions/us6190848.json and
+## us6309811.json, checked against the scans).
+##
+## US 6,190,848, Table I measures each DIR coupler's strength alone: a single
+## green layer (gelatin 2.79 g/m², the magenta coupler M-1 0.692 g/m², the
+## DIR 0.055 mmol/m², silver 1.08 g/m²) under an overcoat, its contrast (the
+## steepest slope between steps) cut by the DIR by a measured share (IDIR-2
+## 25.3 %, CDIR-2 67.1 %). That fixes each inhibitor's restraint, the one
+## constant the chemistry does not otherwise know. Then the bilayer of Table
+## II (a blue causer with IDIR-2 over a green receiver with CDIR-2, a
+## scavenging interlayer between), exposed green alone and blue with green,
+## gives the interimage ratio R = γ(green) / γ(blue + green): measured 1.23
+## (Table II, no modifier) and 1.45 (Table III's coating set). The chemistry
+## predicts it, nothing refitted.
+##
+## Found: the restraints come out 24 /mM (IDIR-2) and 62 /mM (CDIR-2). The
+## bilayer as printed (the receiver's M-1 at 0.045 g/m², far below Table I's
+## 0.692, though clearly printed) uses up its coupler by 0.2 density in both
+## exposures, so R = 0.99; with 0.45 or 0.692 g/m², R = 1.04 and 1.07, short
+## of the measured 1.23–1.45. Cross-layer inhibition is too weak here, as
+## Portra's single-colour gammas and Gold's border are: the inhibitor only
+## slows development (thin areas still run almost to completion), and about
+## 85 % of what is released escapes to the bath. Real DIR inhibitors adsorb
+## and stop a grain developing (docs/PHYSICAL-FILM.md, part 4).
+##
+## Assumed where the patents are silent: each emulsion's developable share
+## over log H a logistic of width 0.35 (Portra 400's calibrated shape, about),
+## the same steps of 0.15 for blue and green, grains 1.0 × 0.12 µm tabular
+## (the binding sites), every coupler and DIR dispersed in an equal weight of
+## solvent, an overcoat's hardener and filter dyes as bulk only.
+import memory
+from luce_std import math
+import film_chemistry
+from film_chemistry import Layer, Chemistry, Bath
+import film_chemistry_reference
+
+## The steps: 21 of 0.15 log H.
+let step_count: usize = 21
+let step_size: f64 = 0.15
+
+## Dry thickness (µm) of a layer of `gelatin` and `organics` (g/m²) and
+## `silver` (µmol/m², as AgBr).
+func dry_of(gelatin: f64, organics: f64, silver: f64) -> f64:
+    return gelatin / 1.34 + organics / 1.1 + silver * 1.0e-6 * 187.8 / 6.47
+
+## Binding sites (µmol/m²) on `silver` µmol/m² of tabular grains 1.0 × 0.12 µm.
+func sites_of(silver: f64) -> f64:
+    let volume = silver * 1.0e-6 * 187.8 / 6.47
+    let surface = volume * (2.0 / 0.12e-4 + 4.0 / 1.0e-4) * 1.0e-4
+    return surface / 0.5e-18 / 6.02214076e23 * 1.0e6
+
+## The developable share of an emulsion at step `step` (log H from the first).
+func developable_share(step: usize) -> f64:
+    let x = (f64)step * step_size - 1.5
+    return 1.0 / (1.0 + math.exp(-x / 0.35))
+
+## Develop `layers` in C-41 at every step: each record given `exposed[record]`
+## (false: unexposed) its halide's developable share; the dye each record
+## makes per step (µmol/m²), steps far apart (no edge between them).
+func developed_steps(layers: const Layer[], restraints: f64[2], exposed: bool[3]) -> f64[]!:
+    var reference = try film_chemistry_reference.reference_of(1, 3.25, 37.8)
+    defer reference.release()
+    var chemistry = reference.chemistry
+    chemistry.restraints = restraints
+    var grid = try film_chemistry.make_grid(layers, step_count, 1.0e6)
+    defer grid.release()
+    for step in 0..<step_count:
+        for record in 0..<(usize)3:
+            var halide = 0.0
+            for layer in layers:
+                if layer.record == (i64)record:
+                    halide += layer.halide
+            if exposed[record]:
+                film_chemistry.expose(&grid, (i64)record, step, halide * developable_share(step))
+    try film_chemistry.develop(&grid, &chemistry, &reference.bath, reference.seconds, 0.05)
+    let out = try new f64[step_count * 3] --- in memory.heap
+    for step in 0..<step_count:
+        for record in 0..<(usize)3:
+            out[step * 3 + record] = grid.record_total(film_chemistry.dye, (i64)record, step)
+    return out
+
+## The steepest slope of record `record`'s dye between neighbouring steps.
+func contrast(dye: const f64[], record: usize) -> f64:
+    var most = 0.0
+    for step in 1..<step_count:
+        most = math.max(most, (dye[step * 3 + record] - dye[(step - 1) * 3 + record]) / step_size)
+    return most
+
+# mark: Table I: a DIR's strength alone ========================================
+
+## US 6,190,848 Table I's single green layer (top first: overcoat, imaging
+## layer), with a DIR (`dir` µmol/m², `mass` g/mol, through a timing group or
+## not) or without (0).
+func single_layer(dir: f64, mass: f64, timed: bool) -> Layer[2]:
+    let silver_umol = 1.08 / 107.87 * 1.0e6
+    let coupler = 0.692 / 1040.08 * 1.0e6
+    let dir_grams = dir * 1.0e-6 * mass
+    return [Layer(dry = dry_of(2.79, 0.02, 0.0), cells = 2),
+            Layer(dry = dry_of(2.79, 2.0 * 0.692 + 3.0 * dir_grams, silver_umol), record = 1, coupler = coupler, equivalence = 2.0,
+                  k_couple = 4.45, k_dir = 7.3, dir_coupler = dir, timed = timed, halide = silver_umol, sites = sites_of(silver_umol), cells = 4)]
+
+## The share Table I's DIR cuts the single layer's contrast by, at restraint `restraint`.
+func contrast_cut(dir: f64, mass: f64, timed: bool, restraint: f64) -> f64!:
+    let check = try developed_steps(single_layer(0.0, mass, timed), [restraint, restraint], [false, true, false])
+    defer free(check) in memory.heap
+    let dosed = try developed_steps(single_layer(dir, mass, timed), [restraint, restraint], [false, true, false])
+    defer free(dosed) in memory.heap
+    return 1.0 - contrast(dosed, 1) / contrast(check, 1)
+
+## The restraint (1/mM) at which the DIR cuts the contrast by `cut`: bisection
+## in its log.
+func restraint_for(cut: f64, mass: f64, timed: bool) -> f64!:
+    var low = 0.01
+    var high = 1.0e4
+    for _ in 0..<30:
+        let middle = math.sqrt(low * high)
+        if try contrast_cut(55.0, mass, timed, middle) < cut:
+            low = middle
+        else:
+            high = middle
+    return math.sqrt(low * high)
+
+# mark: Table II: the bilayer =================================================
+
+## US 6,190,848's bilayer (top first): overcoat; the blue causer (Y-1 0.91
+## g/m², IDIR-2 0.11 mmol/m², silver 0.79 g/m²); the interlayer (gelatin 0.64,
+## the scavenger ILS-1 0.11 g/m², 2,5-di-t-octylhydroquinone, and a filter
+## dye); the green receiver (M-1 0.045 g/m² as printed, CDIR-2 0.03 g/m²,
+## silver 0.81 g/m²); the antihalation layer (gelatin 2.41, black silver 0.34).
+func bilayer(receiver_coupler: f64 = 0.045) -> Layer[5]:
+    let causer_silver = 0.79 / 107.87 * 1.0e6
+    let receiver_silver = 0.81 / 107.87 * 1.0e6
+    let interlayer_dry = dry_of(0.64, 0.22, 0.0)
+    let scavenger = 0.11 / 334.54 * 1.0e6
+    return [Layer(dry = dry_of(2.79, 0.02, 0.0), cells = 2),
+            Layer(dry = dry_of(2.79, 2.0 * 0.91 + 3.0 * 0.1078, causer_silver), record = 2, coupler = 0.91 / 805.5 * 1.0e6, equivalence = 2.0,
+                  k_couple = 1.25, k_dir = 7.3, dir_coupler = 110.0, timed = true, inhibitor_kind = 0, halide = causer_silver,
+                  sites = sites_of(causer_silver), cells = 4),
+            # The scavenger, 1 /(mM·s) times its concentration in the swollen layer (an estimate).
+            Layer(dry = interlayer_dry, scavenger = scavenger / (interlayer_dry * 2.6), cells = 1),
+            Layer(dry = dry_of(2.79, 2.0 * receiver_coupler + 3.0 * 0.03, receiver_silver), record = 1, coupler = receiver_coupler / 1040.08 * 1.0e6, equivalence = 2.0,
+                  k_couple = 4.45, k_dir = 7.3, dir_coupler = 0.03 / 722.96 * 1.0e6, inhibitor_kind = 1, halide = receiver_silver,
+                  sites = sites_of(receiver_silver), cells = 3),
+            Layer(dry = dry_of(2.41, 0.034, 0.0), cells = 2)]
+
+test "Kodak's DIR strengths fix each inhibitor's restraint; the bilayer's interimage, predicted, falls short":
+    # IDIR-2 (timed, MW 980): 25.3 %; CDIR-2 (direct, MW 723): 67.1 %.
+    let mild = restraint_for(0.253, 979.66, true) catch failure:
+        assert(false)
+        return
+    let strong = restraint_for(0.671, 722.96, false) catch failure:
+        assert(false)
+        return
+    let mild_cut = contrast_cut(55.0, 979.66, true, mild) catch failure:
+        assert(false)
+        return
+    print(f"restraint: IDIR-2 {mild} /mM (cuts {mild_cut * 100.0} %), CDIR-2 {strong} /mM")
+    assert(math.abs(mild_cut - 0.253) < 0.005)
+    for receiver_coupler in [0.045, 0.45, 0.692]:
+        let green = developed_steps(bilayer(receiver_coupler), [mild, strong], [false, true, false]) catch failure:
+            assert(false)
+            return
+        defer free(green) in memory.heap
+        let both = developed_steps(bilayer(receiver_coupler), [mild, strong], [false, true, true]) catch failure:
+            assert(false)
+            return
+        defer free(both) in memory.heap
+        let ratio = contrast(green, 1) / contrast(both, 1)
+        print(f"bilayer, M-1 {receiver_coupler} g/m²: R = {ratio}; receiver's most dye {green[(step_count - 1) * 3 + 1]} µmol/m² (Kodak: 1.23 in Table II, 1.45 in Table III)")
+        # Recorded, not yet met: the interimage runs the right way but weak.
+        assert(ratio > 0.98 and ratio < 1.5)
