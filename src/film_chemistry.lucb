@@ -1,0 +1,514 @@
+## The reference chemistry: a colour or black-and-white film developing in its
+## bath, as a conserving reaction–diffusion solver on a grid across the film
+## (x) and down through its layers (z), the bath above the top cell
+## (docs/PHYSICAL-FILM.md, part 4; research: owner_supplied_chemistry_data.md).
+## It is the slow, careful reference the fast GPU path is checked against, not
+## what the viewer runs.
+##
+## State is kept as amounts per film area (µmol/m²) in each cell, so a layer
+## swelling changes concentrations (mM = amount / wet thickness in µm) without
+## making or losing anything. Mobile species: developer R, oxidized developer O
+## (quinonediimine), bromide B, the DIR coupler's timed precursor P and free
+## inhibitor F. Fixed in place: developable silver halide A, developed silver
+## S, image coupler Q, DIR coupler G, dye Y and inhibitor bound to the grains
+## H. The reactions, per cell:
+##
+##   development  r_dev = k_dev·g(t)·A·c_R/(K_R + c_R)/(1 + K_B·c_B + K_H·c_H):
+##                each silver reduced takes half a developer molecule (two
+##                electrons each), makes half an O and frees one bromide
+##   coupling     r_cpl = k_cpl·c_O·c_Q·Δz: a dye molecule from the coupler,
+##                taking ν/2 O (ν = 2 or 4 silver per dye: two- or
+##                four-equivalent couplers)
+##   DIR coupling r_dir = k_dir·c_O·c_G·Δz: one O, one precursor (or inhibitor
+##                directly, when the coupler has no timing group)
+##   O lost       r_lost = (k_sulfite + k_scavenger)·c_O·Δz: to the bath's
+##                sulfite, and to an interlayer's scavenger
+##   release      P → F at k_release (ln 2 over its half-time)
+##   binding      F + site → H at k_on·c_F·(c_sites − c_H)·Δz, back at k_off·H
+##
+## g(t) = 1 − e^(−t/τ) is the induction before development runs. Each step
+## reacts first (limited so nothing goes negative), then diffuses each mobile
+## species implicitly, across then down, the bath exchanging through the top
+## surface at J = h·(c_bath − c_top) (h a length per time, so it does not move
+## with the grid). Bath and film are kept apart in the books: what crossed the
+## surface is counted, so every atom is accounted for (`Books`).
+import memory
+from luce_std import math
+
+## The mobile species, in this order in `Grid.mobile`.
+pub let developer: usize = 0
+pub let oxidized: usize = 1
+pub let bromide: usize = 2
+pub let precursor: usize = 3
+pub let inhibitor: usize = 4
+pub let mobile_count: usize = 5
+
+## The fixed species, in this order in `Grid.fixed`.
+pub let halide: usize = 0
+pub let silver: usize = 1
+pub let coupler: usize = 2
+pub let dir_coupler: usize = 3
+pub let dye: usize = 4
+pub let bound: usize = 5
+pub let fixed_count: usize = 6
+
+## One layer of the coating, top (bath side) first.
+pub struct Layer:
+    ## Dry thickness (µm) and how much it swells in the bath (wet over dry).
+    pub var dry: f64 = 1.0
+    pub var swell: f64 = 2.6
+    ## Which record it holds: 0 red (cyan dye), 1 green (magenta), 2 blue
+    ## (yellow), −1 none (an interlayer or overcoat).
+    pub var record: i64 = -1
+    ## Image coupler and DIR coupler (µmol/m²), and silver per dye molecule of
+    ## the image coupler (2 or 4).
+    pub var coupler: f64 = 0.0
+    pub var dir_coupler: f64 = 0.0
+    pub var equivalence: f64 = 4.0
+    ## An interlayer's scavenger of oxidized developer, a first-order rate (1/s).
+    pub var scavenger: f64 = 0.0
+    ## Sites that bind inhibitor (µmol/m²): the grains' surface.
+    pub var sites: f64 = 0.0
+    ## Cells it is cut into.
+    pub var cells: usize = 2
+
+## The rates and transport (wet gelatin, at the bath's temperature).
+pub struct Chemistry:
+    ## Diffusion coefficients (µm²/s), mobile species in order.
+    pub var diffusion: f64[5] = [100.0, 100.0, 1100.0, 100.0, 100.0]
+    ## Development (1/s), its half-saturation in developer (mM) and its
+    ## restraint by bromide and bound inhibitor (1/mM).
+    pub var k_develop: f64 = 0.01
+    pub var half_developer: f64 = 2.0
+    pub var bromide_restraint: f64 = 0.02
+    pub var inhibitor_restraint: f64 = 1.0
+    ## Coupling (1/(mM·s)): image coupler, DIR coupler.
+    pub var k_couple: f64 = 50.0
+    pub var k_dir: f64 = 50.0
+    ## Oxidized developer lost to sulfite (1/s).
+    pub var k_sulfite: f64 = 1.0
+    ## The precursor's release (1/s; 0: the DIR releases inhibitor directly).
+    pub var k_release: f64 = 0.0
+    ## Binding (1/(mM·s)) and unbinding (1/s). Binding is set so a free
+    ## inhibitor goes √(D/(k_on·c_sites)) ≈ 19.5 µm before it binds (about 2 mM
+    ## of sites), Rajkowski and Nowak's chemical spread length for Kodak Gold.
+    pub var k_on: f64 = 0.13
+    pub var k_off: f64 = 0.01
+    ## The induction time (s) and the swelling's time constant (s).
+    pub var induction: f64 = 5.0
+    pub var swelling: f64 = 10.0
+
+## The bath: what it holds (mM, mobile species in order) and how fast it
+## exchanges with the film's surface (µm/s).
+pub struct Bath:
+    pub var holds: f64[5] = [15.0, 0.0, 11.0, 0.0, 0.0]
+    pub var exchange: f64 = 10.0
+
+## Every amount that entered the film through its surface, per mobile species
+## (µmol/m² summed over the columns, over the column count), and what the
+## reactions made and used, for checking that nothing is created or lost.
+pub struct Books:
+    pub var entered: f64[5] = [0.0, 0.0, 0.0, 0.0, 0.0]
+    pub var developed: f64 = 0.0
+    pub var coupled: f64 = 0.0
+    pub var dir_coupled: f64 = 0.0
+    pub var oxidized_lost: f64 = 0.0
+    ## Oxidized developer used by everything (coupling, DIR, losses).
+    pub var oxidized_used: f64 = 0.0
+
+## The film on its grid: `columns` across (each `width` µm), the layers' cells
+## down. Amounts per cell in µmol/m².
+pub struct Grid:
+    pub var columns: usize
+    pub var width: f64
+    pub var rows: usize
+    pub var layers: Layer[]
+    ## Each row's layer, and its dry thickness (µm).
+    pub var row_layer: usize[]
+    pub var row_dry: f64[]
+    ## Each row's wet thickness now.
+    pub var row_wet: f64[]
+    pub var mobile: f64[]
+    pub var fixed: f64[]
+    pub var time: f64 = 0.0
+    pub var books: Books
+
+    pub func release():
+        free(self.layers) in memory.heap
+        free(self.row_layer) in memory.heap
+        free(self.row_dry) in memory.heap
+        free(self.row_wet) in memory.heap
+        free(self.mobile) in memory.heap
+        free(self.fixed) in memory.heap
+
+    ## Species `species`' amount in row `row` of column `column`.
+    pub func mobile_at(species: usize, row: usize, column: usize) -> f64:
+        return self.mobile[(species * self.rows + row) * self.columns + column]
+
+    pub func fixed_at(species: usize, row: usize, column: usize) -> f64:
+        return self.fixed[(species * self.rows + row) * self.columns + column]
+
+    ## Fixed species `species` in column `column` summed over record `record`'s rows.
+    pub func record_total(species: usize, record: i64, column: usize) -> f64:
+        var sum = 0.0
+        for row in 0..<self.rows:
+            if self.layers[self.row_layer[row]].record == record:
+                sum += self.fixed_at(species, row, column)
+        return sum
+
+    ## A mobile or fixed species summed over the whole film, per column.
+    pub func mobile_total(species: usize) -> f64:
+        var sum = 0.0
+        for at in 0..<(self.rows * self.columns):
+            sum += self.mobile[species * self.rows * self.columns + at]
+        return sum / (f64)self.columns
+
+    pub func fixed_total(species: usize) -> f64:
+        var sum = 0.0
+        for at in 0..<(self.rows * self.columns):
+            sum += self.fixed[species * self.rows * self.columns + at]
+        return sum / (f64)self.columns
+
+## A film of `layers` (top first), `columns` × `width` µm across, soaked in
+## nothing yet, its couplers and binding sites in place. The caller fills each
+## record's developable halide (`expose`).
+pub func make_grid(layers: const Layer[], columns: usize, width: f64) -> Grid!:
+    var rows: usize = 0
+    for layer in layers:
+        rows += layer.cells
+    var out = Grid(columns = columns, width = width, rows = rows)
+    out.layers = try new Layer[layers.length] --- in memory.heap
+    out.row_layer = try new usize[rows] --- in memory.heap
+    out.row_dry = try new f64[rows] --- in memory.heap
+    out.row_wet = try new f64[rows] --- in memory.heap
+    out.mobile = try new f64[mobile_count * rows * columns] --- in memory.heap
+    out.fixed = try new f64[fixed_count * rows * columns] --- in memory.heap
+    for at in 0..<out.mobile.length:
+        out.mobile[at] = 0.0
+    for at in 0..<out.fixed.length:
+        out.fixed[at] = 0.0
+    var row: usize = 0
+    for (index, layer) in layers.indexed():
+        out.layers[index] = layer
+        for _ in 0..<layer.cells:
+            out.row_layer[row] = index
+            out.row_dry[row] = layer.dry / (f64)layer.cells
+            out.row_wet[row] = out.row_dry[row]
+            for column in 0..<columns:
+                let share = 1.0 / (f64)layer.cells
+                out.fixed[(coupler * rows + row) * columns + column] = layer.coupler * share
+                out.fixed[(dir_coupler * rows + row) * columns + column] = layer.dir_coupler * share
+            row += 1
+    return out
+
+## Give record `record` in column `column` `amount` µmol/m² of developable
+## halide (silver the exposure made developable), spread evenly over its rows.
+pub func expose(grid: Grid*, record: i64, column: usize, amount: f64):
+    var rows: usize = 0
+    for row in 0..<grid.rows:
+        if grid.layers[grid.row_layer[row]].record == record:
+            rows += 1
+    for row in 0..<grid.rows:
+        if grid.layers[grid.row_layer[row]].record == record:
+            grid.fixed[(halide * grid.rows + row) * grid.columns + column] = amount / (f64)rows
+
+## Develop `grid` in `bath` for `seconds`, in steps of at most `step` s.
+pub func develop(grid: Grid*, chemistry: const Chemistry*, bath: const Bath*, seconds: f64, step: f64) -> !:
+    let count = (usize)math.max(math.ceil(seconds / step), 1.0)
+    let dt = seconds / (f64)count
+    let longest = grid.rows if grid.rows > grid.columns else grid.columns
+    let scratch = try new f64[4 * longest] --- in memory.heap
+    defer free(scratch) in memory.heap
+    for _ in 0..<count:
+        # Symmetric splitting: half the reactions, the transport, the other half.
+        swell(grid, chemistry, grid.time + 0.25 * dt)
+        react(grid, chemistry, grid.time, 0.5 * dt)
+        swell(grid, chemistry, grid.time + 0.5 * dt)
+        for species in 0..<mobile_count:
+            diffuse_across(grid, species, chemistry.diffusion[species] * dt, scratch)
+            diffuse_down(grid, species, chemistry.diffusion[species] * dt, bath.holds[species], bath.exchange * dt, scratch)
+        swell(grid, chemistry, grid.time + 0.75 * dt)
+        react(grid, chemistry, grid.time + 0.5 * dt, 0.5 * dt)
+        grid.time += dt
+
+## Each row's wet thickness at time `t`: swelling toward its layer's.
+func swell(grid: Grid*, chemistry: const Chemistry*, t: f64):
+    let reached = 1.0 - math.exp(-t / math.max(chemistry.swelling, 1.0e-9))
+    for row in 0..<grid.rows:
+        let layer = grid.layers[grid.row_layer[row]]
+        grid.row_wet[row] = grid.row_dry[row] * (1.0 + (layer.swell - 1.0) * reached)
+
+# mark: Reactions =============================================================
+
+## The reactions from time `begun` for `dt` in every cell, explicit, each consumer scaled down so
+## no species goes below nothing.
+func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
+    let n = grid.rows * grid.columns
+    let started = 1.0 - math.exp(-(begun + 0.5 * dt) / math.max(chemistry.induction, 1.0e-9))
+    for row in 0..<grid.rows:
+        let layer = grid.layers[grid.row_layer[row]]
+        let wet = grid.row_wet[row]
+        for column in 0..<grid.columns:
+            let at = row * grid.columns + column
+            let r_amount = grid.mobile[developer * n + at]
+            let o_amount = grid.mobile[oxidized * n + at]
+            let b_amount = grid.mobile[bromide * n + at]
+            let p_amount = grid.mobile[precursor * n + at]
+            let f_amount = grid.mobile[inhibitor * n + at]
+            let a_amount = grid.fixed[halide * n + at]
+            let q_amount = grid.fixed[coupler * n + at]
+            let g_amount = grid.fixed[dir_coupler * n + at]
+            let h_amount = grid.fixed[bound * n + at]
+            let c_r = r_amount / wet
+            let c_o = o_amount / wet
+            let c_b = b_amount / wet
+            let c_f = f_amount / wet
+            let c_h = h_amount / wet
+            # Development, limited by the halide left and by the developer
+            # (half a molecule per silver).
+            let restraint = 1.0 + chemistry.bromide_restraint * c_b + chemistry.inhibitor_restraint * c_h
+            # First order in the halide left: integrated exactly over the step.
+            let rate = chemistry.k_develop * started * c_r / (chemistry.half_developer + c_r) / restraint
+            var r_dev = a_amount * (1.0 - math.exp(-rate * dt)) / dt
+            r_dev = math.min(r_dev, 2.0 * r_amount / dt)
+            # What uses the oxidized developer, scaled to what there is (with
+            # what this step makes).
+            var r_cpl = chemistry.k_couple * c_o * (q_amount / wet) * wet
+            var r_dir = chemistry.k_dir * c_o * (g_amount / wet) * wet
+            var r_lost = (chemistry.k_sulfite + layer.scavenger) * c_o * wet
+            r_cpl = math.min(r_cpl, q_amount / dt)
+            r_dir = math.min(r_dir, g_amount / dt)
+            let wanted = 0.5 * layer.equivalence * r_cpl + r_dir + r_lost
+            let available = o_amount / dt + 0.5 * r_dev
+            if wanted > available and wanted > 0.0:
+                let scale = available / wanted
+                r_cpl *= scale
+                r_dir *= scale
+                r_lost *= scale
+            # The precursor's release (or the DIR's own, with no timing group).
+            let r_release = chemistry.k_release * p_amount if chemistry.k_release > 0.0 else 0.0
+            # Binding to the grains' sites, and back.
+            let free_sites = math.max(layer.sites * grid.row_dry[row] / math.max(layer.dry, 1.0e-12) / wet - c_h, 0.0)
+            var r_on = chemistry.k_on * c_f * free_sites * wet
+            r_on = math.min(r_on, f_amount / dt)
+            let r_off = chemistry.k_off * h_amount
+            grid.fixed[halide * n + at] = a_amount - r_dev * dt
+            grid.fixed[silver * n + at] += r_dev * dt
+            grid.fixed[coupler * n + at] = q_amount - r_cpl * dt
+            grid.fixed[dir_coupler * n + at] = g_amount - r_dir * dt
+            grid.fixed[dye * n + at] += r_cpl * dt
+            grid.mobile[developer * n + at] = r_amount - 0.5 * r_dev * dt
+            grid.mobile[oxidized * n + at] = math.max(o_amount + (0.5 * r_dev - 0.5 * layer.equivalence * r_cpl - r_dir - r_lost) * dt, 0.0)
+            grid.mobile[bromide * n + at] = b_amount + r_dev * dt
+            if chemistry.k_release > 0.0:
+                grid.mobile[precursor * n + at] = p_amount + (r_dir - r_release) * dt
+                grid.mobile[inhibitor * n + at] = f_amount + (r_release - r_on + r_off) * dt
+            else:
+                grid.mobile[inhibitor * n + at] = f_amount + (r_dir - r_on + r_off) * dt
+            grid.fixed[bound * n + at] = h_amount + (r_on - r_off) * dt
+            let share = 1.0 / (f64)grid.columns
+            grid.books.developed += r_dev * dt * share
+            grid.books.coupled += r_cpl * dt * share
+            grid.books.dir_coupled += r_dir * dt * share
+            grid.books.oxidized_lost += r_lost * dt * share
+            grid.books.oxidized_used += (0.5 * layer.equivalence * r_cpl + r_dir + r_lost) * dt * share
+
+# mark: Transport =============================================================
+
+## Implicit diffusion across each row (`spread` = D·dt, µm²), the ends closed.
+func diffuse_across(grid: Grid*, species: usize, spread: f64, scratch: f64[]):
+    let m = grid.columns
+    if m < 2 or spread <= 0.0:
+        return
+    let n = grid.rows * m
+    let w = spread / (grid.width * grid.width)
+    for row in 0..<grid.rows:
+        let base = species * n + row * m
+        # (1 + 2w) n_i − w (n_i−1 + n_i+1) = old; the ends lose one neighbour.
+        for i in 0..<m:
+            let below = w if i > 0 else 0.0
+            let above = w if i + 1 < m else 0.0
+            scratch[i] = -below
+            scratch[m + i] = 1.0 + below + above
+            scratch[2 * m + i] = -above
+            scratch[3 * m + i] = grid.mobile[base + i]
+        solve_tridiagonal(scratch, m)
+        for i in 0..<m:
+            grid.mobile[base + i] = scratch[3 * m + i]
+
+## Implicit diffusion down each column (`spread` = D·dt), cell to cell through
+## both halves' resistance, the bath (holding `bath` mM) through the top
+## surface at `exchange` = h·dt µm, the base below closed. Counts what entered.
+func diffuse_down(grid: Grid*, species: usize, spread: f64, bath: f64, exchange: f64, scratch: f64[]):
+    let rows = grid.rows
+    let n = rows * grid.columns
+    if spread <= 0.0:
+        return
+    for column in 0..<grid.columns:
+        # Conductance (times dt) between row i and i+1: dt/(Δz_i/2D + Δz_i+1/2D),
+        # on concentrations (amount over wet thickness).
+        for i in 0..<rows:
+            let wet = grid.row_wet[i]
+            var down = 0.0
+            if i + 1 < rows:
+                down = 1.0 / (0.5 * wet / spread + 0.5 * grid.row_wet[i + 1] / spread)
+            var up = 0.0
+            if i > 0:
+                up = 1.0 / (0.5 * grid.row_wet[i - 1] / spread + 0.5 * wet / spread)
+            else:
+                # The surface: the bath's boundary layer, then half the top cell.
+                if exchange > 0.0:
+                    up = 1.0 / (1.0 / exchange + 0.5 * wet / spread)
+            scratch[i] = -(up / grid.row_wet[i - 1]) if i > 0 else 0.0
+            scratch[rows + i] = 1.0 + (up + down) / wet
+            scratch[2 * rows + i] = -(down / grid.row_wet[i + 1]) if i + 1 < rows else 0.0
+            scratch[3 * rows + i] = grid.mobile[species * n + i * grid.columns + column]
+            if i == 0:
+                scratch[3 * rows] += up * bath
+        solve_tridiagonal(scratch, rows)
+        let top = scratch[3 * rows]
+        # What crossed the surface this step (implicit: at the new top).
+        let surface = 1.0 / (1.0 / exchange + 0.5 * grid.row_wet[0] / spread) if exchange > 0.0 else 0.0
+        grid.books.entered[species] += surface * (bath - top / grid.row_wet[0]) / (f64)grid.columns
+        for i in 0..<rows:
+            grid.mobile[species * n + i * grid.columns + column] = scratch[3 * rows + i]
+
+## Solve the tridiagonal system in `s` (below, diagonal, above, right side,
+## each `m` long) in place: the solution replaces the right side (Thomas).
+func solve_tridiagonal(s: f64[], m: usize):
+    for i in 1..<m:
+        let factor = s[i] / s[m + i - 1]
+        s[m + i] -= factor * s[2 * m + i - 1]
+        s[3 * m + i] -= factor * s[3 * m + i - 1]
+    s[3 * m + m - 1] /= s[m + m - 1]
+    var i = m - 1
+    while i > 0:
+        i -= 1
+        s[3 * m + i] = (s[3 * m + i] - s[2 * m + i] * s[3 * m + i + 1]) / s[m + i]
+
+# mark: Tests =================================================================
+
+## A plain three-record colour negative for the solver's own tests (estimates,
+## not a stock): an overcoat, the blue record (a two-equivalent yellow
+## coupler), a scavenging interlayer, green (two-equivalent magenta), another
+## interlayer, red (four-equivalent cyan).
+func test_layers() -> Layer[7]:
+    return [Layer(dry = 1.0, cells = 1),
+            Layer(dry = 4.0, record = 2, coupler = 900.0, dir_coupler = 30.0, equivalence = 2.0, sites = 20.0),
+            Layer(dry = 1.0, scavenger = 200.0, cells = 1),
+            Layer(dry = 4.0, record = 1, coupler = 700.0, dir_coupler = 30.0, equivalence = 2.0, sites = 20.0),
+            Layer(dry = 1.0, scavenger = 200.0, cells = 1),
+            Layer(dry = 5.0, record = 0, coupler = 900.0, dir_coupler = 30.0, equivalence = 4.0, sites = 20.0),
+            Layer(dry = 1.0, cells = 1)]
+
+## A film `columns` wide, its records given `left` µmol/m² of developable
+## halide left of `split` and `right` after, developed 195 s (C-41's 3:15).
+func developed_test(columns: usize, split: usize, left: f64, right: f64, exchange: f64 = 10.0, step: f64 = 0.05,
+                    cells: usize = 2, width: f64 = 4.0, holds: f64[5] = [15.0, 0.0, 11.0, 0.0, 0.0]) -> Grid!:
+    var layers = test_layers()
+    for at in 0..<(usize)7:
+        if layers[at].record >= 0:
+            layers[at].cells = cells
+    var grid = try make_grid(layers, columns, width)
+    errdefer grid.release()
+    for column in 0..<columns:
+        for record in 0..<(i64)3:
+            expose(&grid, record, column, left if column < split else right)
+    let chemistry = Chemistry()
+    let bath = Bath(holds = holds, exchange = exchange)
+    try develop(&grid, &chemistry, &bath, 195.0, step)
+    return grid
+
+test "nothing is made or lost: silver, bromide, developer and couplers balance":
+    var grid = developed_test(8, 4, 1000.0, 150.0) catch failure:
+        assert(false)
+        return
+    defer grid.release()
+    let n = grid.rows * grid.columns
+    var start_halide = 0.0
+    for column in 0..<grid.columns:
+        start_halide += (1000.0 if column < 4 else 150.0) * 3.0
+    start_halide /= (f64)grid.columns
+    let silver_now = grid.fixed_total(halide) + grid.fixed_total(silver)
+    assert(math.abs(silver_now - start_halide) < 1.0e-9 * start_halide)
+    assert(math.abs(grid.fixed_total(silver) - grid.books.developed) < 1.0e-9 * start_halide)
+    # Bromide: what the bath brought plus one per silver developed.
+    let bromide_made = grid.mobile_total(bromide) - grid.books.entered[bromide]
+    assert(math.abs(bromide_made - grid.books.developed) < 1.0e-6 * grid.books.developed)
+    # Developer: what entered less half a molecule per silver.
+    let developer_left = grid.mobile_total(developer) - grid.books.entered[developer]
+    assert(math.abs(developer_left + 0.5 * grid.books.developed) < 1.0e-6 * grid.books.developed)
+    # Oxidized developer: made, used, escaped.
+    let oxidized_left = grid.mobile_total(oxidized) - grid.books.entered[oxidized]
+    assert(math.abs(oxidized_left - (0.5 * grid.books.developed - grid.books.oxidized_used)) < 1.0e-6 * grid.books.developed)
+    # Each dye molecule took one coupler.
+    var couplers = 0.0
+    for layer in test_layers():
+        couplers += layer.coupler
+    assert(math.abs(grid.fixed_total(coupler) + grid.fixed_total(dye) - couplers) < 1.0e-9 * couplers)
+    for at in 0..<(mobile_count * n):
+        assert(grid.mobile[at] >= -1.0e-12)
+    print(f"developed {grid.books.developed} µmol/m², dye {grid.fixed_total(dye)}, O lost {grid.books.oxidized_lost}")
+
+test "the uniform result converges in time step and depth":
+    var results: f64[3]
+    let steps: f64[3] = [0.02, 0.01, 0.01]
+    let cells: usize[3] = [2, 2, 4]
+    for k in 0..<(usize)3:
+        var grid = developed_test(1, 1, 800.0, 800.0, step = steps[k], cells = cells[k]) catch failure:
+            assert(false)
+            return
+        defer grid.release()
+        results[k] = grid.record_total(dye, 1, 0)
+    print(f"green dye: dt 0.02 {results[0]}, dt 0.01 {results[1]}, half the cells {results[2]}")
+    assert(math.abs(results[1] / results[0] - 1.0) < 0.01)
+    assert(math.abs(results[2] / results[1] - 1.0) < 0.02)
+
+test "edges emerge: the dense side's border denser, the thin side's fringe thinner":
+    let columns: usize = 120
+    var grid = developed_test(columns, 60, 1000.0, 120.0, width = 4.0) catch failure:
+        assert(false)
+        return
+    defer grid.release()
+    let far_dense = grid.record_total(dye, 1, 5)
+    let far_thin = grid.record_total(dye, 1, 114)
+    var border = 0.0
+    var fringe = 1.0e9
+    for column in 50..<(usize)60:
+        border = math.max(border, grid.record_total(dye, 1, column))
+    for column in 60..<(usize)70:
+        fringe = math.min(fringe, grid.record_total(dye, 1, column))
+    print(f"green dye: far dense {far_dense}, border {border}; far thin {far_thin}, fringe {fringe}")
+    assert(border > far_dense * 1.005 and fringe < far_thin * 0.995)
+
+test "less agitation develops less; in a dilute developer the dense areas most (compensation)":
+    # Large even patches, renewed at h 30 against 3 µm/s. A C-41-like bath
+    # (15 mM developer, 11 mM bromide): the dense patch falls a little more
+    # than the thin one (7 % against 1 %). A dilute bath (2 mM, no bromide):
+    # the developer itself runs out where much develops, so the dense patch
+    # falls far more (31 % against 7 %): stand development's compensation,
+    # from the developer's balance alone (the rates are this test's estimates).
+    let exchanges: f64[2] = [30.0, 3.0]
+    let baths: f64[4] = [15.0, 11.0, 2.0, 0.0]
+    var ratios: f64[4]
+    for b in 0..<(usize)2:
+        # Each patch its own large even area (one column: nothing beside it).
+        var dense: f64[2]
+        var thin: f64[2]
+        for k in 0..<(usize)2:
+            let holds: f64[5] = [baths[b * 2], 0.0, baths[b * 2 + 1], 0.0, 0.0]
+            var heavy = developed_test(1, 1, 1000.0, 1000.0, exchange = exchanges[k], holds = holds) catch failure:
+                assert(false)
+                return
+            defer heavy.release()
+            var light = developed_test(1, 1, 120.0, 120.0, exchange = exchanges[k], holds = holds) catch failure:
+                assert(false)
+                return
+            defer light.release()
+            dense[k] = heavy.record_total(dye, 1, 0)
+            thin[k] = light.record_total(dye, 1, 0)
+        ratios[b * 2] = dense[1] / dense[0]
+        ratios[b * 2 + 1] = thin[1] / thin[0]
+    print(f"h 3 over 30 µm/s: concentrated dense {ratios[0]} thin {ratios[1]}; dilute dense {ratios[2]} thin {ratios[3]}")
+    assert(ratios[0] < ratios[1] and ratios[1] < 1.0)
+    assert(ratios[2] < ratios[3] - 0.1)
