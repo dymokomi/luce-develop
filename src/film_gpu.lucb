@@ -68,8 +68,11 @@ pub struct FilmPasses:
     ## Film `scene` (the camera's values, `width` × `height`): `matrix` into AP1,
     ## `tables` and `aspect` for the lens vignetting, `atlas` the film's. The
     ## filmed scene, a texture these passes own until the next run.
+    ## With `statistical` false the statistical film is not made (the
+    ## stochastic render will replace it: an export's); what is returned then
+    ## is not yet the film.
     pub func run(device: gpu.Device, scene: gpu.Texture, tables: gpu.Texture, atlas: gpu.Texture, source: const Film*,
-                 matrix: f64[9], aspect: f64, width: u32, height: u32, veil: f64 = 0.0) -> gpu.Texture!:
+                 matrix: f64[9], aspect: f64, width: u32, height: u32, veil: f64 = 0.0, statistical: bool = true) -> gpu.Texture!:
         self.veil = veil
         self.device = device
         if self.kernel == none:
@@ -143,11 +146,12 @@ pub struct FilmPasses:
         self.last_plan = plan
         self.last_matrix = matrix
         self.last_aspect = aspect
-        try self.pass(spare, 4, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
-        # The duplicates between negative and print soften the developed image.
-        if plan.duplicated.radius > 0:
-            try self.pass(field, 1, spare, spare, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
-            try self.pass(spare, 1, field, field, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
+        if statistical:
+            try self.pass(spare, 4, exposed, field, tables, atlas, 0, 0, none_blur, plan, matrix, aspect, shown)
+            # The duplicates between negative and print soften the developed image.
+            if plan.duplicated.radius > 0:
+                try self.pass(field, 1, spare, spare, tables, atlas, 1, 0, plan.duplicated, plan, matrix, aspect)
+                try self.pass(spare, 1, field, field, tables, atlas, 0, 1, plan.duplicated, plan, matrix, aspect)
         try self.submit()
         return spare
 
@@ -371,7 +375,8 @@ pub func filmed_on_gpu(source: Film*, scene: const Scene*, matrix: f64[9], built
     try atlas_texture.upload(u8[]((u8*)atlas.data, atlas.length * 2))
     var passes = FilmPasses()
     defer passes.release()
-    var out = try passes.run(device, scene_texture, tables_texture, atlas_texture, source, matrix, aspect, width, height, veil)
+    var out = try passes.run(device, scene_texture, tables_texture, atlas_texture, source, matrix, aspect, width, height, veil,
+                             statistical = not grained)
     if grained:
         while true:
             if let resolved = try passes.refine(device, tables_texture, atlas_texture, samples, (f64)export_work, at_end = true):
