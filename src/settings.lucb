@@ -584,6 +584,31 @@ pub struct Look:
         try recipe.text_of(&self.settings.recipe, &out)
         return try interop.copy_text(out.text())
 
+    ## The output the recipe goes to (recipe.output_names).
+    pub func output() -> i64:
+        return (i64)recipe.output_of(&self.settings.recipe)
+
+    ## Go to output `at`, keeping the camera's stages.
+    pub func set_output(at: i64):
+        let now = self.settings.recipe
+        self.settings.recipe = recipe.chain((usize)at, now.has((i64)recipe.Stage.white_balance), now.has((i64)recipe.Stage.lens),
+                                            now.has((i64)recipe.Stage.filter))
+
+    ## Put an optional camera stage (white balance, lens, filter) in or take it
+    ## out, keeping the output.
+    pub func set_stage_used(stage: i64, used: bool):
+        let now = self.settings.recipe
+        var balance = now.has((i64)recipe.Stage.white_balance)
+        var lens = now.has((i64)recipe.Stage.lens)
+        var filter = now.has((i64)recipe.Stage.filter)
+        if stage == (i64)recipe.Stage.white_balance:
+            balance = used
+        elif stage == (i64)recipe.Stage.lens:
+            lens = used
+        elif stage == (i64)recipe.Stage.filter:
+            filter = used
+        self.settings.recipe = recipe.chain(recipe.output_of(&now), balance, lens, filter)
+
     ## Start from mode `at` (recipe.mode_names): its stages, its stock and the
     ## other settings it sets.
     pub func use_mode(at: i64):

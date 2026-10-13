@@ -294,10 +294,15 @@ let mode_spacing: f64 = 64.0
 
 ## Mode `at`'s recipe.
 pub func mode(at: usize) -> Recipe:
+    return chained(mode_chains[at])
+
+## The recipe of stages `stages` names ("key|key|…"), each wired to the one
+## before, the last displayed.
+func chained(stages: str) -> Recipe:
     var out = Recipe(display = -1)
     for index in 0..<stage_count:
         out.nodes[index].input = -1
-    let bytes = mode_chains[at].bytes
+    let bytes = stages.bytes
     var first: usize = 0
     var previous: i64 = -1
     var row = 0.0
@@ -314,6 +319,56 @@ pub func mode(at: usize) -> Recipe:
             row += 1.0
     out.display = previous
     return out
+
+# mark: Outputs =================================================================
+
+## What a developed negative or slide goes to, each its chain of stages after
+## Develop: a telecine (scanned, graded, seen on a display), a release print
+## (Vision 2383, projected), a slide on a lightbox, a print on paper, or a
+## digital intermediate (scanned, graded, recorded back to film, printed and
+## projected). The app's Print mode picks one; every recipe is the camera's
+## stages, the film and its development, then an output.
+pub let output_count: usize = 5
+pub let output_names: str[5] = ["Telecine", "Release Print", "Lightbox", "Paper Print", "Digital Intermediate"]
+let output_chains: str[5] = ["scan|grade|view|easel", "print|project|easel", "lightbox|easel", "paper|easel", "scan|grade|record|print|project|easel"]
+
+pub func output_total() -> i64:
+    return (i64)output_count
+pub func output_name(at: i64) -> str:
+    return output_names[(usize)at]
+
+## The recipe of output `output`, the light through a white balance, a lens
+## and a filter where asked (each light in, light out, before the film).
+pub func chain(output: usize, balance: bool, lens: bool, filter: bool) -> Recipe:
+    var text: Buffer
+    defer text.destroy()
+    text.put_text("file") catch failure:
+        _ = failure
+    for (stage, wanted) in [("white_balance", balance), ("exposure", true), ("lens", lens), ("filter", filter), ("film", true), ("develop", true)]:
+        if wanted:
+            text.put_text("|") catch failure:
+                _ = failure
+            text.put_text(stage) catch failure:
+                _ = failure
+    text.put_text("|") catch failure:
+        _ = failure
+    text.put_text(output_chains[output if output < output_count else output_count - 1]) catch failure:
+        _ = failure
+    return chained(text.text())
+
+## The output a recipe goes to: the last of its presentation stages that tells
+## them apart (a recorder: a digital intermediate; paper; a lightbox; a print;
+## else a telecine).
+pub func output_of(recipe: const Recipe*) -> usize:
+    if recipe.has((i64)Stage.record):
+        return 4
+    if recipe.has((i64)Stage.paper):
+        return 3
+    if recipe.has((i64)Stage.lightbox):
+        return 2
+    if recipe.has((i64)Stage.print):
+        return 1
+    return 0
 
 ## The stock mode `at` starts with (the film_stock value), and the other
 ## settings it sets (text form, "" none).
@@ -449,6 +504,15 @@ test "a stage goes into the chain where it is put":
     recipe.insert_after((i64)Stage.lens, (i64)Stage.exposure)
     assert(recipe.nodes[(usize)Stage.lens].input == (i64)Stage.exposure and recipe.nodes[(usize)Stage.film].input == (i64)Stage.lens)
     assert(recipe.active((i64)Stage.lens) and recipe.path().count == 9)
+
+test "outputs chain the camera, the film and the output's stages":
+    let printed = chain(1, true, false, true)
+    assert(printed.has((i64)Stage.white_balance) and printed.has((i64)Stage.filter) and not printed.has((i64)Stage.lens))
+    assert(printed.display == (i64)Stage.easel and printed.path().count == 9)
+    assert(output_of(&printed) == 1)
+    for at in 0..<output_count:
+        let made = chain(at, false, true, false)
+        assert(output_of(&made) == at and made.path().count > 0)
 
 test "the text form round-trips":
     var recipe = mode(1)
