@@ -104,6 +104,11 @@ pub func reference_of(process: i64, minutes: f64, celsius: f64, agitation: i64 =
     # and pH). ECN-2 shares both (an estimate: H-24 gives no such chart).
     chemistry.k_develop = 0.06
     chemistry.delay = 90.0
+    # Bound inhibitor slows development (rate over 1 + K·c, K 1 /mM, an
+    # estimate). Poisoning instead (`Chemistry.poisons`, at Kodak Table I's
+    # strengths) predicts US 6,190,848's bilayer as measured but decides every
+    # grain of this coating within seconds: the calibration cannot reach
+    # Portra's densest points and ±40 s changes nothing (film_chemistry_patents).
     # Arrhenius from the process's own temperature.
     let gas = 8.314462618
     let own = standard.celsius + 273.15
@@ -439,4 +444,5 @@ test "an edge against Kodak Gold 200's measured trace (predicted)":
     print(f"edge: plateaus {far_low} {far_high} (step {step}); border {border - far_high} ({(border - far_high) / step * 100.0} %) {((f64)border_at + 0.5) * width - 200.0} µm in; fringe {far_low - fringe} ({(far_low - fringe) / step * 100.0} %); Gold 200: 23 % and 2.4 %, 12 µm")
     assert(border > far_high and fringe < far_low)
     assert(math.abs(((f64)border_at + 0.5) * width - 200.0 - 12.0) < 6.0)
+
 

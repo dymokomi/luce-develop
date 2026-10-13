@@ -209,14 +209,21 @@ pixel size only decides how finely the film is sampled.
    and 1.07 with 0.45 and 0.692 g/m², against the measured 1.23 (Table II)
    and 1.45 (Table III).
 
-   Three checks now agree: cross-layer and lateral inhibition are too weak
-   (this bilayer, Portra's single-colour gammas, Gold's border). Two causes
-   to test next: the inhibitor here only slows development, so areas that
-   develop nearly to completion barely notice it, where a real DIR inhibitor
-   adsorbs and stops a grain from developing at all; and about 85 % of what
-   is released escapes to the bath. Then US 6,309,811's twelve layers
-   (ML-1–4: IDIR-6 against IDIR-2, with and without IEH-A) as the held-out
-   test of the change. Each step releases inhibitor with the
+   Three checks agree that inhibition which only slows development is too
+   weak across layers and edges (this bilayer, Portra's single-colour gammas,
+   Gold's border); about 85 % of what is released also escapes to the bath.
+   Inhibition that poisons grains instead (each grain developing or poisoned
+   first; `Chemistry.poisons`), its strengths refitted on Table I (IDIR-2 2.5,
+   CDIR-2 6.7, IDIR-6 1.4, CDIR-1 7.4 /mM), predicts the bilayer as measured:
+   R = 1.225 against 1.23, nothing fitted to it. But on the multilayer
+   reference coating, with its many DIRs, it decides every grain within
+   seconds: Portra cannot be calibrated and ±40 s of development changes
+   nothing, against Kodak's Z-131 chart, at any rate tried (0.004–0.1 /s). So
+   the reference keeps the slowing form, and the truth lies between: grains
+   poisoned at their start of development but not all decided at once
+   (adsorption's rates and reversibility on silver bromide, the inhibitor's
+   release as dye forms, its escape). That is the next model, with US
+   6,309,811's twelve layers (ML-1–4) as its held-out test. Each step releases inhibitor with the
    dye it forms under the inhibitor already released (DIR couplers react as
    dye forms); the developed curve is solved so an even field still develops
    to the published one (fixed point, damped; cached per development).

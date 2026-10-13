@@ -59,11 +59,12 @@ func developable_share(step: usize) -> f64:
 ## Develop `layers` in C-41 at every step: each record given `exposed[record]`
 ## (false: unexposed) its halide's developable share; the dye each record
 ## makes per step (µmol/m²), steps far apart (no edge between them).
-func developed_steps(layers: const Layer[], restraints: f64[2], exposed: bool[3]) -> f64[]!:
+func developed_steps(layers: const Layer[], restraints: f64[2], exposed: bool[3], poisons: bool = false) -> f64[]!:
     var reference = try film_chemistry_reference.reference_of(1, 3.25, 37.8)
     defer reference.release()
     var chemistry = reference.chemistry
     chemistry.restraints = restraints
+    chemistry.poisons = poisons
     var grid = try film_chemistry.make_grid(layers, step_count, 1.0e6)
     defer grid.release()
     for step in 0..<step_count:
@@ -102,21 +103,21 @@ func single_layer(dir: f64, mass: f64, timed: bool) -> Layer[2]:
                   k_couple = 4.45, k_dir = 7.3, dir_coupler = dir, timed = timed, halide = silver_umol, sites = sites_of(silver_umol), cells = 4)]
 
 ## The share Table I's DIR cuts the single layer's contrast by, at restraint `restraint`.
-func contrast_cut(dir: f64, mass: f64, timed: bool, restraint: f64) -> f64!:
-    let check = try developed_steps(single_layer(0.0, mass, timed), [restraint, restraint], [false, true, false])
+func contrast_cut(dir: f64, mass: f64, timed: bool, restraint: f64, poisons: bool = false) -> f64!:
+    let check = try developed_steps(single_layer(0.0, mass, timed), [restraint, restraint], [false, true, false], poisons)
     defer free(check) in memory.heap
-    let dosed = try developed_steps(single_layer(dir, mass, timed), [restraint, restraint], [false, true, false])
+    let dosed = try developed_steps(single_layer(dir, mass, timed), [restraint, restraint], [false, true, false], poisons)
     defer free(dosed) in memory.heap
     return 1.0 - contrast(dosed, 1) / contrast(check, 1)
 
 ## The restraint (1/mM) at which the DIR cuts the contrast by `cut`: bisection
 ## in its log.
-func restraint_for(cut: f64, mass: f64, timed: bool) -> f64!:
+func restraint_for(cut: f64, mass: f64, timed: bool, poisons: bool = false) -> f64!:
     var low = 0.01
     var high = 1.0e4
     for _ in 0..<30:
         let middle = math.sqrt(low * high)
-        if try contrast_cut(55.0, mass, timed, middle) < cut:
+        if try contrast_cut(55.0, mass, timed, middle, poisons) < cut:
             low = middle
         else:
             high = middle
@@ -171,3 +172,29 @@ test "Kodak's DIR strengths fix each inhibitor's restraint; the bilayer's interi
         print(f"bilayer, M-1 {receiver_coupler} g/m²: R = {ratio}; receiver's most dye {green[(step_count - 1) * 3 + 1]} µmol/m² (Kodak: 1.23 in Table II, 1.45 in Table III)")
         # Recorded, not yet met: the interimage runs the right way but weak.
         assert(ratio > 0.98 and ratio < 1.5)
+
+test "poisoning grains instead of slowing them predicts the bilayer as measured":
+    # Each inhibitor's strength refitted on Table I with poisoning: IDIR-2
+    # 2.5 /mM, CDIR-2 6.7, IDIR-6 1.4, CDIR-1 7.4. The bilayer with Table I's
+    # coupler level then gives R = 1.225 (Kodak 1.23), nothing fitted to it.
+    # But on the multilayer reference coating this form decides every grain
+    # within seconds (its DIRs are many): Portra cannot be calibrated and
+    # ±40 s changes nothing, against Kodak's Z-131. The truth lies between:
+    # docs/PHYSICAL-FILM.md, part 4.
+    let mild = restraint_for(0.253, 979.66, true, true) catch failure:
+        assert(false)
+        return
+    let strong = restraint_for(0.671, 722.96, false, true) catch failure:
+        assert(false)
+        return
+    let green = developed_steps(bilayer(0.692), [mild, strong], [false, true, false], true) catch failure:
+        assert(false)
+        return
+    defer free(green) in memory.heap
+    let both = developed_steps(bilayer(0.692), [mild, strong], [false, true, true], true) catch failure:
+        assert(false)
+        return
+    defer free(both) in memory.heap
+    let ratio = contrast(green, 1) / contrast(both, 1)
+    print(f"poisoning: IDIR-2 {mild} /mM, CDIR-2 {strong} /mM; bilayer R = {ratio} (Kodak 1.23)")
+    assert(math.abs(ratio - 1.23) < 0.05)

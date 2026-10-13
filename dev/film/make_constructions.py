@@ -16,7 +16,9 @@ Per layer, top (bath side) first:
   layer's own dye; their silver per dye, the µmol-weighted mean of 2 and 4;
 - DIR coupler: DIR and DIAR couplers (any dye), released through a timing
   group (film_chemistry's k_release) when most of the layer's carry one,
-  else directly;
+  else directly; its inhibitor strong (kind 1: alkyl or aryl
+  mercaptotetrazoles) or mild (kind 0: benzotriazoles and ester-bearing
+  tetrazoles) by what most of its DIR releases;
 - coupling rates (1/(mM·s)): Kodak US 5,104,776's effective constants for
   milled dispersions with CD-4, by class (not these patents' molecules):
   yellow image 1.25, magenta image 4.45, masking 17, DIR 7.3; cyan image
@@ -116,6 +118,7 @@ def build(name):
         rate_sum = 0.0
         dir_total = 0.0
         timed = 0.0
+        strong = 0.0
         scavenger_umol = 0.0
         for cid, mg in parts.items():
             c = compounds.get(cid) or {}
@@ -130,6 +133,9 @@ def build(name):
             umol = mg / mw * 1000.0
             if 'dir' in role or 'diar' in role:
                 dir_total += umol
+                fragment = str(c.get('inhibitor_fragment', '')).lower()
+                if 'mercaptotetrazole' in fragment and 'carbonyl' not in fragment:
+                    strong += umol
                 if str(c.get('timing_group', '')).startswith('yes'):
                     timed += umol
                 continue
@@ -160,6 +166,7 @@ def build(name):
             'dir': round(dir_total, 3),
             'k_couple': round(rate_sum / coupler, 4) if coupler > 0 else 0.0,
             'k_dir': 7.3 if dir_total > 0 else 0.0,
+            'kind': 1 if dir_total > 0 and strong > dir_total / 2 else 0,
             'timed': 'true' if dir_total > 0 and timed > dir_total / 2 else 'false',
             'scavenger': round(1.0 * scavenger_umol / wet, 4),
             'halide': round(halide, 2),
@@ -175,7 +182,7 @@ def emit(func, label, layers):
     for L in layers:
         rows.append(f"        # {L['name']}: {L['role']}\n"
                     f"        Layer(dry = {L['dry']}, record = {L['record']}, coupler = {L['coupler']}, equivalence = {L['equivalence']}, "
-                    f"k_couple = {L['k_couple']}, k_dir = {L['k_dir']}, dir_coupler = {L['dir']}, timed = {L['timed']}, scavenger = {L['scavenger']}, halide = {L['halide']}, "
+                    f"k_couple = {L['k_couple']}, k_dir = {L['k_dir']}, dir_coupler = {L['dir']}, inhibitor_kind = {L['kind']}, timed = {L['timed']}, scavenger = {L['scavenger']}, halide = {L['halide']}, "
                     f"sites = {L['sites']}, cells = {L['cells']})")
     return (f"## {label}\npub func {func}() -> Layer[{len(layers)}]:\n    return [\n" + ",\n".join(rows) + "]\n")
 

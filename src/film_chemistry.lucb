@@ -55,7 +55,9 @@ pub let dir_coupler: usize = 3
 pub let dye: usize = 4
 pub let bound: usize = 5
 pub let bound_b: usize = 6
-pub let fixed_count: usize = 7
+## Halide the inhibitor poisoned (`Chemistry.poisons`): it never develops.
+pub let poisoned: usize = 7
+pub let fixed_count: usize = 8
 
 ## One layer of the coating, top (bath side) first.
 pub struct Layer:
@@ -100,6 +102,11 @@ pub struct Chemistry:
     pub var half_developer: f64 = 2.0
     pub var bromide_restraint: f64 = 0.02
     pub var restraints: f64[2] = [1.0, 1.0]
+    ## How bound inhibitor acts: false, it slows development (the rate over
+    ## 1 + K·c); true, it poisons grains, each grain developing or being
+    ## poisoned first (the halide left goes at k·g·(c_R/(K_R + c_R) +
+    ## K·c), the poisoned share never develops).
+    pub var poisons: bool = false
     ## Coupling (1/(mM·s)), where a layer does not give its own: Kodak
     ## US 5,104,776's effective rates for milled dispersions with CD-4 (a
     ## magenta image coupler 4.45, a DIR coupler 7.3; the assay's temperature
@@ -290,10 +297,14 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             let c_h_b = h_b_amount / wet
             # Development, limited by the halide left and by the developer
             # (half a molecule per silver).
-            let restraint = 1.0 + chemistry.bromide_restraint * c_b + chemistry.restraints[0] * c_h + chemistry.restraints[1] * c_h_b
+            let inhibition = chemistry.restraints[0] * c_h + chemistry.restraints[1] * c_h_b
+            let restraint = 1.0 + chemistry.bromide_restraint * c_b + (0.0 if chemistry.poisons else inhibition)
             # First order in the halide left: integrated exactly over the step.
             let rate = chemistry.k_develop * started * c_r / (chemistry.half_developer + c_r) / restraint
-            var r_dev = a_amount * (1.0 - math.exp(-rate * dt)) / dt
+            let poisoning = chemistry.k_develop * started * inhibition if chemistry.poisons else 0.0
+            let taken = a_amount * (1.0 - math.exp(-(rate + poisoning) * dt)) / dt
+            var r_dev = taken * rate / math.max(rate + poisoning, 1.0e-300)
+            let r_poison = taken - r_dev
             r_dev = math.min(r_dev, 2.0 * r_amount / dt)
             # The oxidized developer: made at half the development's rate,
             # used first order in itself (coupling, DIR coupling, sulfite and
@@ -317,7 +328,8 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             r_dir = math.min(r_dir, g_amount / dt)
             # The sites both inhibitors share.
             let free_sites = math.max(layer.sites * grid.row_dry[row] / math.max(layer.dry, 1.0e-12) / wet - c_h - c_h_b, 0.0)
-            grid.fixed[halide * n + at] = a_amount - r_dev * dt
+            grid.fixed[halide * n + at] = a_amount - (r_dev + r_poison) * dt
+            grid.fixed[poisoned * n + at] += r_poison * dt
             grid.fixed[silver * n + at] += r_dev * dt
             grid.fixed[coupler * n + at] = q_amount - r_cpl * dt
             grid.fixed[dir_coupler * n + at] = g_amount - r_dir * dt
