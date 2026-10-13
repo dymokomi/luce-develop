@@ -51,6 +51,7 @@ pub func export(source: str, settings: str, target: str, format: i64, quality: i
     var opened = try scene.open(source, (usize)edge)
     defer opened.close()
     let wanted = parse(settings)
+    try opened.turn((i64)wanted.get(.geometry_turn))
     if format == jpeg:
         var picture = try process.render(&opened, wanted, output, samples = grain_samples)
         defer picture.close()

@@ -148,6 +148,15 @@ pub struct Scene:
             out.to_camera = xyz.invert(xyz.Matrix3(m)).m
         return out
 
+    ## Turn the picture `quarters` quarter turns clockwise (the settings'
+    ## Turn, geometry_turn): applied before everything else, as the camera's
+    ## own orientation is.
+    pub func turn(quarters: i64) -> !:
+        let wrapped = ((quarters % 4) + 4) % 4
+        # As the EXIF orientations that turn a picture by those quarters.
+        let orientations: u64[4] = [1, 6, 3, 8]
+        try self.orient(orientations[(usize)wrapped])
+
     ## Turn the pixels upright from EXIF orientation `orientation` (1–8; other
     ## values leave them as they are). 5–8 swap the width and height.
     func orient(orientation: u64) -> !:
@@ -195,6 +204,21 @@ func upright_source(orientation: u64, x: usize, y: usize, width: usize, height: 
         7 => (width - 1 - y, height - 1 - x)
         8 => (width - 1 - y, x)
         _ => (x, y)
+
+test "a quarter turn clockwise puts the left column on top":
+    # 2 × 1: a dark pixel left of a bright one; turned, 1 × 2 with the dark on top.
+    var picture = Scene()
+    picture.columns = 2
+    picture.rows = 1
+    picture.pixels = try new f16[8] --- in memory.heap
+    for at in 0..<(usize)8:
+        picture.pixels[at] = (f16)(0.0 if at < 4 else 1.0)
+    defer picture.close()
+    try picture.turn(1)
+    assert(picture.columns == 1 and picture.rows == 2)
+    assert((f64)picture.pixels[0] == 0.0 and (f64)picture.pixels[4] == 1.0)
+    try picture.turn(-1)
+    assert(picture.columns == 2 and (f64)picture.pixels[0] == 0.0)
 
 func multiply(a: f64[9], b: f64[9]) -> f64[9]:
     var out: f64[9]

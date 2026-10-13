@@ -142,8 +142,11 @@ func developing() -> Developing:
 pub struct Renderer:
     var loading: Loading*?
     var worker: thread.Handle
-    ## The scene shown, and whether its pixels still need to go up.
+    ## The scene shown, and whether its pixels still need to go up; the
+    ## quarter turns its pixels have had, and the settings' (geometry_turn).
     var shown: Scene
+    var turned: i64
+    var turn_wanted: i64
     var shown_serial: u64
     var upload: bool
     ## Output A, always drawn, and output B, drawn right of `split` (0..1 of
@@ -197,6 +200,7 @@ pub struct Renderer:
     pub func show(shown: Scene):
         self.shown.close()
         self.shown = shown
+        self.turned = 0
         self.upload = self.shown.width() > 0
 
     ## Show nothing.
@@ -218,6 +222,7 @@ pub struct Renderer:
             return false
         self.shown.close()
         self.shown = loading.done
+        self.turned = 0
         loading.done = Scene()
         self.shown_serial = loading.done_serial
         memory.copy(self.problem[..<loading.failure_length], loading.failure[..<loading.failure_length], loading.failure_length)
@@ -279,6 +284,7 @@ pub struct Renderer:
         if self.watching:
             self.watch_began = time.now()
             self.watch_running = true
+        self.turn_wanted = (i64)settings.get(.geometry_turn)
         self.a.take(compile(&settings))
         self.comparing = settings.recipe.comparing()
         if self.comparing:
@@ -453,6 +459,11 @@ pub struct Renderer:
             self.shader = shader
             self.pipeline = pipeline
         let device = self.device else return
+        # Another Turn: the pixels turned by the difference, and up again.
+        if self.shown.width() > 0 and self.turned != self.turn_wanted:
+            try self.shown.turn(self.turn_wanted - self.turned)
+            self.turned = self.turn_wanted
+            self.upload = true
         if self.upload:
             if let old = self.scene_texture:
                 var gone = old

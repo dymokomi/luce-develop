@@ -132,11 +132,12 @@ pub enum Parameter as u8:
     paper_magenta = 115
     paper_cyan = 116
     view = 117
+    geometry_turn = 118
 
 ## How many parameters there are.
-pub let parameter_count: usize = 118
+pub let parameter_count: usize = 119
 
-pub let parameters: ParameterSpec[118] = [
+pub let parameters: ParameterSpec[119] = [
     ParameterSpec("temperature", "Temperature", "White Balance", 0.0, 50000.0, 0.0, 0),
     ParameterSpec("tint", "Tint", "White Balance", -150.0, 150.0, 0.0, 0),
     ParameterSpec("exposure", "Exposure", "Exposure", -6.0, 6.0, 0.0, 2),
@@ -254,4 +255,5 @@ pub let parameters: ParameterSpec[118] = [
     ParameterSpec("paper_yellow", "Yellow", "Paper", 0.0, 200.0, 0.0, 0),
     ParameterSpec("paper_magenta", "Magenta", "Paper", 0.0, 200.0, 0.0, 0),
     ParameterSpec("paper_cyan", "Cyan", "Paper", 0.0, 200.0, 0.0, 0),
-    ParameterSpec("view", "View", "View", 0.0, 4.0, 0.0, 0)]
+    ParameterSpec("view", "View", "View", 0.0, 4.0, 0.0, 0),
+    ParameterSpec("geometry_turn", "Turn", "Crop", 0.0, 3.0, 0.0, 0)]

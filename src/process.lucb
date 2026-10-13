@@ -299,4 +299,5 @@ pub func render16(source: const Scene*, settings: Settings, output: view.Output 
 pub func render_file(path: str, settings: Settings, edge: i64) -> interop.Reference[Picture]!:
     var opened = try scene.open(path, (usize)edge)
     defer opened.close()
+    try opened.turn((i64)settings.get(.geometry_turn))
     return try adopt(try render(&opened, settings))
