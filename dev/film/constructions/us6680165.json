@@ -1,0 +1,1151 @@
+{
+ "reference": "US6680165B1 Example 6, comparative 6.1 (Tables VIII and IX)",
+ "label": "Kodak patent reference construction US6680165 Ex.6.1 (C-41 colour negative) - not a commercial stock",
+ "title": "US 6,680,165 B1 (Eastman Kodak, 20 Jan 2004) - cyan coupler dispersion with phenolic activator",
+ "sources": [
+  "https://patents.google.com/patent/US6680165B1/en",
+  "https://patentimages.storage.googleapis.com/ed/68/fa/ec4d396ccef365/US6680165.pdf"
+ ],
+ "units": {
+  "laydowns": "'mg/sq meter' as printed in Table VIII; P1 per layer printed in Table IX as g/m2 (converted x1000 here, original kept in source_note)",
+  "grain": "Diameter (um), Thickness (um), % bromide, Dye load '(mm/m)' as printed"
+ },
+ "example_6_1": {
+  "type": "Comp",
+  "P1_dispersion_formula_printed": "1.0:1.0 P1:S1 (ratio by weight)",
+  "P1_total_g_m2": 1.045,
+  "P1_layer2_g_m2": 0.645,
+  "P1_layer3_g_m2": 0.33,
+  "P1_layer4_g_m2": 0.07,
+  "red_contrast": 0.57,
+  "check": "0.645+0.330+0.070 = 1.045 (consistent)"
+ },
+ "additives_not_quantified": "'The above contains sequestrants, antifoggants, surfactants, antistat, matte beads and lubricants as is known in the art. The film also contains a hardener at 1.8% of total gel.'",
+ "processing": {
+  "name": "KODAK FLEXICOLOR C-41 (Example 6 text: 'processed using KODAK FLEXICOLOR C-41 chemistry'); status M red density measured",
+  "steps_from_table_II_single_layer_examples_procedure_A": [
+   {
+    "step": "C-41 Developer",
+    "time_s": 120,
+    "agitation": "Nitrogen"
+   },
+   {
+    "step": "Acetic Acid Stop Bath",
+    "time_s": 30,
+    "agitation": "Nitrogen"
+   },
+   {
+    "step": "Flexicolor III Bleach",
+    "time_s": 180,
+    "agitation": "Air"
+   },
+   {
+    "step": "Wash",
+    "time_s": 180
+   },
+   {
+    "step": "Fix",
+    "time_s": 240,
+    "agitation": "Nitrogen"
+   },
+   {
+    "step": "Wash",
+    "time_s": 180
+   },
+   {
+    "step": "Photoflow (wetting agent)",
+    "time_s": 30
+   }
+  ],
+  "temperature": "100 F (37.8 C) - Table II",
+  "caveat": "Table II is stated for the single-layer examples 1-5; Example 6 only says C-41 chemistry, so applying Table II times to 6.1 is an inference (note the 120 s developer differs from the standard C-41 3:15)"
+ },
+ "layers": [
+  {
+   "position": 0,
+   "name": "Support",
+   "role": "support",
+   "description": "Not specified for Example 6 (text: 'may also be coated on a support, such as polyethylene naphthalate, containing a magnetic recording layer'). Earlier single-layer examples used cellulose acetate butyrate.",
+   "components": []
+  },
+  {
+   "position": 1,
+   "layer_number": 1,
+   "name": "Layer 1",
+   "role": "antihalation layer (grey silver + filter dyes) - role inferred from contents",
+   "components": [
+    {
+     "kind": "silver",
+     "name_printed": "Gray silver",
+     "laydown_mg_m2": 150
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-2",
+     "laydown_mg_m2": 16.1
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-2",
+     "laydown_mg_m2": 32
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-3",
+     "laydown_mg_m2": 2.7
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-4",
+     "laydown_mg_m2": 3.8
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-5",
+     "laydown_mg_m2": 75
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-5",
+     "laydown_mg_m2": 97
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1991
+    }
+   ]
+  },
+  {
+   "position": 2,
+   "layer_number": 2,
+   "name": "Layer 2",
+   "role": "slow red-sensitive (cyan) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow cyan emulsion",
+     "laydown_mg_m2": 209,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "S cyan (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.8,
+      "thickness_um": 0.11,
+      "bromide_pct_printed": 95.5,
+      "iodide_pct_inferred": 4.5,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.82,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "C-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow-slow cyan emulsion",
+     "laydown_mg_m2": 331,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "SS cyan (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.43,
+      "thickness_um": 0.11,
+      "bromide_pct_printed": 99.5,
+      "iodide_pct_inferred": 0.5,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.66,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "C-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "P1",
+     "laydown_mg_m2": 645.0,
+     "source_note": "Table IX ex. 6.1 prints 0.645 g/m2 (Table VIII says 'Table XI or Table X' - sic)"
+    },
+    {
+     "kind": "compound",
+     "id": "S1",
+     "laydown_mg_m2": 645.0,
+     "source_note": "coupler solvent dibutyl sebacate; Table IX 6.1 'P1 Dispersion Formula' 1.0:1.0 P1:S1 by weight, so S1 = P1 weight (derived)"
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-2",
+     "laydown_mg_m2": 75
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-3",
+     "laydown_mg_m2": 12
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-4",
+     "laydown_mg_m2": 13
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-6",
+     "laydown_mg_m2": 21
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 7.4
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1804
+    }
+   ]
+  },
+  {
+   "position": 3,
+   "layer_number": 3,
+   "name": "Layer 3",
+   "role": "mid red-sensitive (cyan) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Mid cyan emulsion",
+     "laydown_mg_m2": 555,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "M cyan (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 1.24,
+      "thickness_um": 0.12,
+      "bromide_pct_printed": 96.3,
+      "iodide_pct_inferred": 3.7,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 1.0,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "C-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "P1",
+     "laydown_mg_m2": 330.0,
+     "source_note": "Table IX ex. 6.1 prints 0.33 g/m2 (Table VIII says 'Table XI or Table X' - sic)"
+    },
+    {
+     "kind": "compound",
+     "id": "S1",
+     "laydown_mg_m2": 330.0,
+     "source_note": "coupler solvent dibutyl sebacate; Table IX 6.1 'P1 Dispersion Formula' 1.0:1.0 P1:S1 by weight, so S1 = P1 weight (derived)"
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-3",
+     "laydown_mg_m2": 72
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-4",
+     "laydown_mg_m2": 32
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-6",
+     "laydown_mg_m2": 17
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-7",
+     "laydown_mg_m2": 70,
+     "note": "Coup-7 is a yellow image coupler; printed in this cyan layer as shown (verified against PDF image) - possibly intended, possibly a misprint"
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 8.9
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1150
+    }
+   ]
+  },
+  {
+   "position": 4,
+   "layer_number": 4,
+   "name": "Layer 4",
+   "role": "fast red-sensitive (cyan) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast cyan emulsion",
+     "laydown_mg_m2": 525,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "F cyan (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 2.5,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 96.3,
+      "iodide_pct_inferred": 3.7,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.89,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "C-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast-fast cyan emulsion",
+     "laydown_mg_m2": 250,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "FF cyan (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 3.9,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 96.3,
+      "iodide_pct_inferred": 3.7,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.79,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "C-2"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "P1",
+     "laydown_mg_m2": 70.0,
+     "source_note": "Table IX ex. 6.1 prints 0.07 g/m2 (Table VIII says 'Table XI or Table X' - sic)"
+    },
+    {
+     "kind": "compound",
+     "id": "S1",
+     "laydown_mg_m2": 70.0,
+     "source_note": "coupler solvent dibutyl sebacate; Table IX 6.1 'P1 Dispersion Formula' 1.0:1.0 P1:S1 by weight, so S1 = P1 weight (derived)"
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-2",
+     "laydown_mg_m2": 32
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-3",
+     "laydown_mg_m2": 30
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-4",
+     "laydown_mg_m2": 45
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-6",
+     "laydown_mg_m2": 50
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 14.1
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 977
+    }
+   ]
+  },
+  {
+   "position": 5,
+   "layer_number": 5,
+   "name": "Layer 5",
+   "role": "interlayer (scavenger) - role inferred",
+   "components": [
+    {
+     "kind": "compound",
+     "id": "Coup-4",
+     "laydown_mg_m2": 16.1
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-2",
+     "laydown_mg_m2": 25
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 539
+    }
+   ]
+  },
+  {
+   "position": 6,
+   "layer_number": 6,
+   "name": "Layer 6",
+   "role": "slowest green-sensitive (magenta) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow-Slow magenta emul",
+     "laydown_mg_m2": 365,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "SS magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.53,
+      "thickness_um": 0.083,
+      "bromide_pct_printed": 98.7,
+      "iodide_pct_inferred": 1.3,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.89,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-8",
+     "laydown_mg_m2": 180
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-9",
+     "laydown_mg_m2": 101
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 4.7
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1168
+    }
+   ]
+  },
+  {
+   "position": 7,
+   "layer_number": 7,
+   "name": "Layer 7",
+   "role": "slow/mid green-sensitive (magenta) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow Slow magenta emul",
+     "laydown_mg_m2": 170,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "SS magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.53,
+      "thickness_um": 0.083,
+      "bromide_pct_printed": 98.7,
+      "iodide_pct_inferred": 1.3,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.89,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow Magenta emulsion",
+     "laydown_mg_m2": 35,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "S magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.47,
+      "thickness_um": 0.12,
+      "bromide_pct_printed": 97.0,
+      "iodide_pct_inferred": 3.0,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 1.04,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Mid magenta emulsion",
+     "laydown_mg_m2": 545,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "M magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 1.01,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 95.5,
+      "iodide_pct_inferred": 4.5,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 1.03,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-8",
+     "laydown_mg_m2": 308
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-9",
+     "laydown_mg_m2": 73
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-5",
+     "laydown_mg_m2": 29.1
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-10",
+     "laydown_mg_m2": 7
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 10.4
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1751
+    }
+   ]
+  },
+  {
+   "position": 8,
+   "layer_number": 8,
+   "name": "Layer 8",
+   "role": "fast green-sensitive (magenta) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast magenta emulsion",
+     "laydown_mg_m2": 560,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "F magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 1.86,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 95.5,
+      "iodide_pct_inferred": 4.5,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.95,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast-fast magenta emul.",
+     "laydown_mg_m2": 440,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "FF magenta (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 2.9,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 96.3,
+      "iodide_pct_inferred": 3.7,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.85,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "M-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-2",
+     "laydown_mg_m2": 2.5
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-8",
+     "laydown_mg_m2": 85
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-9",
+     "laydown_mg_m2": 82
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-10",
+     "laydown_mg_m2": 16
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-5",
+     "laydown_mg_m2": 13
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 6.8
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1276
+    }
+   ]
+  },
+  {
+   "position": 9,
+   "layer_number": 9,
+   "name": "Layer 9",
+   "role": "yellow filter interlayer - role inferred (Dye-1 blue absorber)",
+   "components": [
+    {
+     "kind": "compound",
+     "id": "Coup-11",
+     "laydown_mg_m2": 16.1
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-2",
+     "laydown_mg_m2": 25
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-1",
+     "laydown_mg_m2": 22
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 538
+    }
+   ]
+  },
+  {
+   "position": 10,
+   "layer_number": 10,
+   "name": "Layer 10",
+   "role": "slow/mid blue-sensitive (yellow) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Mid yellow emulsion",
+     "laydown_mg_m2": 230,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "M yellow (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 1.26,
+      "thickness_um": 0.14,
+      "bromide_pct_printed": 95.8,
+      "iodide_pct_inferred": 4.2,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.8,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "Y-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow yellow emulsion",
+     "laydown_mg_m2": 325,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "S yellow (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.99,
+      "thickness_um": 0.14,
+      "bromide_pct_printed": 98.6,
+      "iodide_pct_inferred": 1.4,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.9,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "Y-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Slow-slow yellow emul.",
+     "laydown_mg_m2": 160,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "SS yellow (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 0.53,
+      "thickness_um": 0.083,
+      "bromide_pct_printed": 98.7,
+      "iodide_pct_inferred": 1.3,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 1.1,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "Y-1"
+     }
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-7",
+     "laydown_mg_m2": 1060
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-2",
+     "laydown_mg_m2": 5
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-12",
+     "laydown_mg_m2": 54
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-4",
+     "laydown_mg_m2": 32
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 8.2
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-3",
+     "laydown_mg_m2": 2.4
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-4",
+     "laydown_mg_m2": 0.05
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-7",
+     "laydown_mg_m2": 16.9
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 1803
+    }
+   ]
+  },
+  {
+   "position": 11,
+   "layer_number": 11,
+   "name": "Layer 11",
+   "role": "fast blue-sensitive (yellow) layer",
+   "components": [
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast yellow emulsion",
+     "laydown_mg_m2": 650,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "F yellow (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "Tab.",
+      "ecd_um_printed_as_diameter": 2.67,
+      "thickness_um": 0.13,
+      "bromide_pct_printed": 95.8,
+      "iodide_pct_inferred": 4.2,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.8,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "Y-1"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Fast-fast yellow emul.",
+     "laydown_mg_m2": 260,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "emulsion_table_key": "FF yellow (mapping from layer name to table row is an inference)",
+     "grain": {
+      "type_printed": "3D",
+      "ecd_um_printed_as_diameter": 1.22,
+      "thickness_um": null,
+      "bromide_pct_printed": 90.3,
+      "iodide_pct_inferred": 9.7,
+      "iodide_note": "inferred as 100 - %bromide assuming AgBrI with no chloride (patent prints only % bromide)",
+      "sensitizing_dye_load_printed_mm_per_m": 0.22,
+      "sensitizing_dye_load_unit_note": "printed '(mm/m)'; presumably mmol per mol Ag - inference",
+      "sensitizing_dye_set": "Y-2",
+      "thickness_note": "blank in table (3D grain)"
+     }
+    },
+    {
+     "kind": "emulsion",
+     "name_printed": "Lippman emulsion",
+     "laydown_mg_m2": 54,
+     "laydown_basis": "mg/sq meter as printed; not stated whether as silver - see notes",
+     "grain": null,
+     "grain_note": "Lippmann (fine-grain) emulsion; not in the emulsion table - no grain data given"
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-7",
+     "laydown_mg_m2": 255
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-13",
+     "laydown_mg_m2": 108
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-12",
+     "laydown_mg_m2": 92
+    },
+    {
+     "kind": "compound",
+     "id": "Coup-2",
+     "laydown_mg_m2": 5.0
+    },
+    {
+     "kind": "compound",
+     "id": "Chem-1",
+     "laydown_mg_m2": 13.2
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 950
+    }
+   ]
+  },
+  {
+   "position": 12,
+   "layer_number": 12,
+   "name": "Layer 12",
+   "role": "UV-absorbing layer - role inferred (Dye-5, Dye-6 are UV-type dyes)",
+   "components": [
+    {
+     "kind": "compound",
+     "id": "Dye-5",
+     "laydown_mg_m2": 161
+    },
+    {
+     "kind": "compound",
+     "id": "Dye-6",
+     "laydown_mg_m2": 105
+    },
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 690
+    }
+   ]
+  },
+  {
+   "position": 13,
+   "layer_number": 13,
+   "name": "Layer 13",
+   "role": "protective overcoat",
+   "components": [
+    {
+     "kind": "gelatin",
+     "laydown_mg_m2": 867
+    }
+   ]
+  }
+ ],
+ "compounds": {
+  "P1": {
+   "role": "cyan image coupler (primary phenolic coupler, Formula [P])",
+   "dye_color": "cyan",
+   "equivalence": "4-equivalent",
+   "coupling_site": "phenol C-4 (para to OH) carries H",
+   "structure_description": "2-[3-(4-cyanophenyl)ureido]-5-[2-(2,4-di-tert-pentylphenoxy)hexanamido]phenol",
+   "mw_check": "Patent text: 1.076 mmol/m2 of P1 = 0.646 g/m2 -> 600.4 g/mol implied; RDKit 598.8 - consistent",
+   "same_as": "US5500316 Coupler-1",
+   "smiles_as_transcribed": "Oc1cc(NC(=O)C(CCCC)Oc2ccc(C(C)(C)CC)cc2C(C)(C)CC)ccc1NC(=O)Nc1ccc(C#N)cc1",
+   "formula": "C36H46N4O4",
+   "mw_g_mol": 598.8,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "drawn after Table VIII (PDF p.35); MW cross-check from text"
+  },
+  "S1": {
+   "role": "coupler solvent (non-phenolic)",
+   "structure_description": "dibutyl sebacate ('dibutylsebacate (S1)')",
+   "smiles_as_transcribed": "CCCCOC(=O)CCCCCCCCC(=O)OCCCC",
+   "formula": "C18H34O4",
+   "mw_g_mol": 314.5,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "text, Photographic Examples paragraph"
+  },
+  "Coup-2": {
+   "role": "bleach-accelerator-releasing coupler (BARC) - inferred; forms cyan dye",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_site": "1-naphthol C-4: -S(CH2)2COOH",
+   "coupling_off_group": "3-mercaptopropionic acid",
+   "structure_description": "1-hydroxy-N-(2-dodecyloxy-5-methylphenyl)-2-naphthamide, 4-S(CH2)2COOH",
+   "smiles_as_transcribed": "Oc1c(C(=O)Nc2cc(C)ccc2OCCCCCCCCCCCC)cc(SCCC(=O)O)c2ccccc12",
+   "formula": "C33H43NO5S",
+   "mw_g_mol": 565.8,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-3": {
+   "role": "masking (coloured) cyan coupler - azo-dye coupling-off group (inferred from structure)",
+   "dye_color": "cyan (formed dye); coupler coloured magenta/red",
+   "equivalence": "2-equivalent",
+   "coupling_site": "1-naphthol C-4 aryloxy",
+   "coupling_off_group": "4-[(8-acetamido-1-hydroxy-3,6-disulfonato-2-naphthyl)azo]phenoxy, drawn as bis-pyridinium salt",
+   "same_as": "US5500316 Coupler-5",
+   "structure_description": "1-hydroxy-N-[4-(2,4-di-tert-pentylphenoxy)butyl]-2-naphthamide with azo-dye aryloxy leaving group",
+   "mw_alternatives": {
+    "free_acid": 955.1,
+    "bis_pyridinium_salt": 1113.3
+   },
+   "smiles_as_transcribed": "Oc1c(C(=O)NCCCCOc2ccc(C(C)(C)CC)cc2C(C)(C)CC)cc(Oc2ccc(N=Nc3c(S(=O)(=O)O)cc4cc(S(=O)(=O)O)cc(NC(C)=O)c4c3O)cc2)c2ccccc12.c1ccncc1.c1ccncc1",
+   "formula": "C59H64N6O12S2",
+   "mw_g_mol": 1113.3,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-4": {
+   "role": "DIAR coupler; forms cyan dye",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_site": "1-naphthol C-4 aryloxy",
+   "coupling_off_group": "2-nitro-4-(tetrazolylthiomethyl)phenoxy",
+   "timing_group": "yes - quinone-methide (1,4-elimination) timing (class inferred from drawing)",
+   "inhibitor_fragment": "1-phenyl-5-mercaptotetrazole (PMT)",
+   "structure_description": "1-hydroxy-N-(2-tetradecyloxyphenyl)-2-naphthamide; 4-O-[2-NO2-4-CH2S-(1-phenyltetrazol-5-yl)phenyl]",
+   "note": "differs from US5500316 Coupler-4 only in the tetrazole N-substituent (phenyl here vs 4-methoxybenzyl there)",
+   "smiles_as_transcribed": "Oc1c(C(=O)Nc2ccccc2OCCCCCCCCCCCCCC)cc(Oc2ccc(CSc3nnnn3-c3ccccc3)cc2[N+](=O)[O-])c2ccccc12",
+   "formula": "C45H50N6O6S",
+   "mw_g_mol": 803.0,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-5": {
+   "role": "DIR coupler (no timing group); forms yellow dye",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_site": "malondianilide CH: N-benzotriazolyl",
+   "timing_group": "none",
+   "inhibitor_fragment": "phenoxycarbonylbenzotriazole (drawn at benzo C-5/6; N attachment drawn across N1/N2 - ambiguous)",
+   "same_as": "US5500316 Coupler-10",
+   "structure_description": "(phenoxycarbonylbenzotriazolyl)malonic bis[2-chloro-5-(1-(dodecyloxycarbonyl)ethoxycarbonyl)anilide]",
+   "smiles_as_transcribed": "O=C(Nc1cc(C(=O)OC(C)C(=O)OCCCCCCCCCCCC)ccc1Cl)C(n1nnc2cc(C(=O)Oc3ccccc3)ccc21)C(=O)Nc1cc(C(=O)OC(C)C(=O)OCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C60H75Cl2N5O12",
+   "mw_g_mol": 1129.2,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-6": {
+   "role": "DIR coupler (no timing group); forms cyan dye",
+   "dye_color": "cyan",
+   "equivalence": "2-equivalent",
+   "coupling_site": "1-naphthol C-4: S-tetrazole",
+   "timing_group": "none",
+   "inhibitor_fragment": "1-ethyl-5-mercaptotetrazole",
+   "structure_description": "1-hydroxy-N-(2-tetradecyloxyphenyl)-4-(1-ethyltetrazol-5-ylthio)-2-naphthamide",
+   "smiles_as_transcribed": "Oc1c(C(=O)Nc2ccccc2OCCCCCCCCCCCCCC)cc(Sc2nnnn2CC)c2ccccc12",
+   "formula": "C34H45N5O3S",
+   "mw_g_mol": 603.8,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-7": {
+   "role": "yellow image coupler",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_site": "pivaloylacetanilide CH: N-linked oxazolidinedione",
+   "coupling_off_group": "5,5-dimethyl-2,4-oxazolidinedione-3-yl",
+   "structure_description": "alpha-pivaloyl-alpha-(5,5-dimethyl-2,4-dioxo-oxazolidin-3-yl)-2-chloro-5-(hexadecyloxycarbonyl)acetanilide",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(N1C(=O)OC(C)(C)C1=O)C(=O)Nc1cc(C(=O)OCCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C35H53ClN2O7",
+   "mw_g_mol": 649.3,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-8": {
+   "role": "magenta image coupler",
+   "dye_color": "magenta",
+   "equivalence": "2-equivalent",
+   "coupling_site": "pyrazolone C-4 arylthio",
+   "coupling_off_group": "2-[2-(2,4-di-tert-pentylphenoxy)butanamido]phenylthio",
+   "same_as": "US5500316 Coupler-9",
+   "structure_description": "1-(2,4,6-trichlorophenyl)-3-(2-chloro-5-tetradecanamidoanilino)-4-arylthio-5-pyrazolone",
+   "smiles_as_transcribed": "O=C1C(Sc2ccccc2NC(=O)C(CC)Oc2ccc(C(C)(C)CC)cc2C(C)(C)CC)C(Nc2cc(NC(=O)CCCCCCCCCCCCC)ccc2Cl)=NN1c1c(Cl)cc(Cl)cc1Cl",
+   "formula": "C55H71Cl4N5O4S",
+   "mw_g_mol": 1040.1,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-9": {
+   "role": "masking (yellow-coloured) magenta coupler - 4-arylazo pyrazolone (inferred)",
+   "dye_color": "magenta (formed dye); coupler yellow",
+   "equivalence": "2-equivalent by the coupling-site rule (arylazo displaced) - inference",
+   "coupling_site": "pyrazolone C-4: 3,4-dimethoxyphenylazo",
+   "same_as": "US5500316 Coupler-7",
+   "structure_description": "1-(2,4,6-trichlorophenyl)-3-[2-chloro-5-(2-(3-tert-butyl-4-hydroxyphenoxy)tetradecanamido)anilino]-4-(3,4-dimethoxyphenylazo)-5-pyrazolone",
+   "smiles_as_transcribed": "O=C1C(N=Nc2ccc(OC)c(OC)c2)C(Nc2cc(NC(=O)C(CCCCCCCCCCCC)Oc3ccc(O)c(C(C)(C)C)c3)ccc2Cl)=NN1c1c(Cl)cc(Cl)cc1Cl",
+   "formula": "C47H56Cl4N6O6",
+   "mw_g_mol": 942.8,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-10": {
+   "role": "DIAR coupler; forms a small unballasted cyan dye (1-hydroxy-2-naphthamide, CONH2) that is likely diffusible/wash-out - inference",
+   "dye_color": "cyan (likely wash-out - inference)",
+   "equivalence": "2-equivalent",
+   "coupling_site": "1-naphthol C-4 aryloxy (ballast is on the leaving group)",
+   "coupling_off_group": "2-(hexadecanesulfonamido)-4-(tetrazolylthiomethyl)phenoxy",
+   "timing_group": "yes - quinone-methide (1,4-elimination) timing (inferred)",
+   "inhibitor_fragment": "1-(propoxycarbonylmethyl)-5-mercaptotetrazole (ester-bearing inhibitor; 'self-destructing' in developer is a common design intent - inference)",
+   "structure_description": "1-hydroxy-2-naphthamide; 4-O-[2-NHSO2(CH2)15CH3-4-CH2S-(1-CH2CO2C3H7-tetrazol-5-yl)phenyl]",
+   "smiles_as_transcribed": "NC(=O)c1cc(Oc2ccc(CSc3nnnn3CC(=O)OCCC)cc2NS(=O)(=O)CCCCCCCCCCCCCCCC)c2ccccc2c1O",
+   "formula": "C40H56N6O7S2",
+   "mw_g_mol": 797.1,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-11": {
+   "role": "DIR coupler (no timing group); forms magenta dye",
+   "dye_color": "magenta",
+   "equivalence": "2-equivalent",
+   "coupling_site": "pyrazolone C-4: S-tetrazole",
+   "timing_group": "none",
+   "inhibitor_fragment": "1-phenyl-5-mercaptotetrazole (PMT)",
+   "same_as": "US5500316 Coupler-8",
+   "structure_description": "1-[4-(2-(2,4-di-tert-pentylphenoxy)butanamido)phenyl]-3-pyrrolidino-4-(1-phenyltetrazol-5-ylthio)-5-pyrazolone",
+   "note": "the ballast phenoxy ring is drawn without double bonds (cyclohexyl-like); treated as aromatic 2,4-di-t-pentylphenoxy by analogy with US5500316 Coupler-8 - inference",
+   "smiles_as_transcribed": "O=C1C(Sc2nnnn2-c2ccccc2)C(N2CCCC2)=NN1c1ccc(NC(=O)C(CC)Oc2ccc(C(C)(C)CC)cc2C(C)(C)CC)cc1",
+   "formula": "C40H50N8O3S",
+   "mw_g_mol": 723.0,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-12": {
+   "role": "DIR coupler (no timing group); forms yellow dye",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_site": "pivaloylacetanilide CH: N-benzotriazolyl",
+   "timing_group": "none",
+   "inhibitor_fragment": "phenoxycarbonylbenzotriazole (N1/N2 attachment ambiguous as drawn)",
+   "structure_description": "alpha-pivaloyl-alpha-(phenoxycarbonylbenzotriazolyl)-2-chloro-5-(hexadecyloxycarbonyl)acetanilide",
+   "smiles_as_transcribed": "CC(C)(C)C(=O)C(n1nnc2cc(C(=O)Oc3ccccc3)ccc21)C(=O)Nc1cc(C(=O)OCCCCCCCCCCCCCCCC)ccc1Cl",
+   "formula": "C43H55ClN4O6",
+   "mw_g_mol": 759.4,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Coup-13": {
+   "role": "yellow image coupler",
+   "dye_color": "yellow",
+   "equivalence": "2-equivalent",
+   "coupling_site": "benzoylacetanilide CH: N-linked hydantoin",
+   "coupling_off_group": "1-benzyl-5-ethoxy-hydantoin-3-yl",
+   "structure_description": "alpha-(4-methoxybenzoyl)-alpha-(1-benzyl-5-ethoxyhydantoin-3-yl)-2-chloro-5-(dodecyloxycarbonyl)acetanilide",
+   "smiles_as_transcribed": "COc1ccc(C(=O)C(N2C(=O)N(Cc3ccccc3)C(OCC)C2=O)C(=O)Nc2cc(C(=O)OCCCCCCCCCCCC)ccc2Cl)cc1",
+   "formula": "C41H50ClN3O8",
+   "mw_g_mol": 748.3,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-1": {
+   "role": "antifoggant/stabilizer (tetraazaindene) - inferred",
+   "structure_description": "printed name: (1,2,4)Triazolo(1,5-a)pyrimidin-7-ol, 5-methyl-, sodium salt",
+   "mw_note": "neutral form; Na salt adds ~22",
+   "smiles_as_transcribed": "Cc1cc(O)n2ncnc2n1",
+   "formula": "C6H6N4O",
+   "mw_g_mol": 150.1,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-2": {
+   "role": "not stated (used in antihalation and interlayers; scavenger role is plausible but NOT established - inference)",
+   "structure_description": "drawn as 6-(2-hexyldecyloxy)purine-type bicyclic (ring-fusion carbons drawn without a double bond); MW computed for aromatic 6-(2-hexyldecyloxy)-9H-purine - uncertain",
+   "smiles_as_transcribed": "CCCCCCCCC(CCCCCC)COc1ncnc2[nH]cnc12",
+   "formula": "C21H36N4O",
+   "mw_g_mol": 360.5,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-3": {
+   "role": "not stated (reductone-type addendum - inference)",
+   "structure_description": "printed name: Cyclopenten-1-one, 2,5-dihydroxy-5-methyl-3-(4-morpholinyl)-",
+   "smiles_as_transcribed": "O=C1C(O)=C(N2CCOCC2)CC1(C)O",
+   "formula": "C10H15NO4",
+   "mw_g_mol": 213.2,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-4": {
+   "role": "antifoggant (mercaptotetrazole) - inferred",
+   "structure_description": "printed name: -N-(3-(2,5-dihydro-5-thioxo-1H-tetrazol-1-yl)phenyl) L-alanine disodium salt",
+   "mw_note": "free acid form",
+   "smiles_as_transcribed": "OC(=O)C(C)Nc1cccc(-n2nn[nH]c2=S)c1",
+   "formula": "C10H11N5O2S",
+   "mw_g_mol": 265.3,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-5": {
+   "role": "oxidized-developer scavenger (hydroquinone) - inferred",
+   "structure_description": "2,5-bis(1,1,3,3-tetramethylbutyl)hydroquinone (di-tert-octylhydroquinone) as drawn",
+   "smiles_as_transcribed": "Oc1cc(C(C)(C)CC(C)(C)C)c(O)cc1C(C)(C)CC(C)(C)C",
+   "formula": "C22H38O2",
+   "mw_g_mol": 334.5,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Chem-7": {
+   "role": "polymer addendum (thickener/binder extender - inferred)",
+   "structure_description": "printed name: 1-Propanesulfonic acid, 2-methyl-2-((1-oxo-2-propenyl)amino) monosodium salt, polymer with 2-propenamide",
+   "mw_g_mol": null,
+   "mw_status": "polymer - not applicable",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-1": {
+   "role": "yellow filter dye (blue absorber) - inferred",
+   "structure_description": "3-cyano-4-[4-(butanesulfonamido)phenyl]-5-(furfurylidene)-2(5H)-furanone",
+   "same_as": "US5500316 Dye-1",
+   "smiles_as_transcribed": "O=C1OC(=Cc2ccco2)C(c2ccc(NS(=O)(=O)CCCC)cc2)=C1C#N",
+   "formula": "C20H18N2O5S",
+   "mw_g_mol": 398.4,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-2": {
+   "role": "filter dye in antihalation layer; structurally a 4-arylazo-5-pyrazolone (yellow-coloured magenta-coupler type) - role inferred",
+   "structure_description": "1-(2,4,6-trichlorophenyl)-3-[3-(2,4-di-tert-pentylphenoxyacetamido)benzamido]-4-(4-methoxyphenylazo)-5-pyrazolone",
+   "smiles_as_transcribed": "O=C1C(N=Nc2ccc(OC)cc2)C(NC(=O)c2cccc(NC(=O)COc3ccc(C(C)(C)CC)cc3C(C)(C)CC)c2)=NN1c1c(Cl)cc(Cl)cc1Cl",
+   "formula": "C41H43Cl3N6O5",
+   "mw_g_mol": 806.2,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-3": {
+   "role": "water-soluble filter dye (antihalation) - inferred",
+   "structure_description": "printed name: 2,6-Anthracenedisulfonic acid, 9,10-dihydroxy-9,10-dioxo-4,8-bis(sulfomethyl)amino)-, tetrasodium salt (sic)",
+   "mw_g_mol": null,
+   "mw_status": "not computed (printed name is internally inconsistent)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-4": {
+   "role": "water-soluble azo filter dye (antihalation) - inferred",
+   "structure_description": "drawn: 1,8-dihydroxy-2-(naphthylazo)naphthalene with four SO3Na groups (two per naphthalene); exact sulfonate locants on the second naphthalene not certain",
+   "mw_g_mol": null,
+   "mw_status": "not computed (locants uncertain)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-5": {
+   "role": "UV absorber (merocyanine) - inferred",
+   "structure_description": "1-(dihexylamino)-4,4-dicyano-1,3-butadiene: (C6H13)2N-CH=CH-CH=C(CN)2",
+   "smiles_as_transcribed": "CCCCCCN(CCCCCC)C=CC=C(C#N)C#N",
+   "formula": "C18H29N3",
+   "mw_g_mol": 287.5,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "Dye-6": {
+   "role": "UV absorber - inferred",
+   "structure_description": "propyl 2-cyano-3-(4-methoxyphenyl)acrylate",
+   "smiles_as_transcribed": "CCCOC(=O)C(C#N)=Cc1ccc(OC)cc1",
+   "formula": "C14H15NO3",
+   "mw_g_mol": 245.3,
+   "mw_status": "estimated: computed with RDKit from a SMILES hand-transcribed from the drawn structure (neutral/free-acid form unless noted)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  },
+  "sensitizing_dye_sets": {
+   "role": "spectral sensitization",
+   "structure_description": "C-1 = SD1+SD2+SD3; C-2 = SD1+SD2+SD4; M-1 = SD5+SD6; Y-1 = SD7+SD8; Y-2 = SD9 (structures drawn on PDF p.38; not transcribed here)",
+   "source": "US6680165B1 structures following Table VIII, cols 65-72 (PDF pp. 35-37)"
+  }
+ }
+}

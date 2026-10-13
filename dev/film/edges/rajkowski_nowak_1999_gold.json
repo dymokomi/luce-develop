@@ -1,0 +1,4692 @@
+{
+ "source": {
+  "citation": "B. Rajkowski, P. Nowak, \"Numerical investigation of sharpness in photographic layers containing DIR compounds\", Optica Applicata 29(3), 275-283 (1999)",
+  "url": "https://dbc.wroc.pl/Content/40473/PDF/optappl_2903p275.pdf",
+  "pdf_sha256": "fa81297316e9e56a13e56f7e373a45287cc1385c5a2fce38ed78ca57282ff227",
+  "pdf_note": "ABBYY FineReader scan; the figures are embedded 300 ppi grey JPX images. They were digitized from 600 dpi pdftoppm page renders, which are 2x upsampled, so the effective resolution is the 300 ppi scan (1 scan px ~ 0.53 um and ~0.0028 D).",
+  "presented": "poster, International Congress on Imaging Science, Antwerp, 7-11 Sept 1998; received 8 Oct 1998"
+ },
+ "key_caveats": [
+  "Each figure contains ONE edge (one pair of exposures), not several exposures or contrasts.",
+  "Each D panel overlays the measured trace (dashed) and the model (solid). They coincide within the plotted line width almost everywhere, so the dashed curve cannot be traced as its own full curve. The traced centre-line is the model curve, and it matches the measurement to about +/-0.006 D and +/-1.2 um. Visible experimental dashes are given separately as fragments.",
+  "The paper gives no exposure values, log-exposure difference, microdensitometer slit/aperture, scan speed, edge-exposure method (contact vs projected), developer temperature or time beyond \"Kodak C-41 process\", or the density type.",
+  "Fig. 7 caption says Gold 200, but the figure legend and the body text say Gold 400 (see fig7a.caption_info.conflict)."
+ ],
+ "text_parameters": {
+  "model": {
+   "LSF": "L(x) = (2.303/K) * 10^(-2|x|/K)  (Frieser), Eq. 1; area = 1",
+   "ChSF": "b(x) = (2.303/Kc) * 10^(-2|x|/Kc), Eq. 2 (printed without a sign). Fig. 2 draws the ChSF of development-INHIBITING compounds (the DIR case) as a NEGATIVE cusp, peak about -0.023 for Kc about 100, and that of accelerating compounds as positive.",
+   "ESF": "ESF(x) = (1 - delta) L(x) + delta b(x), Eq. 3; %ChSF = delta*100 %, Eq. 5; the paper says \"the area under the ESF is equal to 1.0\", which is only exactly true if b is taken as positive. With a negative inhibitor ChSF the area would be 1 - 2*delta. This is not resolved in the text.",
+   "R": "R = dD2/dD1 = border-effect density excess / fringe-effect density deficit, Eq. 4 (Fig. 1). The captions print \"R = x% ChSF in ESF\". Read literally that mixes R with %ChSF; the percentage is almost certainly %ChSF = delta*100, not the ratio R.",
+   "exposure_and_density": "spatial exposure distribution = integral of the ESF (edge response); edge density curve from it assuming a rectilinear characteristic curve with a 45 degree slope (gamma = 1)",
+   "density_dependence": "\"The efficiency of the ChSF depends on the exposure which is expressed by the optical density ... we assume that the effectiveness of adjacency effects varies with density\" (Section 2). No functional form is given.",
+   "K_Kc_units": "micrometres (x is in um; Fig. 2 LSF peak 0.23 = 2.303/K for K = 10, Fig. 4 example K = 10, Kc = 100)",
+   "per_figure": {
+    "Fig5_Gold100": {
+     "K": 15,
+     "Kc": 90,
+     "chsf_percent": 6.24
+    },
+    "Fig6_Gold200": {
+     "K": 20,
+     "Kc": 90,
+     "chsf_percent": 5.28
+    },
+    "Fig7_Gold400_caption_says_200": {
+     "K": 20,
+     "Kc": 90,
+     "chsf_percent": 2.3
+    }
+   }
+  },
+  "experiment": {
+   "films": "Kodak Gold 100, Gold 200, Gold 400 colour negative",
+   "process": "Kodak C-41 (all exposures)",
+   "measurement": "microdensitometer traces scanning across edges; optical density measured in green light",
+   "edge": "\"each edge being the boundary between two regions of different but uniform exposures\"; the introduction speaks of \"knife edge exposure\". The paper does not say whether the edge was a contact knife edge or projected through a lens. The abstract mentions the \"light spread function of the lens and film combination\", which suggests imaging through a lens, but this is not stated.",
+   "exposures_or_contrast": "not given; only the resulting plateau densities can be read from the plots",
+   "microdensitometer_slit": "not given",
+   "acutance": "Jones-Higgins (Eq. 6) and Perrin (Eq. 7) acutance; start/stop points at the smallest visible gradient 0.005 D/um (Higgins & Jones)"
+  }
+ },
+ "figures": {
+  "fig6a": {
+   "figure": "Fig. 6, top (D vs X) panel; the caption calls the dashed experimental curve \"(a)\" and the solid model curve \"(b)\"; both are drawn in this one panel",
+   "page_in_pdf": 6,
+   "journal_page": 280,
+   "caption_info": {
+    "film": "Kodak Gold 200",
+    "film_per_caption": "Kodak Gold 200",
+    "film_per_plot_legend": "Kodak Gold 200",
+    "film_per_body_text": "Kodak Gold 200",
+    "K_um": 20,
+    "Kc_um": 90,
+    "chsf_percent_as_printed": "R = 5.28% ChSF in ESF"
+   },
+   "process": "Kodak C-41",
+   "measurement": "microdensitometer trace across the edge, density measured in green light",
+   "axes": {
+    "x": {
+     "label": "X [um]",
+     "unit": "micrometre",
+     "ticks_major": [
+      0,
+      100,
+      200,
+      300,
+      400
+     ],
+     "ticks_minor_step": 50,
+     "note": "zero is arbitrary (start of scan); the edge sits at about x = 202 um"
+    },
+    "y": {
+     "label": "D",
+     "unit": "optical density (green light; the paper does not say whether it is diffuse or specular)",
+     "ticks_major": [
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0
+     ],
+     "ticks_minor_step": 0.1,
+     "axis_bottom": 0.2,
+     "axis_top_tick": 1.1
+    }
+   },
+   "number_of_measured_edges": 1,
+   "curves": {
+    "trace": {
+     "description": "Centre-line of the plotted solid curve. The dashed experimental curve lies under it to within half a line width (about +/-0.006 D, +/-1.2 um) almost everywhere, so this trace is the model curve and also the experimental curve to that tolerance. It is not an independent experimental trace.",
+     "identity": "model (solid) curve; experimental (dashed) coincides within line width except at the fragments listed",
+     "points_x_um_D": [
+      [
+       4.0,
+       0.3303
+      ],
+      [
+       6.0,
+       0.3303
+      ],
+      [
+       8.0,
+       0.3302
+      ],
+      [
+       10.0,
+       0.3295
+      ],
+      [
+       12.0,
+       0.3302
+      ],
+      [
+       14.0,
+       0.3309
+      ],
+      [
+       16.0,
+       0.3315
+      ],
+      [
+       18.0,
+       0.3311
+      ],
+      [
+       20.0,
+       0.3308
+      ],
+      [
+       22.0,
+       0.3321
+      ],
+      [
+       24.0,
+       0.3321
+      ],
+      [
+       26.0,
+       0.3321
+      ],
+      [
+       28.0,
+       0.3321
+      ],
+      [
+       30.0,
+       0.3314
+      ],
+      [
+       32.0,
+       0.332
+      ],
+      [
+       34.0,
+       0.3307
+      ],
+      [
+       36.0,
+       0.3307
+      ],
+      [
+       38.0,
+       0.3306
+      ],
+      [
+       40.0,
+       0.3279
+      ],
+      [
+       42.0,
+       0.3279
+      ],
+      [
+       44.0,
+       0.3285
+      ],
+      [
+       46.0,
+       0.3272
+      ],
+      [
+       48.0,
+       0.3265
+      ],
+      [
+       50.0,
+       0.3265
+      ],
+      [
+       52.0,
+       0.3271
+      ],
+      [
+       54.0,
+       0.3264
+      ],
+      [
+       56.0,
+       0.3257
+      ],
+      [
+       58.0,
+       0.3244
+      ],
+      [
+       60.0,
+       0.325
+      ],
+      [
+       62.0,
+       0.325
+      ],
+      [
+       64.0,
+       0.3243
+      ],
+      [
+       66.0,
+       0.3236
+      ],
+      [
+       68.0,
+       0.3249
+      ],
+      [
+       70.0,
+       0.3263
+      ],
+      [
+       72.0,
+       0.3256
+      ],
+      [
+       74.0,
+       0.3249
+      ],
+      [
+       76.0,
+       0.325
+      ],
+      [
+       78.0,
+       0.3262
+      ],
+      [
+       80.0,
+       0.3262
+      ],
+      [
+       82.0,
+       0.3275
+      ],
+      [
+       84.0,
+       0.3329
+      ],
+      [
+       86.0,
+       0.3292
+      ],
+      [
+       88.0,
+       0.3268
+      ],
+      [
+       90.0,
+       0.3268
+      ],
+      [
+       92.0,
+       0.3269
+      ],
+      [
+       94.0,
+       0.3273
+      ],
+      [
+       96.0,
+       0.3274
+      ],
+      [
+       98.0,
+       0.3267
+      ],
+      [
+       100.0,
+       0.3262
+      ],
+      [
+       102.0,
+       0.3273
+      ],
+      [
+       104.0,
+       0.3273
+      ],
+      [
+       106.0,
+       0.3271
+      ],
+      [
+       108.0,
+       0.3273
+      ],
+      [
+       110.0,
+       0.3266
+      ],
+      [
+       112.0,
+       0.3262
+      ],
+      [
+       114.0,
+       0.3292
+      ],
+      [
+       116.0,
+       0.3272
+      ],
+      [
+       118.0,
+       0.3272
+      ],
+      [
+       120.0,
+       0.3278
+      ],
+      [
+       122.0,
+       0.3285
+      ],
+      [
+       124.0,
+       0.3285
+      ],
+      [
+       126.0,
+       0.3278
+      ],
+      [
+       128.0,
+       0.3271
+      ],
+      [
+       130.0,
+       0.3277
+      ],
+      [
+       132.0,
+       0.327
+      ],
+      [
+       134.0,
+       0.3268
+      ],
+      [
+       136.0,
+       0.3277
+      ],
+      [
+       138.0,
+       0.3297
+      ],
+      [
+       140.0,
+       0.3276
+      ],
+      [
+       142.0,
+       0.3256
+      ],
+      [
+       144.0,
+       0.3249
+      ],
+      [
+       146.0,
+       0.3255
+      ],
+      [
+       148.0,
+       0.3255
+      ],
+      [
+       150.0,
+       0.3241
+      ],
+      [
+       152.0,
+       0.3248
+      ],
+      [
+       154.0,
+       0.3255
+      ],
+      [
+       156.0,
+       0.3239
+      ],
+      [
+       158.0,
+       0.3246
+      ],
+      [
+       160.0,
+       0.3227
+      ],
+      [
+       162.0,
+       0.3248
+      ],
+      [
+       164.0,
+       0.324
+      ],
+      [
+       166.0,
+       0.3247
+      ],
+      [
+       168.0,
+       0.325
+      ],
+      [
+       170.0,
+       0.3233
+      ],
+      [
+       172.0,
+       0.3226
+      ],
+      [
+       174.0,
+       0.3212
+      ],
+      [
+       176.0,
+       0.3205
+      ],
+      [
+       178.0,
+       0.3185
+      ],
+      [
+       180.0,
+       0.3167
+      ],
+      [
+       182.0,
+       0.3164
+      ],
+      [
+       184.0,
+       0.3171
+      ],
+      [
+       186.0,
+       0.3184
+      ],
+      [
+       188.0,
+       0.3197
+      ],
+      [
+       190.0,
+       0.3275
+      ],
+      [
+       192.0,
+       0.333
+      ],
+      [
+       194.0,
+       0.3355
+      ],
+      [
+       196.0,
+       0.3642
+      ],
+      [
+       198.0,
+       0.4086
+      ],
+      [
+       200.0,
+       0.4659
+      ],
+      [
+       202.0,
+       0.5645
+      ],
+      [
+       204.0,
+       0.675
+      ],
+      [
+       206.0,
+       0.7698
+      ],
+      [
+       208.0,
+       0.8228
+      ],
+      [
+       210.0,
+       0.8626
+      ],
+      [
+       212.0,
+       0.8827
+      ],
+      [
+       214.0,
+       0.8902
+      ],
+      [
+       216.0,
+       0.8892
+      ],
+      [
+       218.0,
+       0.8846
+      ],
+      [
+       220.0,
+       0.8782
+      ],
+      [
+       222.0,
+       0.8732
+      ],
+      [
+       224.0,
+       0.8661
+      ],
+      [
+       226.0,
+       0.8606
+      ],
+      [
+       228.0,
+       0.8542
+      ],
+      [
+       230.0,
+       0.8479
+      ],
+      [
+       232.0,
+       0.8432
+      ],
+      [
+       234.0,
+       0.8351
+      ],
+      [
+       236.0,
+       0.8298
+      ],
+      [
+       238.0,
+       0.825
+      ],
+      [
+       240.0,
+       0.8203
+      ],
+      [
+       242.0,
+       0.8175
+      ],
+      [
+       244.0,
+       0.8148
+      ],
+      [
+       246.0,
+       0.8121
+      ],
+      [
+       248.0,
+       0.8085
+      ],
+      [
+       250.0,
+       0.8066
+      ],
+      [
+       252.0,
+       0.8059
+      ],
+      [
+       254.0,
+       0.8039
+      ],
+      [
+       256.0,
+       0.8021
+      ],
+      [
+       258.0,
+       0.8054
+      ],
+      [
+       260.0,
+       0.7961
+      ],
+      [
+       262.0,
+       0.7937
+      ],
+      [
+       264.0,
+       0.7929
+      ],
+      [
+       266.0,
+       0.795
+      ],
+      [
+       268.0,
+       0.7943
+      ],
+      [
+       270.0,
+       0.7942
+      ],
+      [
+       272.0,
+       0.7931
+      ],
+      [
+       274.0,
+       0.7942
+      ],
+      [
+       276.0,
+       0.7935
+      ],
+      [
+       278.0,
+       0.7927
+      ],
+      [
+       280.0,
+       0.7914
+      ],
+      [
+       282.0,
+       0.7914
+      ],
+      [
+       284.0,
+       0.79
+      ],
+      [
+       286.0,
+       0.7871
+      ],
+      [
+       288.0,
+       0.7866
+      ],
+      [
+       290.0,
+       0.7859
+      ],
+      [
+       292.0,
+       0.7852
+      ],
+      [
+       294.0,
+       0.7845
+      ],
+      [
+       296.0,
+       0.7845
+      ],
+      [
+       298.0,
+       0.7828
+      ],
+      [
+       300.0,
+       0.7777
+      ],
+      [
+       302.0,
+       0.7845
+      ],
+      [
+       304.0,
+       0.7858
+      ],
+      [
+       306.0,
+       0.7853
+      ],
+      [
+       308.0,
+       0.7858
+      ],
+      [
+       310.0,
+       0.7844
+      ],
+      [
+       312.0,
+       0.7857
+      ],
+      [
+       314.0,
+       0.7843
+      ],
+      [
+       316.0,
+       0.7843
+      ],
+      [
+       318.0,
+       0.7857
+      ],
+      [
+       320.0,
+       0.7836
+      ],
+      [
+       322.0,
+       0.7843
+      ],
+      [
+       324.0,
+       0.7842
+      ],
+      [
+       326.0,
+       0.7856
+      ],
+      [
+       328.0,
+       0.7863
+      ],
+      [
+       330.0,
+       0.7883
+      ],
+      [
+       332.0,
+       0.7882
+      ],
+      [
+       334.0,
+       0.7882
+      ],
+      [
+       336.0,
+       0.7896
+      ],
+      [
+       338.0,
+       0.7889
+      ],
+      [
+       340.0,
+       0.7882
+      ],
+      [
+       342.0,
+       0.7868
+      ],
+      [
+       344.0,
+       0.7861
+      ],
+      [
+       346.0,
+       0.7867
+      ],
+      [
+       348.0,
+       0.7861
+      ],
+      [
+       350.0,
+       0.7874
+      ],
+      [
+       352.0,
+       0.7887
+      ],
+      [
+       354.0,
+       0.788
+      ],
+      [
+       356.0,
+       0.7867
+      ],
+      [
+       358.0,
+       0.7863
+      ],
+      [
+       360.0,
+       0.7859
+      ],
+      [
+       362.0,
+       0.7844
+      ],
+      [
+       364.0,
+       0.7839
+      ],
+      [
+       366.0,
+       0.7838
+      ],
+      [
+       368.0,
+       0.7852
+      ],
+      [
+       370.0,
+       0.7838
+      ],
+      [
+       372.0,
+       0.7845
+      ],
+      [
+       374.0,
+       0.7851
+      ],
+      [
+       376.0,
+       0.7838
+      ],
+      [
+       378.0,
+       0.7825
+      ],
+      [
+       380.0,
+       0.781
+      ],
+      [
+       382.0,
+       0.781
+      ],
+      [
+       384.0,
+       0.7816
+      ],
+      [
+       386.0,
+       0.783
+      ],
+      [
+       388.0,
+       0.7816
+      ],
+      [
+       390.0,
+       0.7816
+      ],
+      [
+       392.0,
+       0.7816
+      ],
+      [
+       394.0,
+       0.7829
+      ],
+      [
+       396.0,
+       0.7829
+      ],
+      [
+       398.0,
+       0.783
+      ],
+      [
+       400.0,
+       0.7835
+      ],
+      [
+       402.0,
+       0.7842
+      ],
+      [
+       404.0,
+       0.7848
+      ],
+      [
+       406.0,
+       0.7862
+      ],
+      [
+       408.0,
+       0.7848
+      ],
+      [
+       410.0,
+       0.7857
+      ]
+     ],
+     "spacing_um": 2.0
+    },
+    "trace_edge_fine": {
+     "description": "The same centre-line on a 0.5 um grid over the transition (180-230 um)",
+     "points_x_um_D": [
+      [
+       180.0,
+       0.3167
+      ],
+      [
+       180.5,
+       0.316
+      ],
+      [
+       181.0,
+       0.3157
+      ],
+      [
+       181.5,
+       0.3157
+      ],
+      [
+       182.0,
+       0.3164
+      ],
+      [
+       182.5,
+       0.3164
+      ],
+      [
+       183.0,
+       0.3164
+      ],
+      [
+       183.5,
+       0.3169
+      ],
+      [
+       184.0,
+       0.3171
+      ],
+      [
+       184.5,
+       0.3181
+      ],
+      [
+       185.0,
+       0.3184
+      ],
+      [
+       185.5,
+       0.3184
+      ],
+      [
+       186.0,
+       0.3184
+      ],
+      [
+       186.5,
+       0.3191
+      ],
+      [
+       187.0,
+       0.3197
+      ],
+      [
+       187.5,
+       0.3197
+      ],
+      [
+       188.0,
+       0.3197
+      ],
+      [
+       188.5,
+       0.3211
+      ],
+      [
+       189.0,
+       0.3214
+      ],
+      [
+       189.5,
+       0.3224
+      ],
+      [
+       190.0,
+       0.3275
+      ],
+      [
+       190.5,
+       0.3349
+      ],
+      [
+       191.0,
+       0.3419
+      ],
+      [
+       191.5,
+       0.3374
+      ],
+      [
+       192.0,
+       0.333
+      ],
+      [
+       192.5,
+       0.3285
+      ],
+      [
+       193.0,
+       0.3278
+      ],
+      [
+       193.5,
+       0.3304
+      ],
+      [
+       194.0,
+       0.3355
+      ],
+      [
+       194.5,
+       0.3406
+      ],
+      [
+       195.0,
+       0.3457
+      ],
+      [
+       195.5,
+       0.3508
+      ],
+      [
+       196.0,
+       0.3642
+      ],
+      [
+       196.5,
+       0.3712
+      ],
+      [
+       197.0,
+       0.3782
+      ],
+      [
+       197.5,
+       0.3982
+      ],
+      [
+       198.0,
+       0.4086
+      ],
+      [
+       198.5,
+       0.4162
+      ],
+      [
+       199.0,
+       0.4304
+      ],
+      [
+       199.5,
+       0.4419
+      ],
+      [
+       200.0,
+       0.4659
+      ],
+      [
+       200.5,
+       0.4861
+      ],
+      [
+       201.0,
+       0.5053
+      ],
+      [
+       201.5,
+       0.5368
+      ],
+      [
+       202.0,
+       0.5645
+      ],
+      [
+       202.5,
+       0.5848
+      ],
+      [
+       203.0,
+       0.6205
+      ],
+      [
+       203.5,
+       0.6454
+      ],
+      [
+       204.0,
+       0.675
+      ],
+      [
+       204.5,
+       0.7256
+      ],
+      [
+       205.0,
+       0.7391
+      ],
+      [
+       205.5,
+       0.7521
+      ],
+      [
+       206.0,
+       0.7698
+      ],
+      [
+       206.5,
+       0.7866
+      ],
+      [
+       207.0,
+       0.8011
+      ],
+      [
+       207.5,
+       0.8114
+      ],
+      [
+       208.0,
+       0.8228
+      ],
+      [
+       208.5,
+       0.8342
+      ],
+      [
+       209.0,
+       0.8433
+      ],
+      [
+       209.5,
+       0.8538
+      ],
+      [
+       210.0,
+       0.8626
+      ],
+      [
+       210.5,
+       0.8696
+      ],
+      [
+       211.0,
+       0.8754
+      ],
+      [
+       211.5,
+       0.8795
+      ],
+      [
+       212.0,
+       0.8827
+      ],
+      [
+       212.5,
+       0.8826
+      ],
+      [
+       213.0,
+       0.8879
+      ],
+      [
+       213.5,
+       0.8901
+      ],
+      [
+       214.0,
+       0.8902
+      ],
+      [
+       214.5,
+       0.8929
+      ],
+      [
+       215.0,
+       0.8902
+      ],
+      [
+       215.5,
+       0.8902
+      ],
+      [
+       216.0,
+       0.8892
+      ],
+      [
+       216.5,
+       0.8879
+      ],
+      [
+       217.0,
+       0.887
+      ],
+      [
+       217.5,
+       0.8862
+      ],
+      [
+       218.0,
+       0.8846
+      ],
+      [
+       218.5,
+       0.8834
+      ],
+      [
+       219.0,
+       0.8815
+      ],
+      [
+       219.5,
+       0.8797
+      ],
+      [
+       220.0,
+       0.8782
+      ],
+      [
+       220.5,
+       0.8766
+      ],
+      [
+       221.0,
+       0.8757
+      ],
+      [
+       221.5,
+       0.8746
+      ],
+      [
+       222.0,
+       0.8732
+      ],
+      [
+       222.5,
+       0.8718
+      ],
+      [
+       223.0,
+       0.8692
+      ],
+      [
+       223.5,
+       0.8678
+      ],
+      [
+       224.0,
+       0.8661
+      ],
+      [
+       224.5,
+       0.8642
+      ],
+      [
+       225.0,
+       0.861
+      ],
+      [
+       225.5,
+       0.8618
+      ],
+      [
+       226.0,
+       0.8606
+      ],
+      [
+       226.5,
+       0.8594
+      ],
+      [
+       227.0,
+       0.8581
+      ],
+      [
+       227.5,
+       0.8549
+      ],
+      [
+       228.0,
+       0.8542
+      ],
+      [
+       228.5,
+       0.8526
+      ],
+      [
+       229.0,
+       0.8508
+      ],
+      [
+       229.5,
+       0.8495
+      ],
+      [
+       230.0,
+       0.8479
+      ]
+     ]
+    },
+    "experimental_fragments": {
+     "description": "Bits of the dashed experimental curve that can be seen off the solid line. \"separate\" = an isolated dash, centroid reliable to about +/-0.003 D. \"merged_into_line\" = a dash fused to one side of the solid line, placed at the outer edge minus half a dash width, about +/-0.004 D. \"residue_touching_line\" = the part of a touching dash that sticks out past the traced line, centroid biased away from the line. D_minus_trace = fragment D minus trace D at the same x. On the steep edge, compare x offsets rather than D.",
+     "points": [
+      {
+       "x_um": 17.35,
+       "D": 0.3225,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0083
+      },
+      {
+       "x_um": 19.74,
+       "D": 0.3234,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0088
+      },
+      {
+       "x_um": 26.77,
+       "D": 0.3237,
+       "kind": "merged_into_line",
+       "length_um": 3.45,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0084
+      },
+      {
+       "x_um": 31.69,
+       "D": 0.3237,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0084
+      },
+      {
+       "x_um": 34.34,
+       "D": 0.3232,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0075
+      },
+      {
+       "x_um": 63.78,
+       "D": 0.3075,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0168
+      },
+      {
+       "x_um": 77.61,
+       "D": 0.3187,
+       "kind": "merged_into_line",
+       "length_um": 2.12,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0075
+      },
+      {
+       "x_um": 83.46,
+       "D": 0.3241,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0088
+      },
+      {
+       "x_um": 91.03,
+       "D": 0.3403,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0136
+      },
+      {
+       "x_um": 92.55,
+       "D": 0.34,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.013
+      },
+      {
+       "x_um": 107.65,
+       "D": 0.316,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0113
+      },
+      {
+       "x_um": 115.32,
+       "D": 0.3346,
+       "kind": "merged_into_line",
+       "length_um": 2.12,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0074
+      },
+      {
+       "x_um": 123.34,
+       "D": 0.3392,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0107
+      },
+      {
+       "x_um": 143.38,
+       "D": 0.3432,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0176
+      },
+      {
+       "x_um": 151.72,
+       "D": 0.343,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0188
+      },
+      {
+       "x_um": 160.45,
+       "D": 0.3315,
+       "kind": "merged_into_line",
+       "length_um": 1.06,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0088
+      },
+      {
+       "x_um": 182.93,
+       "D": 0.3357,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0193
+      },
+      {
+       "x_um": 189.39,
+       "D": 0.3369,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0145
+      },
+      {
+       "x_um": 192.98,
+       "D": 0.3369,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0091
+      },
+      {
+       "x_um": 212.39,
+       "D": 0.8903,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0088
+      },
+      {
+       "x_um": 226.19,
+       "D": 0.8526,
+       "kind": "merged_into_line",
+       "length_um": 1.59,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0071
+      },
+      {
+       "x_um": 233.62,
+       "D": 0.8291,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0088
+      },
+      {
+       "x_um": 257.09,
+       "D": 0.813,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0106
+      },
+      {
+       "x_um": 299.98,
+       "D": 0.7865,
+       "kind": "merged_into_line",
+       "length_um": 2.12,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0088
+      },
+      {
+       "x_um": 307.94,
+       "D": 0.7783,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0075
+      },
+      {
+       "x_um": 333.34,
+       "D": 0.7804,
+       "kind": "merged_into_line",
+       "length_um": 3.19,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0078
+      }
+     ]
+    }
+   },
+   "features": {
+    "plateau_low_D": 0.3271,
+    "plateau_low_sd": 0.0023,
+    "plateau_low_window_um": [
+     10,
+     150
+    ],
+    "plateau_high_D": 0.7849,
+    "plateau_high_sd": 0.0024,
+    "plateau_high_window_um": [
+     320,
+     400
+    ],
+    "fringe_min_D": 0.3157,
+    "fringe_min_x_um": 180.9,
+    "border_max_D": 0.8902,
+    "border_max_x_um": 213.7,
+    "dD1_fringe": 0.0114,
+    "dD2_border": 0.1053,
+    "R_dD2_over_dD1": 9.24,
+    "x10_um": 196.64,
+    "x50_um": 201.78,
+    "x90_um": 205.0,
+    "width_10_90_um": 8.36,
+    "max_slope_D_per_um": 0.0675,
+    "max_slope_x_um": 203.8,
+    "max_slope_1um_diff_D_per_um": 0.0728,
+    "notes": "Plateaus are medians over the windows. Extrema come from a 2 um running median. The fringe minimum and border maximum are broad: the trace stays within 0.003 D of the extremum over roughly 6-8 um (fringe) and 4 um (border), so their x positions are good to only about +/-3 um. 10/50/90 % levels are measured between the two plateaus on the rising edge. These are features of the plotted (model ~ experiment) curve.",
+    "model_dDdX_peak_read_from_lower_panel": 0.082,
+    "dDdX_note": "The lower panel of the figure plots dD/dX. Its solid-curve peak was read from the topmost pixel of the peak against that panel's tick calibration (+/-0.003). Use it as an independent check on max_slope."
+   },
+   "calibration": {
+    "um_per_px_600dpi": 0.2654917613746242,
+    "D_per_px_600dpi": 0.001354152938802206,
+    "x_tick_resid_um": [
+     -0.45,
+     -0.76,
+     0.25,
+     0.61,
+     0.29,
+     0.78,
+     0.34,
+     0.16,
+     -1.21
+    ],
+    "y_tick_resid_D": [
+     -0.0012,
+     0.0021,
+     -0.0002,
+     -0.001,
+     -0.0006,
+     0.0013,
+     0.0004,
+     -0.0005,
+     -0.0014,
+     0.0011
+    ],
+    "line_thickness_px_600dpi": 9.0,
+    "line_half_width_um": 1.19,
+    "line_half_width_D": 0.0061,
+    "crop_box_px_600dpi": [
+     540,
+     560,
+     2400,
+     1330
+    ],
+    "page_render": "pg-6.png"
+   }
+  },
+  "fig5a": {
+   "figure": "Fig. 5, top (D vs X) panel; the caption calls the dashed experimental curve \"(a)\" and the solid model curve \"(b)\"; both are drawn in this one panel",
+   "page_in_pdf": 5,
+   "journal_page": 279,
+   "caption_info": {
+    "film": "Kodak Gold 100",
+    "film_per_caption": "Kodak Gold 100",
+    "film_per_plot_legend": "Kodak Gold 100",
+    "film_per_body_text": "Kodak Gold 100",
+    "K_um": 15,
+    "Kc_um": 90,
+    "chsf_percent_as_printed": "R = 6.24% ChSF in ESF"
+   },
+   "process": "Kodak C-41",
+   "measurement": "microdensitometer trace across the edge, density measured in green light",
+   "axes": {
+    "x": {
+     "label": "X [um]",
+     "unit": "micrometre",
+     "ticks_major": [
+      0,
+      100,
+      200,
+      300,
+      400
+     ],
+     "ticks_minor_step": 50,
+     "note": "zero is arbitrary (start of scan); the edge sits at about x = 202 um"
+    },
+    "y": {
+     "label": "D",
+     "unit": "optical density (green light; the paper does not say whether it is diffuse or specular)",
+     "ticks_major": [
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0
+     ],
+     "ticks_minor_step": 0.1,
+     "axis_bottom": 0.2,
+     "axis_top_tick": 1.1
+    }
+   },
+   "number_of_measured_edges": 1,
+   "curves": {
+    "trace": {
+     "description": "Centre-line of the plotted solid curve. The dashed experimental curve lies under it to within half a line width (about +/-0.006 D, +/-1.2 um) almost everywhere, so this trace is the model curve and also the experimental curve to that tolerance. It is not an independent experimental trace.",
+     "identity": "model (solid) curve; experimental (dashed) coincides within line width except at the fragments listed",
+     "points_x_um_D": [
+      [
+       4.0,
+       0.3257
+      ],
+      [
+       6.0,
+       0.3265
+      ],
+      [
+       8.0,
+       0.3293
+      ],
+      [
+       10.0,
+       0.3295
+      ],
+      [
+       12.0,
+       0.3274
+      ],
+      [
+       14.0,
+       0.3275
+      ],
+      [
+       16.0,
+       0.3282
+      ],
+      [
+       18.0,
+       0.3269
+      ],
+      [
+       20.0,
+       0.3269
+      ],
+      [
+       22.0,
+       0.3277
+      ],
+      [
+       24.0,
+       0.3277
+      ],
+      [
+       26.0,
+       0.3292
+      ],
+      [
+       28.0,
+       0.3293
+      ],
+      [
+       30.0,
+       0.3279
+      ],
+      [
+       32.0,
+       0.328
+      ],
+      [
+       34.0,
+       0.328
+      ],
+      [
+       36.0,
+       0.3274
+      ],
+      [
+       38.0,
+       0.3274
+      ],
+      [
+       40.0,
+       0.3275
+      ],
+      [
+       42.0,
+       0.3268
+      ],
+      [
+       44.0,
+       0.3269
+      ],
+      [
+       46.0,
+       0.3269
+      ],
+      [
+       48.0,
+       0.3284
+      ],
+      [
+       50.0,
+       0.3263
+      ],
+      [
+       52.0,
+       0.3271
+      ],
+      [
+       54.0,
+       0.3257
+      ],
+      [
+       56.0,
+       0.3268
+      ],
+      [
+       58.0,
+       0.328
+      ],
+      [
+       60.0,
+       0.3273
+      ],
+      [
+       62.0,
+       0.3274
+      ],
+      [
+       64.0,
+       0.3249
+      ],
+      [
+       66.0,
+       0.3246
+      ],
+      [
+       68.0,
+       0.3276
+      ],
+      [
+       70.0,
+       0.327
+      ],
+      [
+       72.0,
+       0.3258
+      ],
+      [
+       74.0,
+       0.3281
+      ],
+      [
+       76.0,
+       0.3264
+      ],
+      [
+       78.0,
+       0.3264
+      ],
+      [
+       80.0,
+       0.3267
+      ],
+      [
+       82.0,
+       0.3253
+      ],
+      [
+       84.0,
+       0.3245
+      ],
+      [
+       86.0,
+       0.3257
+      ],
+      [
+       88.0,
+       0.3238
+      ],
+      [
+       90.0,
+       0.3256
+      ],
+      [
+       92.0,
+       0.3274
+      ],
+      [
+       94.0,
+       0.3269
+      ],
+      [
+       96.0,
+       0.3269
+      ],
+      [
+       98.0,
+       0.3286
+      ],
+      [
+       100.0,
+       0.3294
+      ],
+      [
+       102.0,
+       0.3296
+      ],
+      [
+       104.0,
+       0.3293
+      ],
+      [
+       106.0,
+       0.3294
+      ],
+      [
+       108.0,
+       0.3298
+      ],
+      [
+       110.0,
+       0.3295
+      ],
+      [
+       112.0,
+       0.3288
+      ],
+      [
+       114.0,
+       0.3296
+      ],
+      [
+       116.0,
+       0.3289
+      ],
+      [
+       118.0,
+       0.3283
+      ],
+      [
+       120.0,
+       0.3269
+      ],
+      [
+       122.0,
+       0.3271
+      ],
+      [
+       124.0,
+       0.3279
+      ],
+      [
+       126.0,
+       0.3286
+      ],
+      [
+       128.0,
+       0.3285
+      ],
+      [
+       130.0,
+       0.3308
+      ],
+      [
+       132.0,
+       0.333
+      ],
+      [
+       134.0,
+       0.333
+      ],
+      [
+       136.0,
+       0.3314
+      ],
+      [
+       138.0,
+       0.331
+      ],
+      [
+       140.0,
+       0.3318
+      ],
+      [
+       142.0,
+       0.3304
+      ],
+      [
+       144.0,
+       0.3304
+      ],
+      [
+       146.0,
+       0.3298
+      ],
+      [
+       148.0,
+       0.3298
+      ],
+      [
+       150.0,
+       0.3285
+      ],
+      [
+       152.0,
+       0.3285
+      ],
+      [
+       154.0,
+       0.3271
+      ],
+      [
+       156.0,
+       0.3265
+      ],
+      [
+       158.0,
+       0.3251
+      ],
+      [
+       160.0,
+       0.3237
+      ],
+      [
+       162.0,
+       0.3238
+      ],
+      [
+       164.0,
+       0.3258
+      ],
+      [
+       166.0,
+       0.326
+      ],
+      [
+       168.0,
+       0.3247
+      ],
+      [
+       170.0,
+       0.3231
+      ],
+      [
+       172.0,
+       0.3226
+      ],
+      [
+       174.0,
+       0.3227
+      ],
+      [
+       176.0,
+       0.3213
+      ],
+      [
+       178.0,
+       0.3221
+      ],
+      [
+       180.0,
+       0.3194
+      ],
+      [
+       182.0,
+       0.3179
+      ],
+      [
+       184.0,
+       0.3179
+      ],
+      [
+       186.0,
+       0.318
+      ],
+      [
+       188.0,
+       0.3195
+      ],
+      [
+       190.0,
+       0.3214
+      ],
+      [
+       192.0,
+       0.3262
+      ],
+      [
+       194.0,
+       0.3325
+      ],
+      [
+       196.0,
+       0.3495
+      ],
+      [
+       198.0,
+       0.3839
+      ],
+      [
+       200.0,
+       0.4383
+      ],
+      [
+       202.0,
+       0.5518
+      ],
+      [
+       204.0,
+       0.8152
+      ],
+      [
+       206.0,
+       0.9473
+      ],
+      [
+       208.0,
+       1.012
+      ],
+      [
+       210.0,
+       1.0341
+      ],
+      [
+       212.0,
+       1.0417
+      ],
+      [
+       214.0,
+       1.0417
+      ],
+      [
+       216.0,
+       1.0366
+      ],
+      [
+       218.0,
+       1.0315
+      ],
+      [
+       220.0,
+       1.0251
+      ],
+      [
+       222.0,
+       1.0167
+      ],
+      [
+       224.0,
+       1.0088
+      ],
+      [
+       226.0,
+       0.9996
+      ],
+      [
+       228.0,
+       0.991
+      ],
+      [
+       230.0,
+       0.9832
+      ],
+      [
+       232.0,
+       0.9786
+      ],
+      [
+       234.0,
+       0.9721
+      ],
+      [
+       236.0,
+       0.9686
+      ],
+      [
+       238.0,
+       0.9624
+      ],
+      [
+       240.0,
+       0.9589
+      ],
+      [
+       242.0,
+       0.9537
+      ],
+      [
+       244.0,
+       0.9505
+      ],
+      [
+       246.0,
+       0.9488
+      ],
+      [
+       248.0,
+       0.9474
+      ],
+      [
+       250.0,
+       0.9446
+      ],
+      [
+       252.0,
+       0.9418
+      ],
+      [
+       254.0,
+       0.9375
+      ],
+      [
+       256.0,
+       0.9347
+      ],
+      [
+       258.0,
+       0.9325
+      ],
+      [
+       260.0,
+       0.9305
+      ],
+      [
+       262.0,
+       0.9277
+      ],
+      [
+       264.0,
+       0.9273
+      ],
+      [
+       266.0,
+       0.927
+      ],
+      [
+       268.0,
+       0.9261
+      ],
+      [
+       270.0,
+       0.9235
+      ],
+      [
+       272.0,
+       0.921
+      ],
+      [
+       274.0,
+       0.9195
+      ],
+      [
+       276.0,
+       0.9175
+      ],
+      [
+       278.0,
+       0.9165
+      ],
+      [
+       280.0,
+       0.9147
+      ],
+      [
+       282.0,
+       0.914
+      ],
+      [
+       284.0,
+       0.9126
+      ],
+      [
+       286.0,
+       0.9134
+      ],
+      [
+       288.0,
+       0.9134
+      ],
+      [
+       290.0,
+       0.9136
+      ],
+      [
+       292.0,
+       0.9144
+      ],
+      [
+       294.0,
+       0.9157
+      ],
+      [
+       296.0,
+       0.9158
+      ],
+      [
+       298.0,
+       0.9166
+      ],
+      [
+       300.0,
+       0.9187
+      ],
+      [
+       302.0,
+       0.9174
+      ],
+      [
+       304.0,
+       0.9168
+      ],
+      [
+       306.0,
+       0.9175
+      ],
+      [
+       308.0,
+       0.9176
+      ],
+      [
+       310.0,
+       0.9184
+      ],
+      [
+       312.0,
+       0.9191
+      ],
+      [
+       314.0,
+       0.9192
+      ],
+      [
+       316.0,
+       0.9192
+      ],
+      [
+       318.0,
+       0.92
+      ],
+      [
+       320.0,
+       0.9198
+      ],
+      [
+       322.0,
+       0.9166
+      ],
+      [
+       324.0,
+       0.9166
+      ],
+      [
+       326.0,
+       0.9167
+      ],
+      [
+       328.0,
+       0.9174
+      ],
+      [
+       330.0,
+       0.9174
+      ],
+      [
+       332.0,
+       0.9166
+      ],
+      [
+       334.0,
+       0.9147
+      ],
+      [
+       336.0,
+       0.9174
+      ],
+      [
+       338.0,
+       0.9156
+      ],
+      [
+       340.0,
+       0.9146
+      ],
+      [
+       342.0,
+       0.9156
+      ],
+      [
+       344.0,
+       0.9141
+      ],
+      [
+       346.0,
+       0.9144
+      ],
+      [
+       348.0,
+       0.9144
+      ],
+      [
+       350.0,
+       0.9143
+      ],
+      [
+       352.0,
+       0.9165
+      ],
+      [
+       354.0,
+       0.9146
+      ],
+      [
+       356.0,
+       0.9146
+      ],
+      [
+       358.0,
+       0.9171
+      ],
+      [
+       360.0,
+       0.919
+      ],
+      [
+       362.0,
+       0.9213
+      ],
+      [
+       364.0,
+       0.9207
+      ],
+      [
+       366.0,
+       0.9182
+      ],
+      [
+       368.0,
+       0.9171
+      ],
+      [
+       370.0,
+       0.9165
+      ],
+      [
+       372.0,
+       0.9172
+      ],
+      [
+       374.0,
+       0.9162
+      ],
+      [
+       376.0,
+       0.9166
+      ],
+      [
+       378.0,
+       0.9189
+      ],
+      [
+       380.0,
+       0.9196
+      ],
+      [
+       382.0,
+       0.9183
+      ],
+      [
+       384.0,
+       0.9176
+      ],
+      [
+       386.0,
+       0.9169
+      ],
+      [
+       388.0,
+       0.9168
+      ],
+      [
+       390.0,
+       0.917
+      ],
+      [
+       392.0,
+       0.9157
+      ],
+      [
+       394.0,
+       0.9157
+      ],
+      [
+       396.0,
+       0.9172
+      ],
+      [
+       398.0,
+       0.9172
+      ],
+      [
+       400.0,
+       0.9173
+      ],
+      [
+       402.0,
+       0.916
+      ],
+      [
+       404.0,
+       0.9172
+      ],
+      [
+       406.0,
+       0.9161
+      ],
+      [
+       408.0,
+       0.9176
+      ]
+     ],
+     "spacing_um": 2.0
+    },
+    "trace_edge_fine": {
+     "description": "The same centre-line on a 0.5 um grid over the transition (180-230 um)",
+     "points_x_um_D": [
+      [
+       180.0,
+       0.3194
+      ],
+      [
+       180.5,
+       0.3193
+      ],
+      [
+       181.0,
+       0.3193
+      ],
+      [
+       181.5,
+       0.3193
+      ],
+      [
+       182.0,
+       0.3179
+      ],
+      [
+       182.5,
+       0.3179
+      ],
+      [
+       183.0,
+       0.3178
+      ],
+      [
+       183.5,
+       0.3172
+      ],
+      [
+       184.0,
+       0.3179
+      ],
+      [
+       184.5,
+       0.318
+      ],
+      [
+       185.0,
+       0.318
+      ],
+      [
+       185.5,
+       0.318
+      ],
+      [
+       186.0,
+       0.318
+      ],
+      [
+       186.5,
+       0.318
+      ],
+      [
+       187.0,
+       0.3188
+      ],
+      [
+       187.5,
+       0.3188
+      ],
+      [
+       188.0,
+       0.3195
+      ],
+      [
+       188.5,
+       0.3202
+      ],
+      [
+       189.0,
+       0.3203
+      ],
+      [
+       189.5,
+       0.321
+      ],
+      [
+       190.0,
+       0.3214
+      ],
+      [
+       190.5,
+       0.322
+      ],
+      [
+       191.0,
+       0.3236
+      ],
+      [
+       191.5,
+       0.3249
+      ],
+      [
+       192.0,
+       0.3262
+      ],
+      [
+       192.5,
+       0.3282
+      ],
+      [
+       193.0,
+       0.3296
+      ],
+      [
+       193.5,
+       0.3335
+      ],
+      [
+       194.0,
+       0.3325
+      ],
+      [
+       194.5,
+       0.3376
+      ],
+      [
+       195.0,
+       0.3414
+      ],
+      [
+       195.5,
+       0.3445
+      ],
+      [
+       196.0,
+       0.3495
+      ],
+      [
+       196.5,
+       0.3545
+      ],
+      [
+       197.0,
+       0.364
+      ],
+      [
+       197.5,
+       0.3744
+      ],
+      [
+       198.0,
+       0.3839
+      ],
+      [
+       198.5,
+       0.395
+      ],
+      [
+       199.0,
+       0.4058
+      ],
+      [
+       199.5,
+       0.4179
+      ],
+      [
+       200.0,
+       0.4383
+      ],
+      [
+       200.5,
+       0.4552
+      ],
+      [
+       201.0,
+       0.4739
+      ],
+      [
+       201.5,
+       0.5088
+      ],
+      [
+       202.0,
+       0.5518
+      ],
+      [
+       202.5,
+       0.6058
+      ],
+      [
+       203.0,
+       0.6904
+      ],
+      [
+       203.5,
+       0.7773
+      ],
+      [
+       204.0,
+       0.8152
+      ],
+      [
+       204.5,
+       0.8481
+      ],
+      [
+       205.0,
+       0.8804
+      ],
+      [
+       205.5,
+       0.9183
+      ],
+      [
+       206.0,
+       0.9473
+      ],
+      [
+       206.5,
+       0.9783
+      ],
+      [
+       207.0,
+       0.9942
+      ],
+      [
+       207.5,
+       1.0076
+      ],
+      [
+       208.0,
+       1.012
+      ],
+      [
+       208.5,
+       1.0217
+      ],
+      [
+       209.0,
+       1.0289
+      ],
+      [
+       209.5,
+       1.0319
+      ],
+      [
+       210.0,
+       1.0341
+      ],
+      [
+       210.5,
+       1.0362
+      ],
+      [
+       211.0,
+       1.0402
+      ],
+      [
+       211.5,
+       1.0409
+      ],
+      [
+       212.0,
+       1.0417
+      ],
+      [
+       212.5,
+       1.0417
+      ],
+      [
+       213.0,
+       1.0424
+      ],
+      [
+       213.5,
+       1.0418
+      ],
+      [
+       214.0,
+       1.0417
+      ],
+      [
+       214.5,
+       1.0403
+      ],
+      [
+       215.0,
+       1.0395
+      ],
+      [
+       215.5,
+       1.0379
+      ],
+      [
+       216.0,
+       1.0366
+      ],
+      [
+       216.5,
+       1.0358
+      ],
+      [
+       217.0,
+       1.0346
+      ],
+      [
+       217.5,
+       1.0331
+      ],
+      [
+       218.0,
+       1.0315
+      ],
+      [
+       218.5,
+       1.0299
+      ],
+      [
+       219.0,
+       1.0283
+      ],
+      [
+       219.5,
+       1.0267
+      ],
+      [
+       220.0,
+       1.0251
+      ],
+      [
+       220.5,
+       1.0235
+      ],
+      [
+       221.0,
+       1.0219
+      ],
+      [
+       221.5,
+       1.0177
+      ],
+      [
+       222.0,
+       1.0167
+      ],
+      [
+       222.5,
+       1.0153
+      ],
+      [
+       223.0,
+       1.0135
+      ],
+      [
+       223.5,
+       1.0112
+      ],
+      [
+       224.0,
+       1.0088
+      ],
+      [
+       224.5,
+       1.0065
+      ],
+      [
+       225.0,
+       1.0042
+      ],
+      [
+       225.5,
+       1.0019
+      ],
+      [
+       226.0,
+       0.9996
+      ],
+      [
+       226.5,
+       0.9973
+      ],
+      [
+       227.0,
+       0.9947
+      ],
+      [
+       227.5,
+       0.9927
+      ],
+      [
+       228.0,
+       0.991
+      ],
+      [
+       228.5,
+       0.9887
+      ],
+      [
+       229.0,
+       0.9867
+      ],
+      [
+       229.5,
+       0.9843
+      ],
+      [
+       230.0,
+       0.9832
+      ]
+     ]
+    },
+    "experimental_fragments": {
+     "description": "Bits of the dashed experimental curve that can be seen off the solid line. \"separate\" = an isolated dash, centroid reliable to about +/-0.003 D. \"merged_into_line\" = a dash fused to one side of the solid line, placed at the outer edge minus half a dash width, about +/-0.004 D. \"residue_touching_line\" = the part of a touching dash that sticks out past the traced line, centroid biased away from the line. D_minus_trace = fragment D minus trace D at the same x. On the steep edge, compare x offsets rather than D.",
+     "points": [
+      {
+       "x_um": 66.12,
+       "D": 0.3318,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0072
+      },
+      {
+       "x_um": 77.28,
+       "D": 0.3336,
+       "kind": "merged_into_line",
+       "length_um": 2.92,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0072
+      },
+      {
+       "x_um": 84.35,
+       "D": 0.3303,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0056
+      },
+      {
+       "x_um": 90.57,
+       "D": 0.3454,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0186
+      },
+      {
+       "x_um": 96.95,
+       "D": 0.3425,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0148
+      },
+      {
+       "x_um": 99.0,
+       "D": 0.3389,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0099
+      },
+      {
+       "x_um": 105.85,
+       "D": 0.3453,
+       "kind": "merged_into_line",
+       "length_um": 1.06,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0159
+      },
+      {
+       "x_um": 107.76,
+       "D": 0.3409,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.011
+      },
+      {
+       "x_um": 123.33,
+       "D": 0.3324,
+       "kind": "merged_into_line",
+       "length_um": 2.13,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0076
+      },
+      {
+       "x_um": 208.62,
+       "D": 1.0057,
+       "kind": "merged_into_line",
+       "length_um": 0.0,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0177
+      },
+      {
+       "x_um": 218.83,
+       "D": 1.0222,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0067
+      },
+      {
+       "x_um": 224.04,
+       "D": 1.0007,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.008
+      },
+      {
+       "x_um": 230.13,
+       "D": 0.9731,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0099
+      },
+      {
+       "x_um": 238.54,
+       "D": 0.9517,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0098
+      },
+      {
+       "x_um": 274.54,
+       "D": 0.9389,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0201
+      },
+      {
+       "x_um": 281.22,
+       "D": 0.9355,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0215
+      },
+      {
+       "x_um": 289.65,
+       "D": 0.9242,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0109
+      },
+      {
+       "x_um": 291.45,
+       "D": 0.9214,
+       "kind": "merged_into_line",
+       "length_um": 1.06,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0072
+      },
+      {
+       "x_um": 323.23,
+       "D": 0.9326,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0163
+      },
+      {
+       "x_um": 330.57,
+       "D": 0.924,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0068
+      },
+      {
+       "x_um": 337.3,
+       "D": 0.9227,
+       "kind": "merged_into_line",
+       "length_um": 1.86,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0072
+      },
+      {
+       "x_um": 338.87,
+       "D": 0.9255,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0103
+      },
+      {
+       "x_um": 340.89,
+       "D": 0.9214,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0072
+      },
+      {
+       "x_um": 354.84,
+       "D": 0.9264,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0118
+      },
+      {
+       "x_um": 361.23,
+       "D": 0.9248,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0071
+      },
+      {
+       "x_um": 402.43,
+       "D": 0.9231,
+       "kind": "merged_into_line",
+       "length_um": 1.33,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0071
+      }
+     ]
+    }
+   },
+   "features": {
+    "plateau_low_D": 0.3276,
+    "plateau_low_sd": 0.0018,
+    "plateau_low_window_um": [
+     10,
+     150
+    ],
+    "plateau_high_D": 0.9166,
+    "plateau_high_sd": 0.0017,
+    "plateau_high_window_um": [
+     320,
+     400
+    ],
+    "fringe_min_D": 0.3179,
+    "fringe_min_x_um": 182.7,
+    "border_max_D": 1.0417,
+    "border_max_x_um": 213.3,
+    "dD1_fringe": 0.0097,
+    "dD2_border": 0.1251,
+    "R_dD2_over_dD1": 12.84,
+    "x10_um": 198.14,
+    "x50_um": 202.72,
+    "x90_um": 204.6,
+    "width_10_90_um": 6.47,
+    "max_slope_D_per_um": 0.134,
+    "max_slope_x_um": 202.5,
+    "max_slope_1um_diff_D_per_um": 0.1714,
+    "notes": "Plateaus are medians over the windows. Extrema come from a 2 um running median. The fringe minimum and border maximum are broad: the trace stays within 0.003 D of the extremum over roughly 6-8 um (fringe) and 4 um (border), so their x positions are good to only about +/-3 um. 10/50/90 % levels are measured between the two plateaus on the rising edge. These are features of the plotted (model ~ experiment) curve.",
+    "model_dDdX_peak_read_from_lower_panel": 0.125,
+    "dDdX_note": "The lower panel of the figure plots dD/dX. Its solid-curve peak was read from the topmost pixel of the peak against that panel's tick calibration (+/-0.003). Use it as an independent check on max_slope."
+   },
+   "calibration": {
+    "um_per_px_600dpi": 0.265809682588563,
+    "D_per_px_600dpi": 0.0014329231238201761,
+    "x_tick_resid_um": [
+     -0.51,
+     -0.35,
+     0.21,
+     0.37,
+     0.8,
+     0.16,
+     0.05,
+     -0.45,
+     -0.29
+    ],
+    "y_tick_resid_D": [
+     0.0007,
+     0.0026,
+     -0.002,
+     -0.0023,
+     -0.0019,
+     0.0006,
+     0.0018,
+     0.0015,
+     -0.0003,
+     -0.0006
+    ],
+    "line_thickness_px_600dpi": 8.0,
+    "line_half_width_um": 1.06,
+    "line_half_width_D": 0.0057,
+    "crop_box_px_600dpi": [
+     480,
+     2650,
+     2350,
+     3400
+    ],
+    "page_render": "pg-5.png"
+   }
+  },
+  "fig7a": {
+   "figure": "Fig. 7, top (D vs X) panel; the caption calls the dashed experimental curve \"(a)\" and the solid model curve \"(b)\"; both are drawn in this one panel",
+   "page_in_pdf": 6,
+   "journal_page": 280,
+   "caption_info": {
+    "film": "Kodak Gold 400 (most likely; see conflict)",
+    "film_per_caption": "Kodak Gold 200",
+    "film_per_plot_legend": "Kodak Gold 400",
+    "film_per_body_text": "Kodak Gold 400",
+    "conflict": "Caption says Gold 200; the plot legend inside the figure and the Section 3 body text both say Gold 400. Two of three sources say 400 and Fig. 6 is already the Gold 200 case, so the caption is most likely a typo. The K and Kc values (20, 90) are identical to Fig. 6; only %ChSF differs (2.3 vs 5.28).",
+    "K_um": 20,
+    "Kc_um": 90,
+    "chsf_percent_as_printed": "R = 2.3% ChSF in ESF"
+   },
+   "process": "Kodak C-41",
+   "measurement": "microdensitometer trace across the edge, density measured in green light",
+   "axes": {
+    "x": {
+     "label": "X [um]",
+     "unit": "micrometre",
+     "ticks_major": [
+      0,
+      100,
+      200,
+      300,
+      400
+     ],
+     "ticks_minor_step": 50,
+     "note": "zero is arbitrary (start of scan); the edge sits at about x = 202 um"
+    },
+    "y": {
+     "label": "D",
+     "unit": "optical density (green light; the paper does not say whether it is diffuse or specular)",
+     "ticks_major": [
+      0.2,
+      0.4,
+      0.6,
+      0.8,
+      1.0
+     ],
+     "ticks_minor_step": 0.1,
+     "axis_bottom": 0.2,
+     "axis_top_tick": 1.1
+    }
+   },
+   "number_of_measured_edges": 1,
+   "curves": {
+    "trace": {
+     "description": "Centre-line of the plotted solid curve. The dashed experimental curve lies under it to within half a line width (about +/-0.006 D, +/-1.2 um) almost everywhere, so this trace is the model curve and also the experimental curve to that tolerance. It is not an independent experimental trace.",
+     "identity": "model (solid) curve; experimental (dashed) coincides within line width except at the fragments listed",
+     "points_x_um_D": [
+      [
+       6.0,
+       0.3823
+      ],
+      [
+       8.0,
+       0.3822
+      ],
+      [
+       10.0,
+       0.3822
+      ],
+      [
+       12.0,
+       0.3814
+      ],
+      [
+       14.0,
+       0.3814
+      ],
+      [
+       16.0,
+       0.3821
+      ],
+      [
+       18.0,
+       0.3821
+      ],
+      [
+       20.0,
+       0.3828
+      ],
+      [
+       22.0,
+       0.3813
+      ],
+      [
+       24.0,
+       0.3805
+      ],
+      [
+       26.0,
+       0.3827
+      ],
+      [
+       28.0,
+       0.3819
+      ],
+      [
+       30.0,
+       0.3819
+      ],
+      [
+       32.0,
+       0.3807
+      ],
+      [
+       34.0,
+       0.3825
+      ],
+      [
+       36.0,
+       0.3832
+      ],
+      [
+       38.0,
+       0.3832
+      ],
+      [
+       40.0,
+       0.3832
+      ],
+      [
+       42.0,
+       0.3839
+      ],
+      [
+       44.0,
+       0.3838
+      ],
+      [
+       46.0,
+       0.3838
+      ],
+      [
+       48.0,
+       0.3838
+      ],
+      [
+       50.0,
+       0.383
+      ],
+      [
+       52.0,
+       0.383
+      ],
+      [
+       54.0,
+       0.3837
+      ],
+      [
+       56.0,
+       0.3852
+      ],
+      [
+       58.0,
+       0.3865
+      ],
+      [
+       60.0,
+       0.3856
+      ],
+      [
+       62.0,
+       0.3835
+      ],
+      [
+       64.0,
+       0.382
+      ],
+      [
+       66.0,
+       0.382
+      ],
+      [
+       68.0,
+       0.3842
+      ],
+      [
+       70.0,
+       0.3841
+      ],
+      [
+       72.0,
+       0.3855
+      ],
+      [
+       74.0,
+       0.3862
+      ],
+      [
+       76.0,
+       0.3847
+      ],
+      [
+       78.0,
+       0.3847
+      ],
+      [
+       80.0,
+       0.3848
+      ],
+      [
+       82.0,
+       0.3854
+      ],
+      [
+       84.0,
+       0.3832
+      ],
+      [
+       86.0,
+       0.3839
+      ],
+      [
+       88.0,
+       0.3838
+      ],
+      [
+       90.0,
+       0.3838
+      ],
+      [
+       92.0,
+       0.3845
+      ],
+      [
+       94.0,
+       0.3837
+      ],
+      [
+       96.0,
+       0.3837
+      ],
+      [
+       98.0,
+       0.3844
+      ],
+      [
+       100.0,
+       0.3837
+      ],
+      [
+       102.0,
+       0.3836
+      ],
+      [
+       104.0,
+       0.3814
+      ],
+      [
+       106.0,
+       0.3835
+      ],
+      [
+       108.0,
+       0.3835
+      ],
+      [
+       110.0,
+       0.3842
+      ],
+      [
+       112.0,
+       0.3849
+      ],
+      [
+       114.0,
+       0.3838
+      ],
+      [
+       116.0,
+       0.3834
+      ],
+      [
+       118.0,
+       0.3833
+      ],
+      [
+       120.0,
+       0.3797
+      ],
+      [
+       122.0,
+       0.3825
+      ],
+      [
+       124.0,
+       0.3832
+      ],
+      [
+       126.0,
+       0.3803
+      ],
+      [
+       128.0,
+       0.3817
+      ],
+      [
+       130.0,
+       0.3817
+      ],
+      [
+       132.0,
+       0.3831
+      ],
+      [
+       134.0,
+       0.3838
+      ],
+      [
+       136.0,
+       0.3817
+      ],
+      [
+       138.0,
+       0.3808
+      ],
+      [
+       140.0,
+       0.3797
+      ],
+      [
+       142.0,
+       0.3778
+      ],
+      [
+       144.0,
+       0.3776
+      ],
+      [
+       146.0,
+       0.3783
+      ],
+      [
+       148.0,
+       0.3763
+      ],
+      [
+       150.0,
+       0.3748
+      ],
+      [
+       152.0,
+       0.3746
+      ],
+      [
+       154.0,
+       0.3755
+      ],
+      [
+       156.0,
+       0.3745
+      ],
+      [
+       158.0,
+       0.3739
+      ],
+      [
+       160.0,
+       0.3739
+      ],
+      [
+       162.0,
+       0.3716
+      ],
+      [
+       164.0,
+       0.3697
+      ],
+      [
+       166.0,
+       0.368
+      ],
+      [
+       168.0,
+       0.3672
+      ],
+      [
+       170.0,
+       0.365
+      ],
+      [
+       172.0,
+       0.3635
+      ],
+      [
+       174.0,
+       0.3613
+      ],
+      [
+       176.0,
+       0.3591
+      ],
+      [
+       178.0,
+       0.3562
+      ],
+      [
+       180.0,
+       0.3534
+      ],
+      [
+       182.0,
+       0.3517
+      ],
+      [
+       184.0,
+       0.3503
+      ],
+      [
+       186.0,
+       0.3487
+      ],
+      [
+       188.0,
+       0.3473
+      ],
+      [
+       190.0,
+       0.345
+      ],
+      [
+       192.0,
+       0.3462
+      ],
+      [
+       194.0,
+       0.353
+      ],
+      [
+       196.0,
+       0.3635
+      ],
+      [
+       198.0,
+       0.3998
+      ],
+      [
+       200.0,
+       0.4715
+      ],
+      [
+       202.0,
+       0.5501
+      ],
+      [
+       204.0,
+       0.6798
+      ],
+      [
+       206.0,
+       0.7992
+      ],
+      [
+       208.0,
+       0.8653
+      ],
+      [
+       210.0,
+       0.893
+      ],
+      [
+       212.0,
+       0.8993
+      ],
+      [
+       214.0,
+       0.9075
+      ],
+      [
+       216.0,
+       0.9067
+      ],
+      [
+       218.0,
+       0.9023
+      ],
+      [
+       220.0,
+       0.8964
+      ],
+      [
+       222.0,
+       0.8892
+      ],
+      [
+       224.0,
+       0.8833
+      ],
+      [
+       226.0,
+       0.8782
+      ],
+      [
+       228.0,
+       0.8713
+      ],
+      [
+       230.0,
+       0.8665
+      ],
+      [
+       232.0,
+       0.8599
+      ],
+      [
+       234.0,
+       0.8555
+      ],
+      [
+       236.0,
+       0.8511
+      ],
+      [
+       238.0,
+       0.8475
+      ],
+      [
+       240.0,
+       0.8442
+      ],
+      [
+       242.0,
+       0.8416
+      ],
+      [
+       244.0,
+       0.8387
+      ],
+      [
+       246.0,
+       0.8358
+      ],
+      [
+       248.0,
+       0.8342
+      ],
+      [
+       250.0,
+       0.8327
+      ],
+      [
+       252.0,
+       0.8313
+      ],
+      [
+       254.0,
+       0.8306
+      ],
+      [
+       256.0,
+       0.8283
+      ],
+      [
+       258.0,
+       0.8282
+      ],
+      [
+       260.0,
+       0.8268
+      ],
+      [
+       262.0,
+       0.8267
+      ],
+      [
+       264.0,
+       0.826
+      ],
+      [
+       266.0,
+       0.8239
+      ],
+      [
+       268.0,
+       0.8235
+      ],
+      [
+       270.0,
+       0.823
+      ],
+      [
+       272.0,
+       0.8222
+      ],
+      [
+       274.0,
+       0.8214
+      ],
+      [
+       276.0,
+       0.8207
+      ],
+      [
+       278.0,
+       0.8199
+      ],
+      [
+       280.0,
+       0.8192
+      ],
+      [
+       282.0,
+       0.8184
+      ],
+      [
+       284.0,
+       0.8184
+      ],
+      [
+       286.0,
+       0.8183
+      ],
+      [
+       288.0,
+       0.8168
+      ],
+      [
+       290.0,
+       0.82
+      ],
+      [
+       292.0,
+       0.8166
+      ],
+      [
+       294.0,
+       0.8167
+      ],
+      [
+       296.0,
+       0.8189
+      ],
+      [
+       298.0,
+       0.8181
+      ],
+      [
+       300.0,
+       0.8166
+      ],
+      [
+       302.0,
+       0.8166
+      ],
+      [
+       304.0,
+       0.8182
+      ],
+      [
+       306.0,
+       0.8187
+      ],
+      [
+       308.0,
+       0.8171
+      ],
+      [
+       310.0,
+       0.8158
+      ],
+      [
+       312.0,
+       0.8157
+      ],
+      [
+       314.0,
+       0.8164
+      ],
+      [
+       316.0,
+       0.8157
+      ],
+      [
+       318.0,
+       0.8156
+      ],
+      [
+       320.0,
+       0.8157
+      ],
+      [
+       322.0,
+       0.8167
+      ],
+      [
+       324.0,
+       0.817
+      ],
+      [
+       326.0,
+       0.8162
+      ],
+      [
+       328.0,
+       0.8155
+      ],
+      [
+       330.0,
+       0.8154
+      ],
+      [
+       332.0,
+       0.8154
+      ],
+      [
+       334.0,
+       0.8154
+      ],
+      [
+       336.0,
+       0.8153
+      ],
+      [
+       338.0,
+       0.8153
+      ],
+      [
+       340.0,
+       0.8153
+      ],
+      [
+       342.0,
+       0.8145
+      ],
+      [
+       344.0,
+       0.8145
+      ],
+      [
+       346.0,
+       0.8144
+      ],
+      [
+       348.0,
+       0.8151
+      ],
+      [
+       350.0,
+       0.8151
+      ],
+      [
+       352.0,
+       0.8151
+      ],
+      [
+       354.0,
+       0.8158
+      ],
+      [
+       356.0,
+       0.8157
+      ],
+      [
+       358.0,
+       0.815
+      ],
+      [
+       360.0,
+       0.8142
+      ],
+      [
+       362.0,
+       0.8142
+      ],
+      [
+       364.0,
+       0.8134
+      ],
+      [
+       366.0,
+       0.8134
+      ],
+      [
+       368.0,
+       0.8134
+      ],
+      [
+       370.0,
+       0.814
+      ],
+      [
+       372.0,
+       0.8139
+      ],
+      [
+       374.0,
+       0.814
+      ],
+      [
+       376.0,
+       0.8132
+      ],
+      [
+       378.0,
+       0.8132
+      ],
+      [
+       380.0,
+       0.8111
+      ],
+      [
+       382.0,
+       0.8109
+      ],
+      [
+       384.0,
+       0.8116
+      ],
+      [
+       386.0,
+       0.8138
+      ],
+      [
+       388.0,
+       0.8123
+      ],
+      [
+       390.0,
+       0.8123
+      ],
+      [
+       392.0,
+       0.813
+      ],
+      [
+       394.0,
+       0.8115
+      ],
+      [
+       396.0,
+       0.8127
+      ],
+      [
+       398.0,
+       0.8121
+      ],
+      [
+       400.0,
+       0.8128
+      ],
+      [
+       402.0,
+       0.8128
+      ],
+      [
+       404.0,
+       0.812
+      ],
+      [
+       406.0,
+       0.8115
+      ],
+      [
+       408.0,
+       0.812
+      ],
+      [
+       410.0,
+       0.8112
+      ],
+      [
+       412.0,
+       0.8112
+      ]
+     ],
+     "spacing_um": 2.0
+    },
+    "trace_edge_fine": {
+     "description": "The same centre-line on a 0.5 um grid over the transition (180-230 um)",
+     "points_x_um_D": [
+      [
+       180.0,
+       0.3534
+      ],
+      [
+       180.5,
+       0.3525
+      ],
+      [
+       181.0,
+       0.3525
+      ],
+      [
+       181.5,
+       0.3523
+      ],
+      [
+       182.0,
+       0.3517
+      ],
+      [
+       182.5,
+       0.351
+      ],
+      [
+       183.0,
+       0.351
+      ],
+      [
+       183.5,
+       0.3503
+      ],
+      [
+       184.0,
+       0.3503
+      ],
+      [
+       184.5,
+       0.3502
+      ],
+      [
+       185.0,
+       0.35
+      ],
+      [
+       185.5,
+       0.3493
+      ],
+      [
+       186.0,
+       0.3487
+      ],
+      [
+       186.5,
+       0.348
+      ],
+      [
+       187.0,
+       0.3474
+      ],
+      [
+       187.5,
+       0.3473
+      ],
+      [
+       188.0,
+       0.3473
+      ],
+      [
+       188.5,
+       0.3458
+      ],
+      [
+       189.0,
+       0.3451
+      ],
+      [
+       189.5,
+       0.3451
+      ],
+      [
+       190.0,
+       0.345
+      ],
+      [
+       190.5,
+       0.3443
+      ],
+      [
+       191.0,
+       0.3437
+      ],
+      [
+       191.5,
+       0.3455
+      ],
+      [
+       192.0,
+       0.3462
+      ],
+      [
+       192.5,
+       0.3472
+      ],
+      [
+       193.0,
+       0.3489
+      ],
+      [
+       193.5,
+       0.3518
+      ],
+      [
+       194.0,
+       0.353
+      ],
+      [
+       194.5,
+       0.3537
+      ],
+      [
+       195.0,
+       0.3545
+      ],
+      [
+       195.5,
+       0.3598
+      ],
+      [
+       196.0,
+       0.3635
+      ],
+      [
+       196.5,
+       0.3685
+      ],
+      [
+       197.0,
+       0.3753
+      ],
+      [
+       197.5,
+       0.384
+      ],
+      [
+       198.0,
+       0.3998
+      ],
+      [
+       198.5,
+       0.4139
+      ],
+      [
+       199.0,
+       0.4314
+      ],
+      [
+       199.5,
+       0.4441
+      ],
+      [
+       200.0,
+       0.4715
+      ],
+      [
+       200.5,
+       0.4916
+      ],
+      [
+       201.0,
+       0.5086
+      ],
+      [
+       201.5,
+       0.5244
+      ],
+      [
+       202.0,
+       0.5501
+      ],
+      [
+       202.5,
+       0.5798
+      ],
+      [
+       203.0,
+       0.612
+      ],
+      [
+       203.5,
+       0.6521
+      ],
+      [
+       204.0,
+       0.6798
+      ],
+      [
+       204.5,
+       0.7225
+      ],
+      [
+       205.0,
+       0.7473
+      ],
+      [
+       205.5,
+       0.7841
+      ],
+      [
+       206.0,
+       0.7992
+      ],
+      [
+       206.5,
+       0.8186
+      ],
+      [
+       207.0,
+       0.8406
+      ],
+      [
+       207.5,
+       0.8535
+      ],
+      [
+       208.0,
+       0.8653
+      ],
+      [
+       208.5,
+       0.8738
+      ],
+      [
+       209.0,
+       0.8891
+      ],
+      [
+       209.5,
+       0.8914
+      ],
+      [
+       210.0,
+       0.893
+      ],
+      [
+       210.5,
+       0.8965
+      ],
+      [
+       211.0,
+       0.8992
+      ],
+      [
+       211.5,
+       0.8983
+      ],
+      [
+       212.0,
+       0.8993
+      ],
+      [
+       212.5,
+       0.9026
+      ],
+      [
+       213.0,
+       0.9061
+      ],
+      [
+       213.5,
+       0.9068
+      ],
+      [
+       214.0,
+       0.9075
+      ],
+      [
+       214.5,
+       0.9082
+      ],
+      [
+       215.0,
+       0.9089
+      ],
+      [
+       215.5,
+       0.9075
+      ],
+      [
+       216.0,
+       0.9067
+      ],
+      [
+       216.5,
+       0.906
+      ],
+      [
+       217.0,
+       0.9051
+      ],
+      [
+       217.5,
+       0.9037
+      ],
+      [
+       218.0,
+       0.9023
+      ],
+      [
+       218.5,
+       0.9009
+      ],
+      [
+       219.0,
+       0.8996
+      ],
+      [
+       219.5,
+       0.8975
+      ],
+      [
+       220.0,
+       0.8964
+      ],
+      [
+       220.5,
+       0.8952
+      ],
+      [
+       221.0,
+       0.8955
+      ],
+      [
+       221.5,
+       0.8919
+      ],
+      [
+       222.0,
+       0.8892
+      ],
+      [
+       222.5,
+       0.8878
+      ],
+      [
+       223.0,
+       0.8859
+      ],
+      [
+       223.5,
+       0.8848
+      ],
+      [
+       224.0,
+       0.8833
+      ],
+      [
+       224.5,
+       0.8823
+      ],
+      [
+       225.0,
+       0.8804
+      ],
+      [
+       225.5,
+       0.879
+      ],
+      [
+       226.0,
+       0.8782
+      ],
+      [
+       226.5,
+       0.8761
+      ],
+      [
+       227.0,
+       0.874
+      ],
+      [
+       227.5,
+       0.8727
+      ],
+      [
+       228.0,
+       0.8713
+      ],
+      [
+       228.5,
+       0.8695
+      ],
+      [
+       229.0,
+       0.8685
+      ],
+      [
+       229.5,
+       0.868
+      ],
+      [
+       230.0,
+       0.8665
+      ]
+     ]
+    },
+    "experimental_fragments": {
+     "description": "Bits of the dashed experimental curve that can be seen off the solid line. \"separate\" = an isolated dash, centroid reliable to about +/-0.003 D. \"merged_into_line\" = a dash fused to one side of the solid line, placed at the outer edge minus half a dash width, about +/-0.004 D. \"residue_touching_line\" = the part of a touching dash that sticks out past the traced line, centroid biased away from the line. D_minus_trace = fragment D minus trace D at the same x. On the steep edge, compare x offsets rather than D.",
+     "points": [
+      {
+       "x_um": 8.31,
+       "D": 0.3929,
+       "kind": "merged_into_line",
+       "length_um": 1.33,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0107
+      },
+      {
+       "x_um": 10.98,
+       "D": 0.3927,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0105
+      },
+      {
+       "x_um": 15.79,
+       "D": 0.3734,
+       "kind": "merged_into_line",
+       "length_um": 1.87,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0087
+      },
+      {
+       "x_um": 29.81,
+       "D": 0.3706,
+       "kind": "merged_into_line",
+       "length_um": 3.74,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0113
+      },
+      {
+       "x_um": 51.96,
+       "D": 0.3717,
+       "kind": "merged_into_line",
+       "length_um": 1.6,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0113
+      },
+      {
+       "x_um": 59.04,
+       "D": 0.393,
+       "kind": "merged_into_line",
+       "length_um": 0.8,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0087
+      },
+      {
+       "x_um": 79.19,
+       "D": 0.4,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0153
+      },
+      {
+       "x_um": 82.13,
+       "D": 0.3965,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0111
+      },
+      {
+       "x_um": 87.2,
+       "D": 0.3734,
+       "kind": "merged_into_line",
+       "length_um": 2.67,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0104
+      },
+      {
+       "x_um": 94.59,
+       "D": 0.3703,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0134
+      },
+      {
+       "x_um": 102.02,
+       "D": 0.3749,
+       "kind": "merged_into_line",
+       "length_um": 2.4,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0087
+      },
+      {
+       "x_um": 118.57,
+       "D": 0.3746,
+       "kind": "merged_into_line",
+       "length_um": 1.33,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0087
+      },
+      {
+       "x_um": 127.11,
+       "D": 0.373,
+       "kind": "merged_into_line",
+       "length_um": 1.87,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0087
+      },
+      {
+       "x_um": 177.97,
+       "D": 0.3411,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0151
+      },
+      {
+       "x_um": 192.01,
+       "D": 0.3734,
+       "kind": "separate",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0272
+      },
+      {
+       "x_um": 195.11,
+       "D": 0.3799,
+       "kind": "merged_into_line",
+       "length_um": 1.2,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0248
+      },
+      {
+       "x_um": 197.35,
+       "D": 0.4369,
+       "kind": "merged_into_line",
+       "length_um": 1.07,
+       "in_steep_edge": true,
+       "D_minus_trace": 0.0556
+      },
+      {
+       "x_um": 200.79,
+       "D": 0.47,
+       "kind": "merged_into_line",
+       "length_um": 0.0,
+       "in_steep_edge": true,
+       "D_minus_trace": -0.0248
+      },
+      {
+       "x_um": 210.47,
+       "D": 0.8857,
+       "kind": "merged_into_line",
+       "length_um": 1.33,
+       "in_steep_edge": false,
+       "D_minus_trace": -0.0097
+      },
+      {
+       "x_um": 212.25,
+       "D": 0.9039,
+       "kind": "merged_into_line",
+       "length_um": 0.53,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0036
+      },
+      {
+       "x_um": 263.71,
+       "D": 0.8428,
+       "kind": "residue_touching_line",
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0168
+      },
+      {
+       "x_um": 288.34,
+       "D": 0.8256,
+       "kind": "merged_into_line",
+       "length_um": 1.33,
+       "in_steep_edge": false,
+       "D_minus_trace": 0.0088
+      }
+     ]
+    }
+   },
+   "features": {
+    "plateau_low_D": 0.3832,
+    "plateau_low_sd": 0.002,
+    "plateau_low_window_um": [
+     10,
+     150
+    ],
+    "plateau_high_D": 0.8142,
+    "plateau_high_sd": 0.0015,
+    "plateau_high_window_um": [
+     320,
+     400
+    ],
+    "fringe_min_D": 0.3443,
+    "fringe_min_x_um": 190.2,
+    "border_max_D": 0.9082,
+    "border_max_x_um": 214.3,
+    "dD1_fringe": 0.0389,
+    "dD2_border": 0.094,
+    "R_dD2_over_dD1": 2.42,
+    "x10_um": 198.81,
+    "x50_um": 202.74,
+    "x90_um": 205.28,
+    "width_10_90_um": 6.47,
+    "max_slope_D_per_um": 0.0695,
+    "max_slope_x_um": 203.7,
+    "max_slope_1um_diff_D_per_um": 0.0732,
+    "notes": "Plateaus are medians over the windows. Extrema come from a 2 um running median. The fringe minimum and border maximum are broad: the trace stays within 0.003 D of the extremum over roughly 6-8 um (fringe) and 4 um (border), so their x positions are good to only about +/-3 um. 10/50/90 % levels are measured between the two plateaus on the rising edge. These are features of the plotted (model ~ experiment) curve.",
+    "model_dDdX_peak_read_from_lower_panel": 0.08,
+    "dDdX_note": "The lower panel of the figure plots dD/dX. Its solid-curve peak was read from the topmost pixel of the peak against that panel's tick calibration (+/-0.003). Use it as an independent check on max_slope."
+   },
+   "calibration": {
+    "um_per_px_600dpi": 0.2669578454400449,
+    "D_per_px_600dpi": 0.001454344902110416,
+    "x_tick_resid_um": [
+     -0.72,
+     -0.37,
+     0.51,
+     0.19,
+     0.53,
+     0.75,
+     0.02,
+     -0.16,
+     -0.75
+    ],
+    "y_tick_resid_D": [
+     0.0009,
+     -0.0018,
+     -0.0021,
+     -0.0017,
+     0.0008,
+     0.0026,
+     0.0052,
+     0.0005,
+     -0.0006,
+     -0.0038
+    ],
+    "line_thickness_px_600dpi": 10.0,
+    "line_half_width_um": 1.33,
+    "line_half_width_D": 0.0073,
+    "crop_box_px_600dpi": [
+     540,
+     3220,
+     2400,
+     3950
+    ],
+    "page_render": "pg-6.png"
+   }
+  }
+ },
+ "uncertainty": {
+  "x_um": {
+   "tick_calibration_rms": 0.5,
+   "line_centre": 0.3,
+   "combined_1sigma": 0.6,
+   "note": "Tick residuals of the linear fit are up to 1.2 um because the ticks were hand-placed or scanned. On the steep edge a 0.6 um x error equals 0.04-0.08 D at fixed x. 10-90 % widths are good to about +/-1 um."
+  },
+  "D": {
+   "tick_calibration_rms": 0.0018,
+   "line_centre": 0.0015,
+   "combined_1sigma": 0.003,
+   "worst_tick_residual": 0.005,
+   "note": "Up to about +/-0.005 D locally where a merged dash widens the line (for example Fig. 6 foot at 189-195 um, Fig. 5 shoulder near 220 um)."
+  },
+  "experiment_vs_trace": "The measured curve is the dashed one and lies within about +/-0.006 D (half line width) of the trace except at the listed fragments (up to +/-0.02 D on plateaus, about 1-2 um earlier on the lower half of the Fig. 7 rise)."
+ }
+}

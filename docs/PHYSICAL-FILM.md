@@ -147,15 +147,50 @@ pixel size only decides how finely the film is sampled.
    per e-fold of a 20 µm chemical length) are a starting resolution, not a
    converged one.
 
-   *Next: a conservative reference solver* (the audit's priority 2): a CPU
-   finite-volume solver per layer and plane, conserving mass, with reduced
-   and oxidised developer, coupler inventory (two- or four-equivalent),
-   dye, bromide and iodide, DIR inventory and active inhibitor, the bath's
-   flux J = h(C_bath − C_surface) at the top surface, interlayer fluxes,
-   positivity-preserving reactions, and convergence checked over Δt and Δx.
-   Its material parameters are fitted once under each stock's reference
-   process; agitation, time, temperature and dilution then change even areas
-   and edges as its equations say. The fast path is then checked against it. Each step releases inhibitor with the
+   *The reference solver* (film_chemistry.lucb, film_chemistry_reference.lucb;
+   the audit's priority 2). A CPU finite-volume solver across the film and
+   down its layers, amounts per area so swelling conserves mass. Developer,
+   oxidized developer, bromide, a timed DIR's precursor and free inhibitor
+   move; halide, silver, image and DIR couplers (two- or four-equivalent),
+   dye and bound inhibitor stay. The bath exchanges through the surface at
+   J = h(c_bath − c_top). Reactions are limited to stay positive, transport is
+   implicit, and the splitting symmetric. Nothing is made or lost (to
+   round-off), and the result converges: Δt 0.02 against 0.01 s differs by
+   2·10⁻⁶; twice the cells by 4·10⁻⁴.
+
+   Its coatings are two Kodak patents' examples (dev/film/constructions,
+   make_constructions.py): US 6,680,165 example 6.1 for C-41 (13 layers,
+   a four-equivalent cyan coupler) and US 5,500,316 sample 1 for ECN-2. They
+   are reference emulsions, not Portra or Vision3. Transport: Iwano's CD-4
+   (14.6 µm²/s against dry thickness, so 99 in the swollen layer: reading it
+   as the swollen layer's own starves the bottom layer, which then cannot make
+   Portra's densities in 3:15), Iwano's KBr in 20 % gelatin (1100), swelling
+   2.6, the bath's exchange by surface renewal (Kodak EP 0564598). Each stock
+   is calibrated under its reference process: each record's developable
+   halide is solved so a large even patch makes the published curve (within
+   0.1 %). Development's rate and induction period (0.05 /s, 95 s) are fitted
+   to Kodak Z-131's ±40 s chart (six numbers, within 0.03 D; a soft start
+   could not make its asymmetry, a loss 1.6 times the gain).
+
+   Predicted, not fitted (Portra 400 in C-41):
+   - agitation: a tank inverted every 30 s lowers HD − LD 8 %, stand 20 %,
+     against a machine's flow; in a dilute developer dense areas lose most
+     (compensation, from the developer's balance alone);
+   - interimage: a single colour's gamma 1.03 / 0.97 / 1.04 of the neutral's,
+     weak against the 1.1–1.3 colour negatives are designed for;
+   - an edge against Kodak Gold 200's measured trace (Rajkowski and Nowak,
+     digitised in dev/film/edges): the border 3 % of the step (Gold 23 %),
+     13 µm in (Gold 12), the fringe 2 % (Gold 2.4 %).
+
+   The edge says what is missing. Raising the inhibitor's restraint (an
+   estimate, 1 /mM) to 4–64 brings interimage to 1.10–1.29 but lifts the
+   fringe with the border (16 % and 12 %), where Gold's border is nine times
+   its fringe: the inhibitor alone cannot make it. Something acting on the
+   dense side, the supply of developer or of oxidized developer to the
+   couplers, is underweighted. The fast path's edge (fitted to MTF) is 18 %.
+   Next: the oxidized developer's partition into the coupler dispersions
+   (Texter, Ross and Matsubara), and fitting the restraint on Gold's edge
+   with interimage held out. Each step releases inhibitor with the
    dye it forms under the inhibitor already released (DIR couplers react as
    dye forms); the developed curve is solved so an even field still develops
    to the published one (fixed point, damped; cached per development).

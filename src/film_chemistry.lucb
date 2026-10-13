@@ -26,7 +26,8 @@
 ##   release      P → F at k_release (ln 2 over its half-time)
 ##   binding      F + site → H at k_on·c_F·(c_sites − c_H)·Δz, back at k_off·H
 ##
-## g(t) = 1 − e^(−t/τ) is the induction before development runs. Each step
+## g(t) = 1 − e^(−(t − t_d)/τ) after the induction period t_d (0 before) is
+## the induction before development runs. Each step
 ## reacts first (limited so nothing goes negative), then diffuses each mobile
 ## species implicitly, across then down, the bath exchanging through the top
 ## surface at J = h·(c_bath − c_top) (h a length per time, so it does not move
@@ -65,6 +66,12 @@ pub struct Layer:
     pub var coupler: f64 = 0.0
     pub var dir_coupler: f64 = 0.0
     pub var equivalence: f64 = 4.0
+    ## Whether its DIR coupler releases through a timing group (a precursor
+    ## that moves, then frees the inhibitor at `Chemistry.k_release`), or
+    ## directly.
+    pub var timed: bool = false
+    ## Its silver halide (µmol/m²): the most an exposure can make developable.
+    pub var halide: f64 = 0.0
     ## An interlayer's scavenger of oxidized developer, a first-order rate (1/s).
     pub var scavenger: f64 = 0.0
     ## Sites that bind inhibitor (µmol/m²): the grains' surface.
@@ -87,14 +94,18 @@ pub struct Chemistry:
     pub var k_dir: f64 = 50.0
     ## Oxidized developer lost to sulfite (1/s).
     pub var k_sulfite: f64 = 1.0
-    ## The precursor's release (1/s; 0: the DIR releases inhibitor directly).
-    pub var k_release: f64 = 0.0
+    ## A timed DIR's precursor's release (1/s): ln 2 over 1 s, an estimate
+    ## within US 4,861,701's 0.1–60 s half-times.
+    pub var k_release: f64 = 0.6931
     ## Binding (1/(mM·s)) and unbinding (1/s). Binding is set so a free
     ## inhibitor goes √(D/(k_on·c_sites)) ≈ 19.5 µm before it binds (about 2 mM
     ## of sites), Rajkowski and Nowak's chemical spread length for Kodak Gold.
     pub var k_on: f64 = 0.13
     pub var k_off: f64 = 0.01
-    ## The induction time (s) and the swelling's time constant (s).
+    ## The induction: no grain starts developing before `delay` s, then
+    ## development comes up over `induction` s; and the swelling's time
+    ## constant (s).
+    pub var delay: f64 = 0.0
     pub var induction: f64 = 5.0
     pub var swelling: f64 = 10.0
 
@@ -244,7 +255,7 @@ func swell(grid: Grid*, chemistry: const Chemistry*, t: f64):
 ## no species goes below nothing.
 func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
     let n = grid.rows * grid.columns
-    let started = 1.0 - math.exp(-(begun + 0.5 * dt) / math.max(chemistry.induction, 1.0e-9))
+    let started = 1.0 - math.exp(-math.max(begun + 0.5 * dt - chemistry.delay, 0.0) / math.max(chemistry.induction, 1.0e-9))
     for row in 0..<grid.rows:
         let layer = grid.layers[grid.row_layer[row]]
         let wet = grid.row_wet[row]
@@ -286,7 +297,7 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
                 r_dir *= scale
                 r_lost *= scale
             # The precursor's release (or the DIR's own, with no timing group).
-            let r_release = chemistry.k_release * p_amount if chemistry.k_release > 0.0 else 0.0
+            let r_release = chemistry.k_release * p_amount
             # Binding to the grains' sites, and back.
             let free_sites = math.max(layer.sites * grid.row_dry[row] / math.max(layer.dry, 1.0e-12) / wet - c_h, 0.0)
             var r_on = chemistry.k_on * c_f * free_sites * wet
@@ -300,11 +311,10 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             grid.mobile[developer * n + at] = r_amount - 0.5 * r_dev * dt
             grid.mobile[oxidized * n + at] = math.max(o_amount + (0.5 * r_dev - 0.5 * layer.equivalence * r_cpl - r_dir - r_lost) * dt, 0.0)
             grid.mobile[bromide * n + at] = b_amount + r_dev * dt
-            if chemistry.k_release > 0.0:
-                grid.mobile[precursor * n + at] = p_amount + (r_dir - r_release) * dt
-                grid.mobile[inhibitor * n + at] = f_amount + (r_release - r_on + r_off) * dt
-            else:
-                grid.mobile[inhibitor * n + at] = f_amount + (r_dir - r_on + r_off) * dt
+            let to_precursor = r_dir if layer.timed else 0.0
+            let to_inhibitor = 0.0 if layer.timed else r_dir
+            grid.mobile[precursor * n + at] = math.max(p_amount + (to_precursor - r_release) * dt, 0.0)
+            grid.mobile[inhibitor * n + at] = f_amount + (to_inhibitor + r_release - r_on + r_off) * dt
             grid.fixed[bound * n + at] = h_amount + (r_on - r_off) * dt
             let share = 1.0 / (f64)grid.columns
             grid.books.developed += r_dev * dt * share

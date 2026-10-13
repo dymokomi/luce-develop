@@ -1,0 +1,439 @@
+## The reference chemistry set up for a stock and a process, and calibrated:
+## a patent's coating (film_constructions.lucb) in the process's bath, its
+## developable halide per exposure solved so that a large even patch,
+## developed exactly as the stock's sheet was, makes the stock's published
+## curve. Everything else the process does (another time, temperature,
+## agitation, an edge, a single colour) is then the chemistry's prediction,
+## not a fit (docs/PHYSICAL-FILM.md, part 4).
+##
+## Where the numbers come from (research_notes/Physical film process
+## simulation/owner_supplied_chemistry_data.md):
+## - developer diffusion: Iwano's CD-4 base, 14.6 µm²/s, taken as measured
+##   against dry thickness, so S²·14.6 in the swollen layer (S = 2.6: 99 µm²/s;
+##   the coordinate is not certain); oxidized developer alike (an estimate:
+##   no measurement found);
+## - bromide: Iwano's KBr in 20 % gelatin at 25 °C, 1100 µm²/s;
+## - the inhibitor: 100 µm²/s (an estimate), its binding set to Rajkowski and
+##   Nowak's 19.5 µm (film_chemistry's `Chemistry`);
+## - swelling 2.6 (Kodak EP 0942323's records, 2.3–3.2; Fuji's 2.4–3 in
+##   developer), toward it with a 20 s time constant (Fuji's T½ ≤ 20–30 s);
+## - the bath: ECN-2's SD-49 as Kodak H-24 gives it (CD-3 3.9 g/L, 8.9 mM;
+##   NaBr 1.20 g/L, 11.7 mM); C-41's as published formulas give it (CD-4 about
+##   4.5 g/L, 15.4 mM; KBr about 1.3 g/L, 10.9 mM: estimates);
+## - its exchange with the film: surface renewal, h = 2√(D/(πτ)) with D = 500
+##   µm²/s in the bath (Kodak EP 0564598B1): a machine's continuous flow 18
+##   µm/s (that patent's channel minimum), a tank inverted every 30 s τ = 30 s
+##   (4.6 µm/s), stand τ the whole development;
+## - dyes: molar absorption at their peaks, cyan 2.6, magenta 4.5, yellow
+##   2.0 × 10⁴ L/(mol·cm) (estimates for image dyes), turning a dye amount
+##   (the stock's normalized dyes) into µmol/m²: 10⁷·amount/ε.
+import memory
+from luce_std import math
+import film_chemistry
+from film_chemistry import Layer, Chemistry, Bath, Grid
+import film_constructions
+import film_model
+from film_model import Model
+import film_develop
+
+pub let extinction: f64[3] = [2.6e4, 4.5e4, 2.0e4]
+pub let bath_diffusion: f64 = 500.0
+let swelling: f64 = 2.6
+
+## The µmol/m² of record `record`'s dye in `amount` of it.
+pub func micromoles(amount: f64, record: usize) -> f64:
+    return amount * 1.0e7 / extinction[record]
+
+pub func amount_of(amount: f64, record: usize) -> f64:
+    return amount * extinction[record] / 1.0e7
+
+## How fast the bath renews the film's surface (µm/s) under agitation
+## `agitation` (film_develop's: 1 continuous, 2 intermittent, 3 stand) over
+## `seconds` of development.
+pub func exchange_of(agitation: i64, seconds: f64) -> f64:
+    if agitation == 1:
+        return 18.0
+    let tau = 30.0 if agitation == 2 else seconds
+    return 2.0 * math.sqrt(bath_diffusion / (math.pi * tau))
+
+## A coating in a bath for a time.
+pub struct Reference:
+    pub var layers: Layer[]
+    pub var chemistry: Chemistry
+    pub var bath: Bath
+    pub var seconds: f64
+
+    pub func release():
+        free(self.layers) in memory.heap
+
+## Process `process` (film_develop's index: 0 ECN-2, 1 C-41) for `minutes` at
+## `celsius` under `agitation` (0: the process's own), on the process's
+## reference coating. Its rates hold at the process's own temperature; others
+## follow Arrhenius (development from the process's published rate per degree,
+## diffusion at 18 kJ/mol, an estimate for small molecules in water).
+pub func reference_of(process: i64, minutes: f64, celsius: f64, agitation: i64 = 0) -> Reference!:
+    let standard = film_develop.processes[(usize)process]
+    var layers: Layer[]
+    var bath = Bath()
+    if process == 0:
+        let coating = film_constructions.us5500316_sample_1()
+        layers = try new Layer[coating.length] --- in memory.heap
+        for (at, layer) in coating.indexed():
+            layers[at] = layer
+        bath.holds = [8.9, 0.0, 11.7, 0.0, 0.0]
+    else:
+        let coating = film_constructions.us6680165_example_6_1()
+        layers = try new Layer[coating.length] --- in memory.heap
+        for (at, layer) in coating.indexed():
+            layers[at] = layer
+        bath.holds = [15.4, 0.0, 10.9, 0.0, 0.0]
+    for at in 0..<layers.length:
+        layers[at].swell = swelling
+    let seconds = minutes * 60.0
+    bath.exchange = exchange_of(agitation if agitation > 0 else standard.agitation, seconds)
+    var chemistry = Chemistry()
+    let developer = 14.6 * swelling * swelling
+    chemistry.diffusion = [developer, developer, 1100.0, developer, 100.0]
+    chemistry.swelling = 20.0
+    # Development's rate and induction period: fitted to Kodak Z-131's C-41
+    # control chart (HD − LD for 40 s more and less around 3:15: two constants
+    # to six numbers, within 0.03 D). 95 s lumps the gelatin's swelling, the
+    # developer's way in and the grains' own induction; ECN-2 shares them
+    # (an estimate: H-24 gives no such chart).
+    chemistry.k_develop = 0.05
+    chemistry.delay = 95.0
+    # Arrhenius from the process's own temperature.
+    let gas = 8.314462618
+    let own = standard.celsius + 273.15
+    let here = celsius + 273.15
+    let develop_energy = standard.rate * gas * own * own
+    let develop_factor = math.exp(-develop_energy / gas * (1.0 / here - 1.0 / own))
+    let diffusion_factor = math.exp(-18000.0 / gas * (1.0 / here - 1.0 / own))
+    chemistry.k_develop *= develop_factor
+    for k in 0..<film_chemistry.mobile_count:
+        chemistry.diffusion[k] *= diffusion_factor
+    return Reference(layers = layers, chemistry = chemistry, bath = bath, seconds = seconds)
+
+## Develop a large even patch: each record (red, green, blue) given
+## `developable` µmol/m² of halide; the dye each makes (µmol/m²).
+pub func even_patch(reference: const Reference*, developable: f64[3], step: f64 = 0.05) -> f64[3]!:
+    var grid = try film_chemistry.make_grid(reference.layers, 1, 1.0)
+    defer grid.release()
+    for record in 0..<(usize)3:
+        film_chemistry.expose(&grid, (i64)record, 0, developable[record])
+    try film_chemistry.develop(&grid, &reference.chemistry, &reference.bath, reference.seconds, step)
+    return [grid.record_total(film_chemistry.dye, 0, 0), grid.record_total(film_chemistry.dye, 1, 0), grid.record_total(film_chemistry.dye, 2, 0)]
+
+## Each record's halide (µmol/m²): the most an exposure can make developable.
+pub func capacity(reference: const Reference*) -> f64[3]:
+    var out: f64[3] = [0.0, 0.0, 0.0]
+    for layer in reference.layers:
+        if layer.record >= 0:
+            out[(usize)layer.record] += layer.halide
+    return out
+
+# mark: Calibration ===========================================================
+
+## The developable halide per record at sampled exposures: what makes the
+## stock's published curve under its reference process.
+pub struct Calibration:
+    ## The samples' log H, and per sample three µmol/m² (red, green, blue).
+    pub var log_h: f64[]
+    pub var developable: f64[]
+    ## The worst miss of the published curve (relative, of a record's dye).
+    pub var worst: f64
+
+    pub func release():
+        free(self.log_h) in memory.heap
+        free(self.developable) in memory.heap
+
+    ## The developable halide at log H `x`, interpolated, held at the ends.
+    pub func at(x: f64) -> f64[3]:
+        let n = self.log_h.length
+        if x <= self.log_h[0]:
+            return [self.developable[0], self.developable[1], self.developable[2]]
+        if x >= self.log_h[n - 1]:
+            return [self.developable[(n - 1) * 3], self.developable[(n - 1) * 3 + 1], self.developable[(n - 1) * 3 + 2]]
+        var i: usize = 0
+        while self.log_h[i + 1] < x:
+            i += 1
+        let t = (x - self.log_h[i]) / (self.log_h[i + 1] - self.log_h[i])
+        var out: f64[3]
+        for k in 0..<(usize)3:
+            out[k] = self.developable[i * 3 + k] * (1.0 - t) + self.developable[(i + 1) * 3 + k] * t
+        return out
+
+## The dye amounts (the stock's normalized units) of `model`'s published curve at sample `at`.
+func published(model: const Model*, at: usize) -> f64[3]:
+    return [model.neutral[at * 3], model.neutral[at * 3 + 1], model.neutral[at * 3 + 2]]
+
+## Calibrate `reference` to `model`'s stock: at every `stride`-th sample of
+## its curves from `low` to `high` log H, Newton's method on the three
+## records' developable halide (their interimage couples them) until the even
+## patch makes the published dye within 0.1 %.
+pub func calibrate(reference: const Reference*, model: const Model*, low: f64, high: f64, stride: usize = 32) -> Calibration!:
+    var places: usize = 0
+    for at in 0..<film_model.curve_samples:
+        let x = film_model.log_h_at(at)
+        if at % stride == 0 and x >= low and x <= high:
+            places += 1
+    var out = Calibration(worst = 0.0)
+    out.log_h = try new f64[places] --- in memory.heap
+    out.developable = try new f64[places * 3] --- in memory.heap
+    errdefer out.release()
+    let most = capacity(reference)
+    var guess: f64[3] = [0.0, 0.0, 0.0]
+    var index: usize = 0
+    for at in 0..<film_model.curve_samples:
+        let x = film_model.log_h_at(at)
+        if at % stride != 0 or x < low or x > high:
+            continue
+        let amounts = published(model, at)
+        var target: f64[3]
+        for k in 0..<(usize)3:
+            target[k] = micromoles(amounts[k], k)
+            if index == 0:
+                guess[k] = 4.0 * target[k]
+        var made = try even_patch(reference, guess)
+        for _ in 0..<12:
+            var miss = 0.0
+            for k in 0..<(usize)3:
+                miss = math.max(miss, math.abs(made[k] / math.max(target[k], 1.0e-9) - 1.0))
+            if miss < 1.0e-3:
+                break
+            # The Jacobian by nudging each record in turn.
+            var jacobian: f64[9]
+            for k in 0..<(usize)3:
+                var nudged = guess
+                let delta = math.max(1.0e-3 * guess[k], 1.0e-3)
+                nudged[k] += delta
+                let moved = try even_patch(reference, nudged)
+                for row in 0..<(usize)3:
+                    jacobian[row * 3 + k] = (moved[row] - made[row]) / delta
+            let residual: f64[3] = [made[0] - target[0], made[1] - target[1], made[2] - target[2]]
+            let inverse = film_model.invert3(jacobian) else break
+            for k in 0..<(usize)3:
+                let change = inverse[k * 3] * residual[0] + inverse[k * 3 + 1] * residual[1] + inverse[k * 3 + 2] * residual[2]
+                guess[k] = math.clamp(guess[k] - change, 0.0, most[k])
+            made = try even_patch(reference, guess)
+        for k in 0..<(usize)3:
+            out.worst = math.max(out.worst, math.abs(made[k] / math.max(target[k], 1.0e-9) - 1.0))
+            out.developable[index * 3 + k] = guess[k]
+        out.log_h[index] = x
+        index += 1
+    return out
+
+# mark: Tests =================================================================
+
+import film_stocks
+
+func portra_400() -> Model!:
+    return try film_model.build_model(film_stocks.stock_at(11))
+
+test "calibrated in C-41, the even patch makes Portra 400's published curve":
+    var model = portra_400() catch failure:
+        assert(false)
+        return
+    defer model.release()
+    assert(model.stock.name == "Kodak Portra 400")
+    var reference = reference_of(1, 3.25, 37.8) catch failure:
+        assert(false)
+        return
+    defer reference.release()
+    var calibration = calibrate(&reference, &model, model.grey_log_h - 2.5, model.grey_log_h + 3.0, 64) catch failure:
+        assert(false)
+        return
+    defer calibration.release()
+    for at in 0..<calibration.log_h.length:
+        print(f"log H {calibration.log_h[at]}: developable {calibration.developable[at * 3]} {calibration.developable[at * 3 + 1]} {calibration.developable[at * 3 + 2]}")
+    print(f"worst miss {calibration.worst}")
+    assert(calibration.worst < 2.0e-3)
+
+## The control strip's two patches (log H from grey): LD and HD, 1.5 apart, so
+## at gamma 0.6 their difference is Z-131's 0.9 contrast.
+let low_patch: f64 = -0.6
+let high_patch: f64 = 0.9
+
+## The scan's HD − LD (Status M, each channel) of `model`'s stock developed in
+## `reference`, its developable halide from `calibration`.
+func strip_contrast(reference: const Reference*, calibration: const Calibration*, model: const Model*) -> f64[3]!:
+    var out: f64[3]
+    var reads: f64[6]
+    for (index, offset) in [low_patch, high_patch].indexed():
+        let made = try even_patch(reference, calibration.at(model.grey_log_h + offset))
+        let amounts: f64[3] = [amount_of(made[0], 0), amount_of(made[1], 1), amount_of(made[2], 2)]
+        let read = model.scanned(amounts)
+        for k in 0..<(usize)3:
+            reads[index * 3 + k] = read[k]
+    for k in 0..<(usize)3:
+        out[k] = reads[3 + k] - reads[k]
+    return out
+
+## A reference calibrated to `model`'s stock in C-41 between LD and HD and a
+## little beyond (for the tests).
+func calibrated_c41(model: const Model*, minutes: f64 = 3.25, agitation: i64 = 0) -> (Reference, Calibration)!:
+    var reference = try reference_of(1, minutes, 37.8, agitation)
+    errdefer reference.release()
+    let calibration = try calibrate(&reference, model, model.grey_log_h - 1.6, model.grey_log_h + 1.6, 16)
+    return (reference, calibration)
+
+test "C-41 for 40 s more and less moves HD − LD as Kodak's Z-131 chart (fitted)":
+    var model = portra_400() catch failure:
+        assert(false)
+        return
+    defer model.release()
+    var (normal, calibration) = calibrated_c41(&model) catch failure:
+        assert(false)
+        return
+    defer normal.release()
+    defer calibration.release()
+    let base = strip_contrast(&normal, &calibration, &model) catch failure:
+        assert(false)
+        return
+    let gains: f64[3] = [0.12, 0.10, 0.14]
+    let losses: f64[3] = [0.19, 0.17, 0.23]
+    for (index, minutes) in [3.25 + 40.0 / 60.0, 3.25 - 40.0 / 60.0].indexed():
+        var other = reference_of(1, minutes, 37.8) catch failure:
+            assert(false)
+            return
+        defer other.release()
+        let moved = strip_contrast(&other, &calibration, &model) catch failure:
+            assert(false)
+            return
+        print(f"C-41 {minutes} min: HD-LD {moved[0] - base[0]} {moved[1] - base[1]} {moved[2] - base[2]}")
+        for k in 0..<(usize)3:
+            let kodak = gains[k] if index == 0 else -losses[k]
+            assert(math.abs(moved[k] - base[k] - kodak) < 0.04)
+
+test "agitation changes even areas' contrast (predicted)":
+    # Large even patches, HD − LD, under a machine's continuous flow (the
+    # process's own), a tank inverted every 30 s, and stand.
+    var model = portra_400() catch failure:
+        assert(false)
+        return
+    defer model.release()
+    var (normal, calibration) = calibrated_c41(&model) catch failure:
+        assert(false)
+        return
+    defer normal.release()
+    defer calibration.release()
+    let base = strip_contrast(&normal, &calibration, &model) catch failure:
+        assert(false)
+        return
+    var previous = base[1]
+    for agitation in [2, 3]:
+        var other = reference_of(1, 3.25, 37.8, agitation) catch failure:
+            assert(false)
+            return
+        defer other.release()
+        let moved = strip_contrast(&other, &calibration, &model) catch failure:
+            assert(false)
+            return
+        print(f"agitation {agitation} (h {other.bath.exchange} µm/s): HD-LD {moved[0]} {moved[1]} {moved[2]} against continuous {base[0]} {base[1]} {base[2]}")
+        assert(moved[1] < previous)
+        previous = moved[1]
+
+test "a single colour against a neutral (interimage, predicted)":
+    # One record exposed along its curve, the others held at grey: its gamma
+    # against the neutral's (Kodak WO 1994/022054 measured 0.98–1.30 on
+    # experimental coatings; colour negatives are designed near 1.1–1.3). With
+    # the estimated inhibitor restraint (1 /mM) the patent's coating gives
+    # about 1.03 / 0.97 / 1.04: weak. Raising the restraint to 4–64 /mM brings
+    # it to 1.10–1.29 but makes the edge's fringe four times Gold's (see the
+    # edge test): docs/PHYSICAL-FILM.md, part 4.
+    var model = portra_400() catch failure:
+        assert(false)
+        return
+    defer model.release()
+    var (normal, calibration) = calibrated_c41(&model) catch failure:
+        assert(false)
+        return
+    defer normal.release()
+    defer calibration.release()
+    let grey = calibration.at(model.grey_log_h)
+    var ratios: f64[3]
+    for record in 0..<(usize)3:
+        var neutral: f64[2]
+        var single: f64[2]
+        for (index, offset) in [-0.5, 0.5].indexed():
+            let moved = calibration.at(model.grey_log_h + offset)
+            let all = even_patch(&normal, moved) catch failure:
+                assert(false)
+                return
+            var alone = grey
+            alone[record] = moved[record]
+            let one = even_patch(&normal, alone) catch failure:
+                assert(false)
+                return
+            neutral[index] = amount_of(all[record], record)
+            single[index] = amount_of(one[record], record)
+        ratios[record] = (single[1] - single[0]) / (neutral[1] - neutral[0])
+    print(f"single colour over neutral gamma: red {ratios[0]} green {ratios[1]} blue {ratios[2]}")
+    for record in 0..<(usize)3:
+        assert(ratios[record] > 0.9 and ratios[record] < 1.5)
+
+## Density `d` of a step's profile at column `at`, and the edge's measures as
+## Rajkowski and Nowak's Gold traces give them.
+test "an edge against Kodak Gold 200's measured trace (predicted)":
+    # Rajkowski and Nowak 1999, Fig. 6(a): Gold 200 in C-41, green light, a
+    # step from 0.327 to 0.785: the border 0.105 over the high plateau 12 µm
+    # in, the fringe 0.011 under the low, 10–90 % over 8.4 µm (with the
+    # microdensitometer's own blur, not given). Here: Portra 400's calibration
+    # (not Gold's), the exposure step spread by its green layer's light
+    # scatter (an exponential of model.scatter), its plateaus placed 0.458
+    # apart in Status M green over D-min. Predicted, with the estimated
+    # constants: the border 3 % (Gold 23 %), 13 µm in (Gold 12), the fringe
+    # 2 % (Gold 2.4 %). The inhibitor alone cannot close it: a stronger
+    # restraint raises the fringe with the border (16 % and 12 % at 64 /mM),
+    # where Gold's border is nine times its fringe. Something acting on the
+    # dense side (the developer's or the oxidized developer's supply) is
+    # underweighted here; the fast path's edge, fitted to MTF, is 18 %.
+    var model = portra_400() catch failure:
+        assert(false)
+        return
+    defer model.release()
+    var (normal, calibration) = calibrated_c41(&model) catch failure:
+        assert(false)
+        return
+    defer normal.release()
+    defer calibration.release()
+    let columns: usize = 200
+    let width = 2.0
+    let low = model.grey_log_h - 0.45
+    let high = low + 0.458 / 0.62
+    let length = math.max(model.scatter[1], 0.5)
+    var grid = film_chemistry.make_grid(normal.layers, columns, width) catch failure:
+        assert(false)
+        return
+    defer grid.release()
+    for column in 0..<columns:
+        let x = ((f64)column + 0.5) * width - 200.0
+        # The step's light through a two-sided exponential spread.
+        let share = 0.5 * math.exp(x / length) if x < 0.0 else 1.0 - 0.5 * math.exp(-x / length)
+        let light = math.pow(10.0, low) * (1.0 - share) + math.pow(10.0, high) * share
+        let developable = calibration.at(math.log10(light))
+        for record in 0..<(usize)3:
+            film_chemistry.expose(&grid, (i64)record, column, developable[record])
+    film_chemistry.develop(&grid, &normal.chemistry, &normal.bath, normal.seconds, 0.05) catch failure:
+        assert(false)
+        return
+    var green: f64[200]
+    for column in 0..<columns:
+        let amounts: f64[3] = [amount_of(grid.record_total(film_chemistry.dye, 0, column), 0), amount_of(grid.record_total(film_chemistry.dye, 1, column), 1),
+                               amount_of(grid.record_total(film_chemistry.dye, 2, column), 2)]
+        green[column] = model.scanned(amounts)[1]
+    let far_low = green[5]
+    let far_high = green[194]
+    var border = 0.0
+    var border_at: usize = 100
+    var fringe = 1.0e9
+    for column in 100..<(usize)150:
+        if green[column] > border:
+            border = green[column]
+            border_at = column
+    for column in 50..<(usize)100:
+        fringe = math.min(fringe, green[column])
+    let step = far_high - far_low
+    print(f"edge: plateaus {far_low} {far_high} (step {step}); border {border - far_high} ({(border - far_high) / step * 100.0} %) {((f64)border_at + 0.5) * width - 200.0} µm in; fringe {far_low - fringe} ({(far_low - fringe) / step * 100.0} %); Gold 200: 23 % and 2.4 %, 12 µm")
+    assert(border > far_high and fringe < far_low)
+    assert(math.abs(((f64)border_at + 0.5) * width - 200.0 - 12.0) < 6.0)
