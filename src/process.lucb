@@ -206,7 +206,9 @@ struct Rendering:
 
     ## Film the scene, when film is on: from here the develop reads the filmed
     ## scene through the identity; with `samples`, the stochastic render (that
-    ## many a pixel; on the GPU unless `cpu`). Call it where the rendering stays.
+    ## many a pixel). On the GPU unless `cpu` (or there is none): the CPU's film
+    ## is the reference the GPU is held to, and far slower (tens of seconds
+    ## for a 3072 px picture against a few). Call it where the rendering stays.
     func film_scene(samples: usize = 0, cpu: bool = false) -> !:
         if not self.develop.film.active():
             return
@@ -219,9 +221,8 @@ struct Rendering:
         if self.scan > 0 and (usize)self.source.width() > self.scan:
             sampled = try self.source.sampled(self.scan)
             filming = &sampled
-        if samples > 0 and not cpu:
-            # The stochastic render on the GPU, as the viewer refines it; on
-            # the CPU (much slower) where there is none.
+        if not cpu:
+            # On the GPU, as the viewer films it; on the CPU where there is none.
             self.filmed = film_gpu.filmed_on_gpu(&self.develop.film, filming, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil,
                                                  (u32)samples) catch failure:
                 recover try film_passes.filmed(&self.develop.film, filming, self.develop.matrix, &self.develop.tables, aspect,
@@ -282,7 +283,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
 ## `scene` developed with `settings` for `output` (sRGB or Display P3 primaries,
 ## sRGB's curve) into an 8-bit picture of its size, on every processor; film
 ## grain by the stochastic render with `samples` a pixel (0: the statistical),
-## filmed on the GPU unless `cpu`.
+## filmed on the GPU unless `cpu` (the reference the GPU is tested against).
 pub func render(source: const Scene*, settings: Settings, output: view.Output = view.Output.srgb, samples: usize = 0, cpu: bool = false) -> Picture!:
     var job = try rendering(source, &settings, output)
     defer job.release()
