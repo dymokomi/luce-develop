@@ -34,6 +34,14 @@ import codes
 
 pub let invalid: ErrorCode = codes.invalid
 
+## Who the loading thread tells when a scene is ready (or failed): `call` with
+## `context`, from the loading thread. The window passes its loop's wake-up
+## (luced-photo: a luce-ui notifier), so it takes the scene with `poll` at once
+## instead of polling for it.
+pub struct Wake:
+    pub var call: func(void*) -> unit
+    pub var context: void*
+
 ## What the window and the loading thread share, guarded by `lock`.
 struct Loading:
     var lock: sync.Mutex
@@ -48,6 +56,7 @@ struct Loading:
     var failure: u8[256]
     var failure_length: usize
     var stopping: bool
+    var told: Wake?
 
 func load(context: void*?):
     let loading = (Loading*)(context else return)
@@ -83,7 +92,10 @@ func load(context: void*?):
             loading.failure_length = length
         else:
             opened.close()
+        let told = loading.told
         loading.lock.unlock()
+        if let hook = told:
+            hook.call(hook.context)
 
 ## One develop of the shown scene: its settings, compiled for one output, and
 ## the GPU state they make (the tables, the view's table, the film's atlas and
@@ -557,6 +569,13 @@ pub struct Renderer:
             which.filmed = resolved
 
     ## Stop the loading thread and let every texture go.
+    ## Tell `hook` whenever a scene this renderer loads is ready (none: nobody).
+    pub func tell(hook: Wake?):
+        let loading = self.loading else return
+        loading.lock.lock()
+        loading.told = hook
+        loading.lock.unlock()
+
     pub func close():
         if let loading = self.loading:
             loading.lock.lock()
