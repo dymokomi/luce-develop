@@ -133,6 +133,24 @@ pub let values_row: usize = 40
 ## Super 16 and IMAX's 15-perf 65 mm (camera aperture 70.41 × 51.61 mm, SMPTE 2005).
 pub let frame_widths: f64[6] = [21950.0, 24890.0, 10260.0, 52480.0, 12520.0, 70410.0]
 
+## The scanner's samples across the frame by Scan's Resolution: an HD telecine
+## (a Spirit DataCine's 1920), a standard-definition one (720 across the 4:3
+## picture), and film scanners at 2K, 4K and 6K. A scan reads the film through
+## its own sampling aperture, one pitch wide: the film is filmed at that many
+## samples, never finer, so grain and detail are what the scan resolves however
+## far the viewer zooms (a camera file is often far finer: a 60 MP frame
+## samples Academy's 21.95 mm every 3 µm, where single dye clouds would show).
+pub let scan_widths: usize[5] = [1920, 720, 2048, 4096, 6144]
+
+## How many samples across the frame the film is read at for `settings` (the
+## compiled ones): its scan's, or 0 where nothing scans it (printed straight from
+## the negative, or a slide on a lightbox), so the film is sampled at the photo's
+## pixels.
+pub func scan_samples(settings: const Settings*) -> usize:
+    if not settings.recipe.active((i64)recipe.Stage.scan):
+        return 0
+    return scan_widths[(usize)math.clamp(settings.get(.scan_resolution), 0.0, 4.0)]
+
 ## Interimage at 100%: how much each layer's development is held back, in log
 ## exposure, per unit of dye its neighbours form (rows red, green, blue
 ## receiving; columns cyan, magenta, yellow formed). Kodak publishes none; an

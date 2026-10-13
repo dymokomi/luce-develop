@@ -104,6 +104,21 @@ pub struct Scene:
     pub static func from_pixels(width: usize, height: usize, pixels: f16[]) -> Scene:
         return Scene(columns = width, rows = height, pixels = pixels, shot_temperature = 6500.0)
 
+    ## The scene `columns` pixels wide (its height in proportion), each pixel the
+    ## mean of the light over its area: what a film scanned at that many samples
+    ## is filmed from. Only its pixels and as-shot white come along (no raw, no
+    ## camera response): it is for filming, through a matrix found on this scene.
+    pub func sampled(columns: usize) -> Scene!:
+        if columns == 0 or self.columns == 0:
+            error(invalid, "a sampled scene needs a size")
+        let rows = (usize)math.max(1.0, math.round((f64)self.rows * (f64)columns / (f64)self.columns))
+        let pixels = try new f16[columns * rows * 4] --- in memory.heap
+        errdefer free(pixels) in memory.heap
+        var job = Sampling(source = &self, columns = columns, rows = rows, pixels = pixels)
+        try parallel.for_each(rows, (void*)&job, sample_row)
+        return Scene(columns = columns, rows = rows, pixels = pixels, as_shot = self.as_shot, shot_temperature = self.shot_temperature,
+                     shot_tint = self.shot_tint, shot_seconds = self.shot_seconds)
+
     ## The pixels as bytes, for a texture upload.
     pub func bytes() -> const u8[]:
         return u8[]((u8*)self.pixels.data, self.pixels.length * 2)
@@ -204,6 +219,72 @@ func upright_source(orientation: u64, x: usize, y: usize, width: usize, height: 
         7 => (width - 1 - y, height - 1 - x)
         8 => (width - 1 - y, x)
         _ => (x, y)
+
+## A scene being sampled (Scene.sampled): rows of `pixels` from `source`.
+struct Sampling:
+    var source: const Scene*
+    var columns: usize
+    var rows: usize
+    var pixels: f16[]
+
+## How much of source pixel `at` lies inside [`low`, `high`) (source pixels).
+func covered(at: usize, low: f64, high: f64) -> f64:
+    return math.max(0.0, math.min((f64)at + 1.0, high) - math.max((f64)at, low))
+
+## Row `y` of a sampled scene: each pixel the area-weighted mean of the source
+## pixels its footprint covers, partly covered ones in part.
+func sample_row(context: void*, y: usize, worker: usize) -> !:
+    let job = (Sampling*)context
+    let original = job.source
+    let step_x = (f64)original.columns / (f64)job.columns
+    let step_y = (f64)original.rows / (f64)job.rows
+    let top = (f64)y * step_y
+    let bottom = top + step_y
+    let first_row = (usize)top
+    let last_row = (usize)math.min(math.ceil(bottom), (f64)original.rows)
+    for x in 0..<job.columns:
+        let left = (f64)x * step_x
+        let right = left + step_x
+        let first_column = (usize)left
+        let last_column = (usize)math.min(math.ceil(right), (f64)original.columns)
+        var sum: f64[4] = [0.0, 0.0, 0.0, 0.0]
+        var weight = 0.0
+        for sy in first_row..<last_row:
+            let wy = covered(sy, top, bottom)
+            for sx in first_column..<last_column:
+                let w = wy * covered(sx, left, right)
+                let at = (sy * original.columns + sx) * 4
+                for channel in 0..<(usize)4:
+                    sum[channel] += w * (f64)original.pixels[at + channel]
+                weight += w
+        let to = (y * job.columns + x) * 4
+        for channel in 0..<(usize)4:
+            job.pixels[to + channel] = (f16)(sum[channel] / math.max(weight, 1.0e-12))
+
+test "a sampled scene keeps the mean light":
+    # 4 × 2 → 2 × 1: each half its own mean; 3 × 1 → 2 × 1 shares the middle.
+    var picture = Scene()
+    picture.columns = 4
+    picture.rows = 2
+    picture.pixels = try new f16[32] --- in memory.heap
+    for at in 0..<(usize)32:
+        picture.pixels[at] = (f16)(f64)(at // 4 % 4)
+    defer picture.close()
+    var half = try picture.sampled(2)
+    defer half.close()
+    assert(half.columns == 2 and half.rows == 1)
+    assert((f64)half.pixels[0] == 0.5 and (f64)half.pixels[4] == 2.5)
+    var three = Scene()
+    three.columns = 3
+    three.rows = 1
+    three.pixels = try new f16[12] --- in memory.heap
+    for at in 0..<(usize)12:
+        three.pixels[at] = (f16)(f64)(at // 4)
+    defer three.close()
+    var two = try three.sampled(2)
+    defer two.close()
+    # Left: pixel 0 whole and half of pixel 1 (1.5 wide): (0 + 0.5) / 1.5.
+    assert(math.abs((f64)two.pixels[0] - 1.0 / 3.0) < 1.0e-3 and math.abs((f64)two.pixels[4] - 5.0 / 3.0) < 1.0e-3)
 
 test "a quarter turn clockwise puts the left column on top":
     # 2 × 1: a dark pixel left of a bright one; turned, 1 × 2 with the dark on top.

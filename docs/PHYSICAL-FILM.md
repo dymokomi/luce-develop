@@ -33,7 +33,14 @@ spectral transmission  ──► scanner / printer / enlarger / projector ──
 
 Units are physical throughout: micrometres on the film, seconds and °C in
 the process, J m⁻² of exposure relative to the stock's speed point. Output
-pixel size only decides how finely the film is sampled.
+pixel size only decides how finely the film is sampled, and never more
+finely than whatever reads the film resolves. A scan reads it at its
+Resolution's samples across the frame (`film.scan_widths`: an HD telecine by
+default, SD, 2K, 4K or 6K), so the film is filmed at that size and drawn up to
+the photo's. A 60 MP camera frame would otherwise sample Academy's 21.95 mm
+every 3 µm, finer than any telecine. There, single dye clouds become pixel
+noise, and its nonlinear trip through the scan's inversion shifts the mean
+color (blue first, the grainiest layer).
 
 ## The parts, in build order
 

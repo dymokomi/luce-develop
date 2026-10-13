@@ -114,6 +114,11 @@ struct Developing:
     var film_passes: FilmPasses
     var filmed: gpu.Texture?
     var film_stale: bool
+    ## The scene at the scan's samples (film.scan_samples) where it is finer,
+    ## which the film is filmed from: its width (0: none made) and height.
+    var scanned_texture: gpu.Texture?
+    var scanned_columns: usize
+    var scanned_rows: usize
 
     func take(settings: Settings):
         self.settings = settings
@@ -123,7 +128,8 @@ struct Developing:
         self.film.release()
         self.film_passes.release()
         self.filmed = none
-        for slot in [&self.tables_texture, &self.view_texture, &self.print_texture, &self.film_texture]:
+        self.scanned_columns = 0
+        for slot in [&self.tables_texture, &self.view_texture, &self.print_texture, &self.film_texture, &self.scanned_texture]:
             if let held = *slot:
                 var gone = held
                 gone.destroy()
@@ -412,8 +418,18 @@ pub struct Renderer:
             (f32)m[0], (f32)m[1], (f32)m[2], (f32)veil, (f32)m[3], (f32)m[4], (f32)m[5], 0.0f32, (f32)m[6], (f32)m[7], (f32)m[8], 0.0f32,
             (f32)(which.settings.get(.vibrance) / 100.0), (f32)(which.settings.get(.saturation) / 100.0), (f32)which.settings.get(.view), (f32)(out_width / out_height),
             (f32)map[0], (f32)map[1], (f32)map[2], 0.0f32, (f32)map[3], (f32)map[4], (f32)map[5], 0.0f32, (f32)map[6], (f32)map[7], (f32)map[8], 0.0f32]
+        # Only the part on the target is drawn: zoomed in, the photo's place runs
+        # far past it (and past the largest region a draw may have); the shader
+        # places the photo by the uniforms, not by the region.
+        let region_left = math.max(left, 0.0)
+        let region_top = math.max(y, 0.0)
+        let region_right = math.min(left + across, size.width)
+        let region_bottom = math.min(y + height, size.height)
+        if region_right <= region_left or region_bottom <= region_top:
+            return
         let images: gpu.Texture[4] = [source_texture, tables_texture, view_texture, film_texture]
-        try gpu.shade(checked, pipeline, gpu.Rect(left, y, across, height), u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
+        try gpu.shade(checked, pipeline, gpu.Rect(region_left, region_top, region_right - region_left, region_bottom - region_top),
+                      u8[]((u8*)&uniforms[0], 128), images, gpu.Filter.linear)
 
     ## Count the develop as shown into the histogram (`histogram`): the photo is
     ## developed at most 256 pixels on its longer side, off screen, and read back.
@@ -486,8 +502,9 @@ pub struct Renderer:
             try texture.upload(self.shown.bytes())
             self.scene_texture = texture
             self.upload = false
-            self.a.film_stale = true
-            self.b.film_stale = true
+            for which in [&self.a, &self.b]:
+                which.film_stale = true
+                which.scanned_columns = 0
         # While development is being watched, how much of it is still to come
         # (both outputs alike, the last frame the developed film).
         if self.watch_running:
@@ -550,12 +567,39 @@ pub struct Renderer:
             let tables_texture = which.tables_texture else return
             let film_texture = which.film_texture else return
             let aspect = (f64)self.shown.width() / (f64)self.shown.height()
-            which.filmed = try which.film_passes.run(device, scene_texture, tables_texture, film_texture, &which.film,
-                                                   try self.scene_matrix(which), aspect, (u32)self.shown.width(), (u32)self.shown.height(),
-                                                   try self.veil_of(which))
+            # Filmed at the scan's samples where the scene is finer: the draw
+            # filters the filmed scene up to the photo's place.
+            var filming = scene_texture
+            var columns = (usize)self.shown.width()
+            var rows = (usize)self.shown.height()
+            let scan = film.scan_samples(&which.settings)
+            if scan > 0 and columns > scan:
+                filming = try self.scanned(device, which, scan)
+                columns = which.scanned_columns
+                rows = which.scanned_rows
+            which.filmed = try which.film_passes.run(device, filming, tables_texture, film_texture, &which.film,
+                                                   try self.scene_matrix(which), aspect, (u32)columns, (u32)rows, try self.veil_of(which))
             which.film_stale = false
         elif self.still_refining(which):
             try self.refine_develop(device, which)
+
+    ## The shown scene at `columns` samples across for `which`, made when it is not.
+    func scanned(device: gpu.Device, which: Developing*, columns: usize) -> gpu.Texture!:
+        if let held = which.scanned_texture:
+            if which.scanned_columns == columns:
+                return held
+            var gone = held
+            gone.destroy()
+            which.scanned_texture = none
+        var sampled = try self.shown.sampled(columns)
+        defer sampled.close()
+        var texture = try gpu.Texture.create(device, (u32)sampled.width(), (u32)sampled.height(), gpu.Format.rgba16_float)
+        errdefer texture.destroy()
+        try texture.upload(sampled.bytes())
+        which.scanned_texture = texture
+        which.scanned_columns = columns
+        which.scanned_rows = (usize)sampled.height()
+        return texture
 
     ## More of `which`'s stochastic render (a frame's share), its grains fitted
     ## first; shown once it has enough.

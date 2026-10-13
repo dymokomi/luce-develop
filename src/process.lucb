@@ -199,8 +199,10 @@ struct Rendering:
     var height: usize
     var bytes: u8[]
     var words: u16[]
-    ## With film, the filmed scene the develop reads instead.
+    ## With film, the filmed scene the develop reads instead, and the samples
+    ## across the frame its scan reads it at (0: the scene's own pixels).
     var filmed: Scene
+    var scan: usize
 
     ## Film the scene, when film is on: from here the develop reads the filmed
     ## scene through the identity; with `samples`, the stochastic render (that
@@ -209,15 +211,23 @@ struct Rendering:
         if not self.develop.film.active():
             return
         let aspect = (f64)self.source.width() / (f64)self.source.height()
+        # Filmed at the scan's samples where the scene is finer (film.scan_samples),
+        # and read from there as any scene is, filtered up to the output.
+        var sampled = Scene()
+        defer sampled.close()
+        var filming = self.source
+        if self.scan > 0 and (usize)self.source.width() > self.scan:
+            sampled = try self.source.sampled(self.scan)
+            filming = &sampled
         if samples > 0 and not cpu:
             # The stochastic render on the GPU, as the viewer refines it; on
             # the CPU (much slower) where there is none.
-            self.filmed = film_gpu.filmed_on_gpu(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil,
+            self.filmed = film_gpu.filmed_on_gpu(&self.develop.film, filming, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil,
                                                  (u32)samples) catch failure:
-                recover try film_passes.filmed(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect,
+                recover try film_passes.filmed(&self.develop.film, filming, self.develop.matrix, &self.develop.tables, aspect,
                                                self.develop.veil, samples)
         else:
-            self.filmed = try film_passes.filmed(&self.develop.film, self.source, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil,
+            self.filmed = try film_passes.filmed(&self.develop.film, filming, self.develop.matrix, &self.develop.tables, aspect, self.develop.veil,
                                                  samples)
         self.source = &self.filmed
         self.develop.matrix = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
@@ -263,7 +273,7 @@ func rendering(source: const Scene*, wanted: const Settings*, output: view.Outpu
                           shown = (View)(i64)settings.get(.view), silver = film_print.silver_kept(settings.get(.print_silver)), to_display = view.working_to_output(output), output = output,
                           vibrance = settings.get(.vibrance) / 100.0, saturation = settings.get(.saturation) / 100.0,
                           aspect = out_width / out_height, map = geometry.frame_map(settings, (f64)source.width(), (f64)source.height()))
-    var out = Rendering(develop = develop, source = source, width = width, height = height)
+    var out = Rendering(develop = develop, source = source, width = width, height = height, scan = film.scan_samples(settings))
     out.develop.film.prepare(settings, try source.film_input(&camera)) catch failure:
         out.develop.film.release()
         error(failure.code, failure.message)
