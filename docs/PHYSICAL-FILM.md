@@ -167,16 +167,17 @@ pixel size only decides how finely the film is sampled.
    step-bounded (an unbounded Newton ran a layer's dye to thousands there).
    Projection is seen at 48 cd/m² in a dark surround, a paper under 500 lux in
    an average one, each carried to a 100 cd/m² display in a dim room by CAM16
-   with lightness, chroma and hue matched (luce_color.cam16.corresponding;
+   with lightness, colorfulness and hue matched (luce_color.cam16.corresponding;
    checked against colour-science): the print shows flatter (mid grey
    18 → 21.7), the paper harder (18 → 13.5). The print and paper views run
    per pixel on the GPU (no 64³ table), within the film's parity limits.
    A paper's surface (Glossy, Lustre, Matte) adds the light it reflects
    before the image, from Kodak's Polycontrast IV curves per surface (matte N
    1.3 % of white; lustre E as glossy), and the room 1 % more (viewing flare,
-   an estimate). Still open: the surface's texture (sheen, lustre's pattern),
-   and the observer's Hunt and Stevens effects, which a relative match leaves
-   out.
+   an estimate). The display keeps the print's lightness, hue and colorfulness
+   (CAM16 M: the Hunt effect, so the cinema's dim print shows a little less
+   saturated). Still open: the surface's texture (sheen, lustre's pattern),
+   and the Stevens effect beyond what CAM16's lightness carries.
 
 ## Rendering: progressive and stochastic
 

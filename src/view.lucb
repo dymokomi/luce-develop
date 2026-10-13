@@ -252,8 +252,10 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
 
 ## Where a print is seen, and the display that shows it, for CAM16
 ## (luce_color.cam16): a print appears as its viewing makes it appear, and the
-## display shows the color that looks the same in its own (the same lightness,
-## chroma and hue, each relative to its white). A cinema's screen white is
+## display shows the color that looks the same in its own (the same lightness
+## relative to its white, hue, and colorfulness: colors look more colorful the
+## brighter they are lit, the Hunt effect, so a cinema's 48 cd/m² print shows
+## a little less saturated on a 100 cd/m² display, a lit wall's a little more). A cinema's screen white is
 ## SMPTE's 48 cd/m² (14 fL), in a dark surround: images look
 ## flatter there (Bartleson and Breneman), which release prints' contrast
 ## makes up for, so a display in a dim room shows them a little flatter. A
@@ -261,9 +263,7 @@ pub func display(view: View, rgb: f64[3], to_display: f64[9], output: Output = O
 ## over π) is in an average surround: it looks more contrasty than on a
 ## display, which shows it a little harder. The display: 100 cd/m² white (the
 ## ACES view's), a dim room. Adapting luminance is a fifth of white (a grey
-## world), the background 20 %. Matching relative attributes, the levels
-## themselves matter little (only through the degree of adaptation); the
-## surround is what changes the picture.
+## world), the background 20 %.
 let screen_white: f64 = 48.0
 let room_lux: f64 = 500.0
 let display_white: f64 = 100.0
@@ -284,7 +284,7 @@ pub func viewing_of(view: View) -> Viewings:
 ## `shown` (XYZ, the print's white at Y = 1, adapted to D65) as the display
 ## shows it.
 func as_displayed(shown: xyz.XYZ, seen: Viewings) -> xyz.XYZ:
-    let matched = cam16.corresponding(xyz.XYZ(shown.x * 100.0, shown.y * 100.0, shown.z * 100.0), seen.print, seen.display)
+    let matched = cam16.corresponding(xyz.XYZ(shown.x * 100.0, shown.y * 100.0, shown.z * 100.0), seen.print, seen.display, colorfulness = true)
     return xyz.XYZ(matched.x / 100.0, matched.y / 100.0, matched.z / 100.0)
 
 ## The print and paper views' data for the GPU, which computes them per pixel

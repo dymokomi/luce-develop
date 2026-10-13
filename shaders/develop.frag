@@ -237,7 +237,7 @@ float paper_density(int grade, float log_e) {
 // CAM16 (luce_color.cam16, as view.lucb's `as_displayed`): `xyz` (white at
 // Y = 1) as it looks where the print is seen (row 2, 15–17), shown as the color
 // that looks the same on the display (18–20): the same lightness, hue and
-// chroma (so the same alpha, J being the same).
+// colorfulness.
 const vec3 m16_x = vec3(0.401288, 0.650173, -0.051461);
 const vec3 m16_y = vec3(-0.250268, 1.204414, 0.045854);
 const vec3 m16_z = vec3(-0.002079, 0.048952, 0.953127);
@@ -268,7 +268,9 @@ vec3 as_displayed(vec3 xyz) {
     float j = pow(max(p2 * s1.x / s2.x, 0.0), s1.y * s1.z);
     if (j <= 0.0) return vec3(0.0);
     float t = 50000.0 / 13.0 * s1.w * s1.x * e_hue * length(vec2(a, b)) / (u + 0.305);
-    float alpha = pow(t, 0.9) * s2.y;
+    // Colorfulness kept (the Hunt effect): chroma scales by the fourth root of
+    // the two viewings' luminance adaptation.
+    float alpha = pow(t, 0.9) * s2.y * pow(s0.w / t0.w, 0.25);
     // Back under the display's.
     float t_back = pow(alpha / t2.y, 1.0 / 0.9);
     float p2_back = t2.x * pow(j, 1.0 / (t1.y * t1.z)) / t1.x;
