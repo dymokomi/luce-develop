@@ -581,23 +581,17 @@ vec4 film_stage(ivec2 at) {
     } else if (stage == 8) {
         // A step of development (film.lucb's `release`): what each layer
         // releases with the dye it forms from share row0.x to row0.y of the way,
-        // held back by the inhibitor the steps before released (image 2; none
-        // at the first, row0.w), and in alpha the developer it uses, row0.z of
-        // it still missing at the end.
+        // held back by the inhibitor the steps before released, as spread by
+        // now (image 2; none at the first, row0.w), added to it; and in alpha
+        // the developer it uses, row0.z of it still missing at the end, added
+        // to what the steps before used.
         vec3 log_h = log_exposure(fetch(first_image, at));
-        vec3 held = params.row0.w > 0.5 ? vec3(0.0) : fetch(second_image, at);
-        vec3 forms = inhibiting(log_h, held);
+        vec4 before = params.row0.w > 0.5 ? vec4(0.0) : fetch4(second_image, at);
+        vec3 forms = inhibiting(log_h, before.rgb);
         vec4 v17 = film_value(17.0);
         vec3 grown = progress(log_h, params.row0.y) - progress(log_h, params.row0.x);
-        out_color = forms * grown;
-        spent = params.row0.z * dot(forms / max(v17.rgb, vec3(1e-9)), grown) / 3.0;
-    } else if (stage == 9) {
-        // The step's release spread down and added to what earlier steps left
-        // (row0.w: none yet).
-        vec4 blur = blurred(first_image, at, step, params.sigma, params.lens.y, radius);
-        vec4 before = params.row0.w > 0.5 ? vec4(0.0) : fetch4(second_image, at);
-        out_color = before.rgb + blur.rgb;
-        spent = before.a + blur.a;
+        out_color = before.rgb + forms * grown;
+        spent = before.a + params.row0.z * dot(forms / max(v17.rgb, vec3(1e-9)), grown) / 3.0;
     } else if (stage == 10) {
         vec3 amounts;
         vec3 effective;

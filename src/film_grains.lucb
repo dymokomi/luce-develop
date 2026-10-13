@@ -11,10 +11,13 @@
 ## q·(1 − r²/ρ²)² within its radius ρ. Clouds add as density, as dyes do.
 ##
 ## The scanner averages the light a pixel passes, not its density: a pixel is
-## −log10 of the mean transmittance over its area. Campbell's theorem gives
-## that mean exactly for a Poisson field of clouds (−log10 E[T] = λ·∫(1 − 10^(−q·c))
-## dA / ln 10) and the variance of its mean over an aperture (an integral of
-## exp(λ·K(r)) − 1, K the clouds' overlap of their 1 − 10^(−q·c)). `fit`
+## −log10 of the mean transmittance over its area. The Poisson field's Laplace
+## functional (Campbell's theorem applied to the transmittance) gives that mean
+## exactly for a field of clouds (−log10 E[T] = λ·∫(1 − 10^(−q·c)) dA / ln 10)
+## and the variance of its mean over an aperture (an integral of
+## exp(λ·K(r)) − 1, K the clouds' overlap of their 1 − 10^(−q·c)); the
+## density's variance through the aperture is first order in it (a delta
+## method). Both hold for grains developing independently of each other. `fit`
 ## uses both: each population's grains are placed so the developed field's
 ## density over a large area is the stock's curve and its rms through a 48 µm
 ## aperture the stock's granularity, at every exposure. Summing densities and

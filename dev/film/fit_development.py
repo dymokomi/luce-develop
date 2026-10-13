@@ -16,10 +16,13 @@ white series are fitted in exactly the form film_develop.lucb develops with
 
 Black and white: the stocks' sheets' series. Colour negative: Kodak Z-131's
 C-41 control-chart deviations for ±40 s around 3:15 (see fit_c41). Reversal: the
-E-6 first developer's negative silver image, its rate fitted to Kodak's push
-speeds (E-28: 8, 11, 14 min rate Ektachrome E200 at +2/3, +1 2/3, +2 1/3
-stops) on Ektachrome E100's curves, its fog to Z-119's D-max loss (+1.5 °C:
-0.12/0.12/0.17)."""
+E-6 first developer's negative silver image, its rate fitted to E100's own
+push (E-4000: push 1, 8 minutes, rates it EI 200, one stop) on Ektachrome
+E100's curves. Kodak publishes no longer push for E100; how the gain grows past
+8 minutes is borrowed from Ektachrome E200's series (E-28: 8, 11, 14 min at
+EI 320, 640, 1000, so +1 and +1 2/3 stops beyond 8), weighted half, the only
+E-6 time series Kodak publishes. Its fog is fitted to Z-119's D-max loss
+(+1.5 °C: 0.12/0.12/0.17)."""
 import json
 from pathlib import Path
 import numpy as np
@@ -145,24 +148,28 @@ def fit_e6():
         i = np.where((P[:-1] >= level) & (P[1:] < level))[0][0]
         return x[i] + (P[i] - level) * (x[i + 1] - x[i]) / (P[i] - P[i + 1])
 
-    targets = {8.0: 2 / 3, 11.0: 5 / 3, 14.0: 7 / 3}
+    # E100's own (E-4000), then E200's gains beyond 8 minutes (E-28), half weight.
+    own, beyond = 1.0, {11.0: 1.0, 14.0: 5 / 3}
 
     def residual(p):
         out = []
         for ch, x, P in layers:
             level = P.min() + 1.0
+            gain = lambda t: (s0 - speed(x, positive(P, x, t, np.exp(p[0]), p[1], fog[ch]), level)) / 0.30103
             s0 = speed(x, positive(P, x, tn, np.exp(p[0]), p[1], fog[ch]), level)
-            for t, stops in targets.items():
-                out.append((s0 - speed(x, positive(P, x, t, np.exp(p[0]), p[1], fog[ch]), level)) / 0.30103 - stops)
+            at8 = gain(8.0)
+            out.append(at8 - own)
+            for t, stops in beyond.items():
+                out.append(0.5 * (gain(t) - at8 - stops))
         return np.array(out)
 
     best = min((least_squares(residual, [a, b]) for a in np.linspace(-4, 1, 11) for b in (0.0, 0.3, 0.6, 1.0)),
                key=lambda r: r.cost)
     k, beta = float(np.exp(best.x[0])), float(best.x[1])
     print(f'E-6 first developer: k {k:.3f}/min, beta {beta:.3f}; fog {[round(fog[c], 4) for c in drops]}; '
-          f'push speeds within {np.abs(residual(best.x)).max():.2f} stops')
+          f'push residuals {np.round(residual(best.x), 3)} stops')
     return dimensionless([k] * 3, [beta] * 3, 0.0, [float(fog[c]) for c in drops], tn,
-                         'fitted to Kodak E-28 push speeds and Z-119 D-max loss on Ektachrome E100')
+                         'fitted to E100 E-4000 push 1 (8 min, +1 stop), E200 E-28 gains past 8 min, Z-119 D-max loss')
 
 
 if __name__ == '__main__':

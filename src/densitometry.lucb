@@ -1,0 +1,164 @@
+## Densitometry: the bands a densitometer, a printer or a paper reads a film's
+## spectral density through. Status A and M are ISO 5-3's own (1995, adopted
+## in the US as ANSI/NAPM IT2.18-1996; a public scan, incorporated by reference
+## in 36 CFR 1238.14: law.resource.org/pub/us/cfr/ibr/001/aimm.it2.18.1996.pdf,
+## tables 3 and 4). Status A reads slides and prints, Status M color negatives
+## (its notes 3 and 4).
+from luce_std import math
+from luce_color import spectral
+
+## A densitometer's three bands, red, green, blue, each summing to 1.
+pub struct Densitometer:
+    pub var bands: f64[243]
+
+    ## The densities (R, G, B) this meter reads of spectral `density`.
+    pub func read(density: const f64[81]) -> f64[3]:
+        var out: f64[3]
+        var transmitted: f64[81]
+        for at in 0..<spectral.samples:
+            transmitted[at] = math.pow(10.0, -density[at])
+        for channel in 0..<(usize)3:
+            var sum = 0.0
+            for at in 0..<spectral.samples:
+                sum += transmitted[at] * self.bands[channel * 81 + at]
+            out[channel] = -math.log10(math.max(sum, 1.0e-12))
+        return out
+
+## ISO 5-3's log10 spectral products (influx × receiver, the whole instrument;
+## peak 5.000), every 10 nm from 400 to 770 nm: Status A (table 3) and Status M
+## (table 4), red, green, blue. -99 marks where the standard prints no value
+## but an arrow with a slope (log10 per nm) to the table's edge: past the last
+## printed value the log falls on at that slope (`tails`).
+let iso_a_red: f64[38] = [
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, 2.568, 4.638, 5.000, 4.871, 4.604, 4.286, 3.900, 3.551,
+    3.165, 2.776, 2.383, 1.970, 1.551, 1.141, 0.741, 0.341, -99.0, -99.0]
+let iso_a_green: f64[38] = [
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, 1.650, 3.822, 4.782, 5.000,
+    4.906, 4.644, 4.221, 3.609, 2.766, 1.579, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0]
+let iso_a_blue: f64[38] = [
+    -99.0, -99.0, 3.602, 4.819, 5.000, 4.912, 4.620, 4.040, 2.989, 1.566, 0.165, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0]
+let iso_m_red: f64[38] = [
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, 2.109, 4.479, 5.000, 4.899, 4.578, 4.252,
+    3.875, 3.491, 3.099, 2.687, 2.269, 1.859, 1.449, 1.054, 0.654, 0.254]
+let iso_m_green: f64[38] = [
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, 1.152, 2.207, 3.156, 3.804, 4.272, 4.626, 4.872,
+    5.000, 4.995, 4.818, 4.458, 3.915, 3.172, 2.239, 1.070, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0]
+let iso_m_blue: f64[38] = [
+    -99.0, 2.103, 4.111, 4.632, 4.871, 5.000, 4.955, 4.743, 4.343, 3.743, 2.990, 1.852, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0,
+    -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0, -99.0]
+## Each band's slopes (log10 per nm) below its first printed value and beyond
+## its last, as the tables' arrows give them: A red, green, blue, M red, green, blue.
+let tails: f64[12] = [0.270, -0.040, 0.220, -0.170, 0.380, -0.140, 0.260, -0.040, 0.106, -0.120, 0.250, -0.220]
+
+## Table `band`'s (0–5: A red, green, blue, M red, green, blue) log product at
+## `nm`: its printed values (linear in the log between them, the 5 nm samples
+## falling halfway), its tails' slopes beyond them.
+func log_product(band: usize, nm: f64) -> f64:
+    var first: usize = 38
+    var last: usize = 0
+    for at in 0..<(usize)38:
+        if value_of(band, at) > -50.0:
+            if at < first:
+                first = at
+            last = at
+    let first_nm = 400.0 + 10.0 * (f64)first
+    let last_nm = 400.0 + 10.0 * (f64)last
+    if nm <= first_nm:
+        return value_of(band, first) - tails[band * 2] * (first_nm - nm)
+    if nm >= last_nm:
+        return value_of(band, last) + tails[band * 2 + 1] * (nm - last_nm)
+    let place = (nm - 400.0) / 10.0
+    let below = (usize)math.floor(place)
+    let t = place - (f64)below
+    let above = below + 1 if below < last else last
+    return value_of(band, below) * (1.0 - t) + value_of(band, above) * t
+
+func value_of(band: usize, at: usize) -> f64:
+    return match band:
+        0 => iso_a_red[at]
+        1 => iso_a_green[at]
+        2 => iso_a_blue[at]
+        3 => iso_m_red[at]
+        4 => iso_m_green[at]
+        _ => iso_m_blue[at]
+
+## A Status densitometer from table `first` (0 Status A, 3 Status M) on the
+## spectral samples. The products already hold the instrument's light, so a
+## transmittance is weighted by them alone.
+func status(first: usize) -> Densitometer:
+    var out: Densitometer
+    for channel in 0..<(usize)3:
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            let weight = math.pow(10.0, log_product(first + channel, spectral.wavelength(at)) - 5.0)
+            out.bands[channel * 81 + at] = weight
+            sum += weight
+        for at in 0..<spectral.samples:
+            out.bands[channel * 81 + at] /= sum
+    return out
+
+## Status A: slides, prints and papers.
+pub func status_a() -> Densitometer:
+    return status(0)
+
+## Status M: color negatives.
+pub func status_m() -> Densitometer:
+    return status(3)
+
+## Printing density: the density of a negative as the printer and the print
+## stock see it. SMPTE RP 180-1999 defines it by these responsivities (red,
+## green, blue at 380–780 nm, its 10 nm table halved linearly to 5 nm; peaks 670,
+## 530 and 430 nm), made for printing camera negatives onto print film.
+let printing_responsivity: f64[243] = [
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0005, 0.001, 0.00935, 0.0177, 0.0545, 0.0913, 0.1568, 0.2223, 0.357, 0.4917, 0.6592,
+    0.8267, 0.91335, 1.0, 0.89685, 0.7937, 0.6212, 0.4487, 0.3197, 0.1907, 0.13295, 0.0752, 0.04245, 0.0097,
+    0.00485, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.00025, 0.0005, 0.00085, 0.0012, 0.00305, 0.0049, 0.02075, 0.0366,
+    0.154, 0.2714, 0.4933, 0.7152, 0.8576, 1.0, 0.93895, 0.8779, 0.66815, 0.4584, 0.29505, 0.1317, 0.0698,
+    0.0079, 0.0052, 0.0025, 0.0019, 0.0013, 0.00065, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0052, 0.034, 0.0628, 0.116, 0.1692, 0.29165, 0.4141, 0.5883, 0.7625, 0.88125, 1.0,
+    0.9377, 0.8754, 0.7133, 0.5512, 0.40655, 0.2619, 0.1847, 0.1075, 0.06685, 0.0262, 0.014, 0.0018, 0.0009,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+## A densitometer reading printing density (RP 180).
+pub func printing() -> Densitometer:
+    var out: Densitometer
+    for channel in 0..<(usize)3:
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            sum += printing_responsivity[channel * 81 + at]
+        for at in 0..<spectral.samples:
+            out.bands[channel * 81 + at] = printing_responsivity[channel * 81 + at] / sum
+    return out
+
+## What a color paper sees of a negative under an enlarger: its layers'
+## spectral sensitivity (`sensitivity`, log10, red first) times a tungsten
+## halogen lamp's light (3200 K, an estimate; the color head's filtration is
+## applied as CC values, film_paper.lucb).
+pub func paper_printing(sensitivity: const f64[243]) -> Densitometer:
+    var out: Densitometer
+    let lamp = spectral.planck(3200.0)
+    for channel in 0..<(usize)3:
+        var peak = -1.0e9
+        for at in 0..<spectral.samples:
+            peak = math.max(peak, sensitivity[channel * 81 + at])
+        var sum = 0.0
+        for at in 0..<spectral.samples:
+            let weight = lamp.values[at] * math.pow(10.0, sensitivity[channel * 81 + at] - peak)
+            out.bands[channel * 81 + at] = weight
+            sum += weight
+        for at in 0..<spectral.samples:
+            out.bands[channel * 81 + at] /= sum
+    return out

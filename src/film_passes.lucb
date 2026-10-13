@@ -9,10 +9,10 @@
 ## halation (film_halation.lucb: the exposure averaged over blocks, gathered at
 ## the kernel's samples, and the halo added back at full size to the scattered
 ## exposure); development in steps (film.lucb's `chemistry_steps`), each
-## releasing inhibitor and using developer (alpha) as the layers develop, spread
-## as far as it will have gone by the end (across, then down while adding it to
-## the earlier steps': diffusion being linear, the same as spreading the field
-## step by step, without rounding it again each step); develop as dye clouds
+## releasing inhibitor and using developer (alpha) as the layers develop under
+## the inhibitor the steps before released, as far as it has spread by then:
+## the field is added to and diffused one step at a time (across, then down),
+## so each step's kinetics see the field as it is at that time; develop as dye clouds
 ## with their grain, and scan. Or, for the stochastic render
 ## (film_grains.lucb), the effective log H the film developed at, then each
 ## pixel the light its samples pass through the grains, averaged and scanned.
@@ -51,9 +51,9 @@ pub struct Plan:
     pub var halation_strength: f32[3]
     pub var halation_block: i32
     ## Development's steps: how far the inhibitor and used developer spread in
-    ## one step (a release at step s goes on spreading through the n − s + 1
-    ## steps left: √(n − s + 1) times this), and how much of the used developer
-    ## each step leaves unrenewed.
+    ## one step (a release at step s has spread √(k − s) times this by step k,
+    ## √(n − s + 1) by the end), and how much of the used developer each step
+    ## leaves unrenewed.
     pub var step_spread: Blur
     pub var keep: f64
     ## The duplicates' blur over the developed image (none: radius 0).
@@ -94,14 +94,13 @@ pub func plan_for(source: const Film*, width: usize) -> Plan:
                 halation_block = (i32)math.clamp(math.round(halo[3] / 8.0 / pitch), 1.0, 32.0),
                 step_spread = held, keep = keep)
 
-## The spread of a release made at step `step` of `n`: the step's, √(n − step + 1) times.
-pub func spread_at(plan: const Plan*, step: usize, n: usize) -> Blur:
-    let scale = math.sqrt((f64)(n - step + 1))
+## One step's spread of the inhibitor (and, in alpha, the used developer),
+## reaching far enough for both.
+pub func step_blur(plan: const Plan*) -> Blur:
     let base = plan.step_spread
-    var out = blur_of([(f64)base.sigma[0] * scale, (f64)base.sigma[1] * scale, (f64)base.sigma[2] * scale])
-    let developer = (f64)base.alpha * scale
-    out.alpha = (f32)developer
-    out.radius = (i32)math.min(math.max((f64)out.radius, math.ceil(3.0 * developer)), widest)
+    var out = blur_of([(f64)base.sigma[0], (f64)base.sigma[1], (f64)base.sigma[2]])
+    out.alpha = base.alpha
+    out.radius = (i32)math.min(math.max((f64)out.radius, math.ceil(3.0 * (f64)base.alpha)), widest)
     return out
 
 ## Whether halation adds anything.
@@ -269,11 +268,13 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             for k in 0..<(usize)3:
                 out[k] = scattered[k] + (f64)pass.weights[k] * halo[k]
         elif pass.stage == 8:
-            # The inhibitor the steps before released around here (none yet at the first).
+            # The inhibitor the steps before released, as spread by now (none
+            # yet at the first), and this step's release added to it.
             let held = [0.0, 0.0, 0.0] if pass.first_step else texel(pass.second, pass.width, pass.height, x, y)
+            let used = 0.0 if pass.first_step else alpha(pass.second, pass.width, pass.height, x, y)
             let stepped = film.release(pass.film, texel(pass.first, pass.width, pass.height, x, y), held, pass.begun, pass.reached, pass.keep)
-            out = [stepped[0], stepped[1], stepped[2]]
-            spent = stepped[3]
+            out = [held[0] + stepped[0], held[1] + stepped[1], held[2] + stepped[2]]
+            spent = used + stepped[3]
         elif pass.stage == 10:
             # The effective log H the film developed at (the stochastic render's).
             let d = film.developed(pass.film, texel(pass.first, pass.width, pass.height, x, y), texel(pass.second, pass.width, pass.height, x, y),
@@ -281,12 +282,6 @@ func run_row(context: void*, row: usize, worker: usize) -> !:
             out = d.effective
         elif pass.stage == 11:
             out = stochastic(pass, column, row)
-        elif pass.stage == 9:
-            let blur = blurred(pass, pass.first, x, y)
-            let at = place(pass.width, pass.height, x, y)
-            let before: f64[4] = [0.0, 0.0, 0.0, 0.0] if pass.first_step else [(f64)pass.second[at], (f64)pass.second[at + 1], (f64)pass.second[at + 2], (f64)pass.second[at + 3]]
-            out = [before[0] + blur[0], before[1] + blur[1], before[2] + blur[2]]
-            spent = before[3] + blur[3]
         else:
             if pass.film.value(6)[3] > 0.0:
                 # Grain: the image made of dye clouds, each the negative at its centre.
@@ -508,8 +503,8 @@ pub func filmed(source: Film*, scene: const Scene*, matrix: f64[9], tables: cons
         try run_sized(&pass, gathered, two, exposed, 7, width, height)
     else:
         memory.copy(exposed, two, size)
-    # Development, step by step: each step's release into `two`, spread across
-    # into `one` and down into `two` again... the inhibitor ends in `one`.
+    # Development, step by step: the field in `one`, each step's release added
+    # into `out`, diffused across into `two` and down into `one` again.
     try develop_steps(&pass, exposed, one, two, out, &plan)
     if samples > 0 and source.value(6)[3] > 0.0:
         try source.fit_grains()
@@ -541,11 +536,13 @@ pub func filmed(source: Film*, scene: const Scene*, matrix: f64[9], tables: cons
     free(out) in memory.heap
     return Scene.from_pixels(width, height, pixels)
 
-## Development's steps on the exposure `exposed`: each step's release, spread
-## across into `spare` and down while adding into `field`, which ends holding
-## the inhibitor and used developer (`scratch` for the release).
+## Development's steps on the exposure `exposed`: each step's release added
+## to `field` (into `scratch`), then the whole field diffused one step, across
+## into `spare` and down into `field`, which ends holding the inhibitor and
+## used developer.
 func develop_steps(pass: Pass*, exposed: const f32[], field: f32[], spare: f32[], scratch: f32[], plan: const Plan*) -> !:
     let n = film.chemistry_steps
+    let spread = step_blur(plan)
     for step in 1..=n:
         pass.stage = 8
         pass.first = exposed
@@ -556,12 +553,8 @@ func develop_steps(pass: Pass*, exposed: const f32[], field: f32[], spare: f32[]
         pass.reached = (f64)step / (f64)n
         pass.keep = math.pow(plan.keep, (f64)(n - step))
         try parallel.for_each(pass.height, (void*)pass, run_row)
-        let spread = spread_at(plan, step, n)
         try run_blur(pass, scratch, scratch, spare, 1, 1, 0, spread)
-        pass.first_step = step == 1
-        # Down, added to `field`: into `scratch`, then back.
-        try run_blur(pass, spare, field, scratch, 9, 0, 1, spread)
-        memory.copy(field, scratch, field.length)
+        try run_blur(pass, spare, spare, field, 1, 0, 1, spread)
 
 ## Stage `stage` into `out` of `width` × `height` (the halation's sizes), the
 ## pass's size put back after.
@@ -671,17 +664,19 @@ test "stand development draws stronger edges than continuous agitation":
 func density_of(source: const Film*, v: f64) -> f64:
     return math.log10(math.max(v, 1.0e-9) / 0.18) / source.value(8)[1]
 
-test "a colour negative's edges overshoot as its MTF says, fading within a few tens of µm":
+test "a colour negative's edges overshoot, fading within a few tens of µm":
     # Portra 400 in C-41 (its standard machine agitation), no halation (its
     # glow is not chemistry), 4096 pixels across 35 mm (about 6 µm each): the
     # green record's overshoot on the dense side of a step, as a share of the
-    # step, and how far it takes to fall to 1/e. Kodak's MTF for it peaks at
-    # 1.11 near 12 cycles/mm, which with the optics' own falloff is an
-    # unsharp mask of gain near 0.2: an overshoot near 10 %. The e-folding
-    # agrees with Nelson's chemical spread function fitted to Kodak Gold 200
-    # (Rajkowski and Nowak, Optica Applicata 1999: about 20 µm); its weight
-    # there, 2.3–5.3 %, is smaller than Portra 400's MTF implies (a different
-    # film, and the data disagree: docs/PHYSICAL-FILM.md, part 4).
+    # step, and how far it takes to fall to 1/e. The model is fitted to
+    # Portra 400's MTF (1.11 near 12 cycles/mm); one MTF ordinate does not fix
+    # a step's overshoot (many spatial responses share it), so its size here is
+    # the model's prediction, bounded loosely. The e-folding is checked against
+    # Nelson's chemical spread fitted to Kodak Gold (Rajkowski and Nowak,
+    # Optica Applicata 1999: 10^(−2|x|/Kc), Kc 90 µm, an e-folding of 19.5 µm).
+    # Their 6.24 % (Gold 100) and 5.28 % (Gold 200) are the chemical spread's
+    # weight in their combined spread function, not an edge's overshoot, so
+    # they are not compared with this (docs/PHYSICAL-FILM.md, part 4).
     var portra = film_for("film_stock=12;film_grain=0;film_halation=0") catch failure:
         assert(false)
         return
@@ -716,7 +711,11 @@ test "a colour negative's edges overshoot as its MTF says, fading within a few t
 
 test "agitation changes edges, not contrast":
     # Far from any edge the negative is the published curve whatever the
-    # agitation: a large even patch's density, continuous against stand.
+    # agitation: a large even patch's density, continuous against stand. This
+    # is a calibrated correction, not a prediction: the developer here is not
+    # yet a conserved field with the bath's flux at its surface, and stretching
+    # the edges' strength over even areas moved a dense patch 1.6 D (stand
+    # against continuous), far more than real; docs/PHYSICAL-FILM.md, part 4.
     var reads: f64[2]
     let texts: str[2] = ["film_stock=18;film_grain=0;develop_process=5;develop_agitation=1",
                          "film_stock=18;film_grain=0;develop_process=5;develop_agitation=3"]

@@ -9,6 +9,8 @@ from luce_color import xyz
 from luce_color import transfer
 import view
 from film_stocks import Stock
+import densitometry
+from densitometry import Densitometer
 import film_stocks
 
 ## The tables' sizes: the scan's cube, the curves' samples and their log H range.
@@ -19,76 +21,6 @@ pub let log_high: f64 = 2.5
 
 ## Slides are seen on a lightbox of this light (D50, as a black body).
 let lightbox_kelvin: f64 = 5000.0
-
-# mark: Densitometry ==========================================================
-
-## A densitometer's three bands, red, green, blue, each summing to 1.
-pub struct Densitometer:
-    var bands: f64[243]
-
-    ## The Status M-like densities (R, G, B) of `density` (spectral).
-    pub func read(density: const f64[81]) -> f64[3]:
-        var out: f64[3]
-        var transmitted: f64[81]
-        for at in 0..<spectral.samples:
-            transmitted[at] = math.pow(10.0, -density[at])
-        for channel in 0..<(usize)3:
-            var sum = 0.0
-            for at in 0..<spectral.samples:
-                sum += transmitted[at] * self.bands[channel * 81 + at]
-            out[channel] = -math.log10(math.max(sum, 1.0e-12))
-        return out
-
-## Printing density: the density of a negative as the printer and the print
-## stock see it. SMPTE RP 180-1999 defines it by these responsivities (red,
-## green, blue at 380–780 nm, its 10 nm table halved linearly to 5 nm; peaks 670,
-## 530 and 430 nm), made for printing camera negatives onto print film.
-let printing_responsivity: f64[243] = [
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0005, 0.001, 0.00935, 0.0177, 0.0545, 0.0913, 0.1568, 0.2223, 0.357, 0.4917, 0.6592,
-    0.8267, 0.91335, 1.0, 0.89685, 0.7937, 0.6212, 0.4487, 0.3197, 0.1907, 0.13295, 0.0752, 0.04245, 0.0097,
-    0.00485, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.00025, 0.0005, 0.00085, 0.0012, 0.00305, 0.0049, 0.02075, 0.0366,
-    0.154, 0.2714, 0.4933, 0.7152, 0.8576, 1.0, 0.93895, 0.8779, 0.66815, 0.4584, 0.29505, 0.1317, 0.0698,
-    0.0079, 0.0052, 0.0025, 0.0019, 0.0013, 0.00065, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0052, 0.034, 0.0628, 0.116, 0.1692, 0.29165, 0.4141, 0.5883, 0.7625, 0.88125, 1.0,
-    0.9377, 0.8754, 0.7133, 0.5512, 0.40655, 0.2619, 0.1847, 0.1075, 0.06685, 0.0262, 0.014, 0.0018, 0.0009,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
-    0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-
-## A densitometer reading printing density (RP 180).
-pub func printing() -> Densitometer:
-    var out: Densitometer
-    for channel in 0..<(usize)3:
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            sum += printing_responsivity[channel * 81 + at]
-        for at in 0..<spectral.samples:
-            out.bands[channel * 81 + at] = printing_responsivity[channel * 81 + at] / sum
-    return out
-
-## What a color paper sees of a negative under an enlarger: its layers'
-## spectral sensitivity (`sensitivity`, log10, red first) times a tungsten
-## halogen lamp's light (3200 K, an estimate; the color head's filtration is
-## applied as CC values, film_paper.lucb).
-pub func paper_printing(sensitivity: const f64[243]) -> Densitometer:
-    var out: Densitometer
-    let lamp = spectral.planck(3200.0)
-    for channel in 0..<(usize)3:
-        var peak = -1.0e9
-        for at in 0..<spectral.samples:
-            peak = math.max(peak, sensitivity[channel * 81 + at])
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            let weight = lamp.values[at] * math.pow(10.0, sensitivity[channel * 81 + at] - peak)
-            out.bands[channel * 81 + at] = weight
-            sum += weight
-        for at in 0..<spectral.samples:
-            out.bands[channel * 81 + at] /= sum
-    return out
 
 ## The densities `meter` reads of a negative of `model`'s stock over the dye
 ## amounts 0..top (33³ × 3, r fastest), over D-min's: what a print material
@@ -105,20 +37,6 @@ pub func printed_by(model: const Model*, meter: const Densitometer*) -> f64[]!:
                 let at = ((b * n + g) * n + r) * 3
                 for k in 0..<(usize)3:
                     out[at + k] = read[k] - base[k]
-    return out
-
-pub func status_m() -> Densitometer:
-    var out: Densitometer
-    let centers: f64[3] = [650.0, 546.0, 447.0]
-    let widths: f64[3] = [16.0, 14.0, 14.0]
-    for channel in 0..<(usize)3:
-        var sum = 0.0
-        for at in 0..<spectral.samples:
-            let d = (spectral.wavelength(at) - centers[channel]) / widths[channel]
-            out.bands[channel * 81 + at] = math.exp(-0.5 * d * d)
-            sum += out.bands[channel * 81 + at]
-        for at in 0..<spectral.samples:
-            out.bands[channel * 81 + at] /= sum
     return out
 
 # mark: The model =============================================================
@@ -376,7 +294,11 @@ func balance_slide(model: Model*):
             model.neutral[sample * 3 + layer] = curve[sample]
 
 pub func build_model(stock: Stock) -> Model!:
-    var out = Model(stock = stock, meter = status_m(), printer = printing())
+    # Each stock's curves are read as its sheet reads them: Status A for slides,
+    # Status M for color negatives (black-and-white silver is near neutral in
+    # either).
+    let meter = densitometry.status_a() if stock.kind == 1 else densitometry.status_m()
+    var out = Model(stock = stock, meter = meter, printer = densitometry.printing())
     errdefer out.release()
     out.base = out.meter.read(stock.d_min)
     out.printer_base = out.printer.read(stock.d_min)

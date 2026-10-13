@@ -94,6 +94,7 @@
 ##          `light_taken`, on its log grid); 390–421 how a pixel averages the
 ##          clouds (`pixel_covariance`: variance, side, diagonal), on its grid
 import interop
+import densitometry
 import memory
 from luce_std.collections import Buffer
 import time
@@ -465,7 +466,7 @@ pub struct Film:
         let model = &self.model
         if self.printing == onto_paper and self.paper_table.length == 0:
             let chosen = film_stocks.paper_at((usize)math.clamp((f64)self.paper, 0.0, (f64)(film_stocks.paper_count - 1)))
-            let meter = film_model.paper_printing(chosen.sensitivity)
+            let meter = densitometry.paper_printing(chosen.sensitivity)
             self.paper_table = try film_model.printed_by(model, &meter)
         let table = model.printed if self.printing == onto_print else (self.paper_table if self.printing == onto_paper else model.scan)
         let n = lut_size
@@ -1452,16 +1453,16 @@ let dye_spread: f64 = 8.5
 ## at the default settings (the test below holds the two together). Through it,
 ## each stock shows the color its dyes, mask and interimage give it, as a
 ## telecine set up once shows each stock it runs.
-let reference_scan: f64[9] = [0.5920970419230391, 0.3839118934210871, 0.02399106465587374,
-                              0.005327903598811009, 1.0190544131456953, -0.02438231674450634,
-                              -0.010722055744861342, 0.27283582185311206, 0.7378862338917493]
+let reference_scan: f64[9] = [0.5844744297270579, 0.3910015515880218, 0.024524018684920285,
+                              0.0064365562204247275, 1.026855233362786, -0.033291789583210864,
+                              -0.0016053762051531303, 0.2199420447155561, 0.7816633314895971]
 
 ## 2383's layers' contrast against the shape its curves share here (Kodak's
 ## graph runs them together where they could be read apart): Kodak matches
 ## them to its camera negatives so a normal grey scale prints neutral. Fitted
 ## so the reference negative, Vision3 250D 5207, does (`print_balance_of`; the
 ## test below holds them together); each stock then prints its own balance.
-let print_balance: f64[3] = [1.0337625302615536, 0.915533957418388, 1.0633760709750428]
+let print_balance: f64[3] = [1.0410326816317843, 0.9123142358797784, 1.0601060980601724]
 
 ## Edge effects in log H per unit of their strength (film_develop.lucb's share of
 ## a step added as overshoot). For a negative of gamma 0.6 whose dye is about 2
@@ -1620,8 +1621,10 @@ test "every stock builds, returns grey in place and keeps neutrals neutral":
                 assert(math.abs(grey[k] / 0.18 - 1.0) < 0.01)
         assert(math.abs(math.log2(grey[0] / grey[1])) < 0.1 and math.abs(math.log2(grey[2] / grey[1])) < 0.1)
         # Above grey a slide's layers part as its sheet's curves do (Velvia 100's
-        # green falls faster: the magenta lean its highlights are known for).
-        let apart = 0.15 if stock.kind == 1 else 0.1
+        # green falls faster: the magenta lean its highlights are known for;
+        # E100's Status A curves, seen by the eye through its dyes, leave its
+        # blue 0.19 stop behind two stops over).
+        let apart = 0.2 if stock.kind == 1 else 0.1
         assert(math.abs(math.log2(bright[0] / bright[1])) < apart and math.abs(math.log2(bright[2] / bright[1])) < apart)
 
 test "film saturates warm colors and keeps their hue near":

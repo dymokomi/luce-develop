@@ -17,7 +17,7 @@
 ## stock carries k, β and tᵢ relative to its normal development
 ## (dev/film/fit_development.py fits them: black-and-white films to their sheets'
 ## development series, within 0.006–0.03 density; color negatives to Kodak's C-41
-## control charts; slides' first developer to Kodak's E-6 push speeds). Fog is
+## control charts; slides' first developer to E100's own push, E-4000). Fog is
 ## its own population, growing with time and, with about 1.75 times the image's
 ## activation energy, faster with warmth (Kodak's C-41 charts: D-min moves twice
 ## as much for +2.2 °C as for +20 % time). Temperature acts through Arrhenius, its
@@ -366,14 +366,15 @@ func stock_curve(stock: const Stock*, channel: usize, x: f64) -> f64:
     let row = channel * film_stocks.curve_most
     return stock.curves[row + below] * (1.0 - t) + stock.curves[row + below + 1] * t
 
-test "Ektachrome E100 pushed in E-6 gains Kodak's push speeds":
-    # Kodak E-28: the first developer at 8, 11 and 14 minutes (6 normal) pushes
-    # 2/3, 5/3 and 7/3 stops, read where the slide is 1.0 over its D-min. The
-    # first developer's negative image grows (film.lucb's `developed_amount`).
+test "Ektachrome E100 pushed in E-6 gains its sheet's push":
+    # Kodak E-4000 (E100): push 1, the first developer at 8 minutes (6 normal),
+    # rates it EI 200, one stop, read where the slide is 1.0 over its D-min.
+    # Past 8 minutes Kodak publishes only Ektachrome E200's series (E-28: EI
+    # 320, 640, 1000 at 8, 11, 14), borrowed for the gain beyond 8: +1 and
+    # +1 2/3 stops. The first developer's negative image grows (film.lucb's
+    # `developed_amount`).
     let e100 = film_stocks.stock_at(15)
     let e6 = standard_of(&e100)
-    let minutes: f64[3] = [8.0, 11.0, 14.0]
-    let stops: f64[3] = [2.0 / 3.0, 5.0 / 3.0, 7.0 / 3.0]
     var mean_gain: f64[3] = [0.0, 0.0, 0.0]
     for channel in 0..<(usize)3:
         var top = -1.0e9
@@ -384,15 +385,18 @@ test "Ektachrome E100 pushed in E-6 gains Kodak's push speeds":
             bottom = math.min(bottom, v)
         let level = bottom + 1.0
         let normal_speed = speed_at(&e100, developing(&e100, e6, 6.0, 38.0), channel, top, bottom, level)
+        let minutes: f64[3] = [8.0, 11.0, 14.0]
+        var gains: f64[3] = [0.0, 0.0, 0.0]
         for (index, time) in minutes.indexed():
             let pushed = speed_at(&e100, developing(&e100, e6, time, 38.0), channel, top, bottom, level)
-            let gained = (normal_speed - pushed) / 0.30103
-            mean_gain[index] += gained / 3.0
-            # Kodak gives one speed for the film; the layers share one rate,
-            # and the blue gains up to 0.4 stop more (its fog is larger).
-            assert(math.abs(gained - stops[index]) < 0.45)
-    for index in 0..<(usize)3:
-        assert(math.abs(mean_gain[index] - stops[index]) < 0.15)
+            gains[index] = (normal_speed - pushed) / 0.30103
+            mean_gain[index] += gains[index] / 3.0
+        # One rate shared by the layers: the blue gains a little more (its
+        # fog is larger).
+        assert(math.abs(gains[0] - 1.0) < 0.15)
+        assert(math.abs(gains[1] - gains[0] - 1.0) < 0.15)
+        assert(math.abs(gains[2] - gains[0] - 5.0 / 3.0) < 0.25)
+    assert(math.abs(mean_gain[0] - 1.0) < 0.05)
 
 ## Where (log H) slide `stock`'s channel, developed as `grown`, falls to `level`.
 func speed_at(stock: const Stock*, grown: Development, channel: usize, top: f64, bottom: f64, level: f64) -> f64:
