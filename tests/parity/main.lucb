@@ -6,8 +6,7 @@
 ## off by more than 6. The Standard and Linear views are computed the same way on
 ## both, so no value may be off by 3 (8 with film, which runs nine half-float
 ## passes first); ACES and Print go through a table on the GPU, so their limit
-## is 40. A recipe with two outputs draws A left of the split and B right of
-## it, each matching its own CPU develop.
+## is 40.
 import c
 import memory
 import strings
@@ -19,7 +18,6 @@ from luce_develop import scene
 from luce_develop import process
 from luce_develop import renderer
 from luce_develop.settings import parse, compile, Settings
-from luce_develop import recipe
 from luce_develop import film
 
 let cases: str[28] = [
@@ -46,11 +44,11 @@ let cases: str[28] = [
     "view=1;film_stock=5;film_grain=0;develop_process=2",
     "view=3;film_stock=1;film_grain=0;print_silver=2.4",
     "view=1;film_stock=2;film_grain=0;film_flash=15;film_filter=5",
-    "recipe=file:0:0:|lens:0:64:file:d;lens_coating=2;lens_diffusion=4",
-    "recipe=file:0:0:|lens:0:64:file|film:0:128:lens|develop:0:192:film|scan:0:256:develop|view:0:320:scan:d;view=1;film_stock=3;film_grain=0;lens_coating=2;lens_diffusion=3",
-    "recipe=file:0:0:|exposure:0:64:file|filter:0:128:exposure|film:0:192:filter|develop:0:256:film|paper:0:320:develop|easel:0:384:paper:d;film_stock=18;film_grain=0;paper_grade=3.5;paper_enlarger=1",
-    "recipe=file:0:0:|white_balance:0:64:file|exposure:0:128:white_balance|film:0:192:exposure|develop:0:256:film|paper:0:320:develop|easel:0:384:paper:d;film_stock=12;film_grain=0;paper_stock=3;paper_yellow=20;paper_exposure=0.5",
-    "recipe=file:0:0:|white_balance:0:64:file|exposure:0:128:white_balance|film:0:192:exposure|develop:0:256:film|print:0:320:develop|project:0:384:print|easel:0:448:project:d;film_stock=3;film_grain=60;print_generations=2;print_optical=1"]
+    "recipe=telecine|lens;film_stock=0;lens_coating=2;lens_diffusion=4",
+    "recipe=telecine|lens;view=1;film_stock=3;film_grain=0;lens_coating=2;lens_diffusion=3",
+    "recipe=paper_print|filter;film_stock=18;film_grain=0;paper_grade=3.5;paper_enlarger=1",
+    "recipe=paper_print|white_balance;film_stock=12;film_grain=0;paper_stock=3;paper_yellow=20;paper_exposure=0.5",
+    "recipe=release_print|white_balance;film_stock=3;film_grain=60;print_generations=2;print_optical=1"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
@@ -206,56 +204,6 @@ func against_export(path: str, settings: Settings, wanted: str, refined: usize, 
     print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [export on the GPU {wanted}, {refined} samples]  mean {mean}  over 6: {outliers}")
     return 0 if good else 1
 
-## A and B compared, the split at 0.4: each side within the film limit (8) of
-## its own CPU develop (B: the recipe shown at Develop, scanned as is).
-func check_compare(device: gpu.Device, path: str) -> i64!:
-    var settings = parse("film_grain=0;contrast=40;saturation=-30")
-    settings.recipe.set_compare((i64)recipe.Stage.develop)
-    var shown_b = settings
-    shown_b.recipe.display = settings.recipe.compare
-    shown_b.recipe.compare = -1
-    var cpu_scene = try scene.open(path, 384)
-    defer cpu_scene.close()
-    var expected_a = try process.render(&cpu_scene, settings, cpu = true)
-    defer expected_a.close()
-    var expected_b = try process.render(&cpu_scene, shown_b, cpu = true)
-    defer expected_b.close()
-    let width = (u32)expected_a.width()
-    let height = (u32)expected_a.height()
-    var drawer = try renderer.create(gpu.Format.rgba8)
-    defer drawer.close()
-    drawer.show(try scene.open(path, 384))
-    drawer.set_settings(settings)
-    drawer.set_split(0.4)
-    var texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba8)
-    defer texture.destroy()
-    try develop_into(&drawer, texture, width, height)
-    let shown = try new u8[(usize)(width * height * 4)] in memory.heap
-    defer free(shown) in memory.heap
-    try texture.read(shown)
-    let split = (usize)((f64)width * 0.4)
-    var largest = 0
-    var total = 0.0
-    var differs = false
-    for y in 0..<(usize)height:
-        for x in 0..<(usize)width:
-            # A column either side of the split may be either.
-            if x + 1 >= split and x <= split:
-                continue
-            let want = expected_a.pixels() if x < split else expected_b.pixels()
-            for k in 0..<(usize)3:
-                let at = (y * (usize)width + x) * 4 + k
-                let difference = (i64)shown[at] - (i64)want[at]
-                let size = difference if difference >= 0 else -difference
-                total += (f64)size
-                largest = size if size > largest else largest
-                if expected_a.pixels()[at] != expected_b.pixels()[at]:
-                    differs = true
-    let mean = total / (f64)(width * height * 3)
-    let good = mean < 1.0 and largest < 8 and differs
-    print(f"{"ok  " if good else "FAIL"}  {paths.base(path)}  [A | B at Develop]  mean {mean}  largest {largest}")
-    return 0 if good else 1
-
 ## Whether a file is at `path`.
 func present(path: str) -> bool!:
     let terminated = try strings.copy(path)
@@ -271,7 +219,6 @@ pub func main(arguments: str[]) -> i32!:
     if arguments.length > 1:
         for path in arguments[1..]:
             failed += try check_file(device, path)
-            failed += try check_compare(device, path)
             failed += try check_stochastic(device, path)
         return 1 if failed > 0 else 0
     for sample in samples:
@@ -280,6 +227,5 @@ pub func main(arguments: str[]) -> i32!:
             return 0
     for sample in samples:
         failed += try check_file(device, sample)
-        failed += try check_compare(device, sample)
         failed += try check_stochastic(device, sample)
     return 1 if failed > 0 else 0

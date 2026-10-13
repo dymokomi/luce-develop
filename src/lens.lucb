@@ -2,8 +2,8 @@
 ## scattered inside a lens, off its glass surfaces, mount and barrel, spreads
 ## over the whole frame as veiling glare: a share of the frame's light laid
 ## evenly over it, lifting the shadows and softening contrast. How much depends
-## on the lens's coating (Lens node, Coating) and on diffusion filters built to
-## add it, such as Tiffen's Low Contrast series (Lens node, Diffusion).
+## on the lens's coating (the Lens stage's Coating) and on diffusion filters built to
+## add it, such as Tiffen's Low Contrast series (its Diffusion).
 ##
 ## The shares are veiling glare indexes (ISO 9358: the light in a small black
 ## patch over the light around it), counted beyond the camera's own: a raw

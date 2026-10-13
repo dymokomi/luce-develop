@@ -13,7 +13,6 @@ from luce_color import icc
 from luce_std.collections import Buffer as Bytes
 from luce_raster.binary import Buffer
 from settings import parse
-import scene
 import process
 import view
 import geometry
@@ -48,10 +47,9 @@ pub func export(source: str, settings: str, target: str, format: i64, quality: i
     try icc.write_named_profile(&profile, "Display P3" if space == display_p3 else "sRGB")
     if edge < 0 or quality < 1 or quality > 100:
         error(invalid, "an export needs a size of 0 or more and a quality of 1 to 100")
-    var opened = try scene.open(source, (usize)edge)
-    defer opened.close()
     let wanted = parse(settings)
-    try opened.turn((i64)wanted.get(.geometry_turn))
+    var opened = try process.opened(source, &wanted, (usize)edge)
+    defer opened.close()
     if format == jpeg:
         var picture = try process.render(&opened, wanted, output, samples = grain_samples)
         defer picture.close()

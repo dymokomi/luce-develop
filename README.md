@@ -10,12 +10,6 @@ export. luced-photo is its first user; the design is in
 
 ## Sources (`source`)
 
-```luce
-from luce_develop import source
-
-let picture = source.open_preview("/photos/DSCF1234.RAF", 512)   # Luce: an owned Picture
-```
-
 - `kind(data) -> Kind`: `raw`, `jpeg`, `png`, `tiff`, `heic` or `unknown`, by the bytes.
 - `is_photo_name(name)`: whether an importer should look at a file, by its extension.
 - `preview(data, long_edge, orientation = 0) -> Picture`: a display-ready preview,
@@ -24,7 +18,6 @@ let picture = source.open_preview("/photos/DSCF1234.RAF", 512)   # Luce: an owne
   asked for (Leica's DNGs carry 160 px), it is a half-size develop instead. A
   JPEG decodes at 1/2 to 1/8 size from its DCT. PNG, TIFF and HEIC decode whole.
   `orientation` 0 uses what the file states where luce-develop reads it.
-- `open_preview(path, long_edge, orientation = 0)`: the same, from a file, for Luce.
 
 ## Pictures (`picture`)
 
@@ -95,25 +88,28 @@ a matrix built from luce-raw's `rendering`. The stages, in the order the shader
 
 ## Recipes (`recipe`)
 
-A photo's settings carry its recipe, the film process as a graph of stages
-(File, White Balance, Exposure, Lens, Filter, Film, Develop, Scan, Grade,
-Print, Project, Lightbox, View, Easel) with typed wires: light, a latent exposure, processed film, a scanned
-image, display light. Each stage owns parameter sections (`stage_sections`).
-`settings.compile(settings)` is what renders: only the stages on the path to
-the displayed one are at work, the rest of the sections at their defaults, and
-the path picks the engine's mode (film on with a Film stage, the 2383 print view
-with Print and Project). The renderer, `process` and export compile on entry.
-Recipes are stored as `recipe=` in the settings text; `Look` edits the graph
-(`add_stage`, `connect`, `set_bypassed`, `set_display`, `use_mode`…), and
-`mode_text(at)` gives a mode (Television, Cinema, Slide, Black & White) as
-settings to stack on a photo.
+A photo's settings carry its recipe, the film process it goes through: the
+File, the camera (White Balance, Exposure, Lens, Filter), the Film and its
+Development, then an output: a Telecine (Scan, Grade, View), a Release Print
+(Print, Project), a Lightbox, a Paper Print or a Digital Intermediate (Scan,
+Grade, Record, Print, Project); the Easel frames it. White Balance, Lens and
+Filter are each there or not; the rest follows from the output. Each stage
+owns parameter sections (`owner_of`). `settings.compile(settings)` is what
+renders: the sections of stages not in the recipe at their defaults, and the
+view as the output has it (the 2383 print view for a projected print, the
+paper view for paper). The renderer, `process` and export compile on entry.
+Recipes are stored as `recipe=telecine|white_balance` in the settings text,
+omitted for the default (Television's). `Look` reads and sets them
+(`has_stage`, `output`, `set_output`, `set_stage_used`), and `mode_text(at)`
+gives a mode (Television, Cinema, Slide, Black & White and others) as settings
+to stack on a photo.
 
 ## Film (`film`)
 
 The Film section turns the develop into a color negative and its transfer, the
 way television shot on film reached the screen: Kodak negative, developed,
 scanned on a telecine and graded on tape. Film works on the negative, at the
-scene's own size and before the develop, so the tone and color tools grade the
+scene's own size (no finer than its scan's Resolution) and before the develop, so the tone and color tools grade the
 scan and the view stays the only tone scale. Everything comes from the stock's
 datasheet (`film_stocks.lucb`, modelled by `film_model.lucb`):
 

@@ -95,7 +95,7 @@ func wheel(hue: f64, saturation: f64) -> (f64, f64):
 ## The tables for `settings`.
 pub func build(settings: const Settings*) -> Tables:
     var out: Tables
-    var gains: f32[1024]
+    var gains: f32[tone.tone_samples]
     tone.fill(*settings, gains)
     for at in 0..<table_width:
         out.put(0, at, (f64)gains[at], 0.0, 0.0, 1.0)

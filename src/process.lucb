@@ -2,7 +2,6 @@
 ## tables (tables.lucb, film.lucb) with the same filtering, except that the view is
 ## evaluated exactly instead of through its table. Export uses it, and the
 ## tests hold the GPU to it. Change both together.
-import interop
 import memory
 from luce_std import parallel
 from luce_std import math
@@ -10,7 +9,7 @@ from luce_color import transfer
 from settings import Settings, View
 import settings as settings_module
 from scene import Scene
-from picture import Picture, adopt
+from picture import Picture
 from tables import Tables
 import scene
 import tables
@@ -257,7 +256,7 @@ func render_row(context: void*, y: usize, worker: usize) -> !:
             job.words[at * 4 + 3] = 65535
 
 func rendering(source: const Scene*, wanted: const Settings*, output: view.Output) -> Rendering!:
-    # What renders: the recipe's stages at work and its mode.
+    # What renders: the settings with only the recipe's stages at work.
     let compiled = settings_module.compile(wanted)
     let settings = &compiled
     # The output is the crop at the scene's scale.
@@ -305,10 +304,11 @@ pub func render16(source: const Scene*, settings: Settings, output: view.Output 
     try parallel.for_each(job.height, (void*)&job, render_row)
     return job.words
 
-## The photo at `path` developed with `settings` at most `edge` pixels on its
-## longer side, for Luce: what an exporter or a thumbnail maker calls.
-pub func render_file(path: str, settings: Settings, edge: i64) -> interop.Reference[Picture]!:
-    var opened = try scene.open(path, (usize)edge)
-    defer opened.close()
-    try opened.turn((i64)settings.get(.geometry_turn))
-    return try adopt(try render(&opened, settings))
+## The photo at `path` as a scene at most `edge` pixels on its longer side (0:
+## full size), turned as `settings` say: what an export or a library's
+## developed picture renders.
+pub func opened(path: str, settings: const Settings*, edge: usize) -> Scene!:
+    var out = try scene.open(path, edge)
+    errdefer out.close()
+    try out.turn((i64)settings.get(.geometry_turn))
+    return out

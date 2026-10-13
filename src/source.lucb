@@ -4,11 +4,7 @@
 ## preview is the largest JPEG the camera embedded (a half-size develop when it
 ## has none); a JPEG decodes straight from its DCT at 1/2–1/8 size; PNG, TIFF and
 ## HEIC decode whole and shrink.
-import c
-import interop
 import memory
-import strings
-from luce_std import files
 from luce_std import paths
 from luce_color import transfer
 from luce_raw import raw
@@ -18,7 +14,7 @@ from luce_png import png
 from luce_tiff import tiff
 from luce_heic import heic
 from luce_raster.model import Raster, SampleType
-from picture import Picture, adopt
+from picture import Picture
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -106,16 +102,6 @@ func stated_orientation(data: const u8[]) -> u64:
     defer found.release()
     let stated = found.value.orientation
     return (u64)stated if stated >= 1 and stated <= 8 else 1
-
-## The preview of the file at `path` (see `preview`), handed to Luce.
-pub func open_preview(path: str, long_edge: i64, orientation: i64 = 0) -> interop.Reference[Picture]!:
-    if long_edge <= 0 or orientation < 0 or orientation > 8:
-        error(invalid, "a preview needs a size and an orientation of 0 to 8")
-    let terminated = try strings.copy(path)
-    defer strings.release(terminated)
-    let data = try files.read((c.str)terminated)
-    defer data.release()
-    return try adopt(try preview(data.value, (usize)long_edge, (u64)orientation))
 
 ## Shrink, then turn upright.
 func finish(decoded: const Picture*, long_edge: usize, orientation: u64) -> Picture!:

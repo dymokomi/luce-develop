@@ -173,10 +173,7 @@ pub struct Grid:
         free(self.mobile) in memory.heap
         free(self.fixed) in memory.heap
 
-    ## Species `species`' amount in row `row` of column `column`.
-    pub func mobile_at(species: usize, row: usize, column: usize) -> f64:
-        return self.mobile[(species * self.rows + row) * self.columns + column]
-
+    ## Fixed species `species`' amount in row `row` of column `column`.
     pub func fixed_at(species: usize, row: usize, column: usize) -> f64:
         return self.fixed[(species * self.rows + row) * self.columns + column]
 

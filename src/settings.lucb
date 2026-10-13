@@ -6,7 +6,7 @@
 ## and builds its controls from the parameter table.
 ##
 ## What the parameters do, by section (ranges are in parameters.lucb). The
-## sections follow the film process (luced-photo shows each as a node's):
+## sections follow the film process, each its recipe stage's (recipe.lucb):
 ##   White Balance    the light on set (temperature in kelvin, 0 = as shot, tint
 ##                    then ignored; tint)
 ##   Exposure         stops over or under the camera's exposure
@@ -188,12 +188,6 @@ pub struct Settings:
                                                   math.clamp(guide.x2, 0.0, 1.0), math.clamp(guide.y2, 0.0, 1.0))
             self.guide_count += 1
 
-    ## Whether every curve is the identity.
-    pub func curves_untouched() -> bool:
-        for curve in self.curves:
-            if curve.count > 0:
-                return false
-        return true
 
 ## The settings a photo starts with: as shot, untouched, through the default
 ## recipe (Television) and the ACES 2.0 view.
@@ -203,42 +197,25 @@ pub func defaults() -> Settings:
         out.values[at] = parameters[at].default
     return out
 
-## What `settings` render with: only the stages on the path to the displayed
-## one at work (a stage elsewhere, bypassed or missing leaves its sections at
-## their defaults; its curves and guides too), and the engine's mode as the
-## path has it: film on with a Film stage (its stock), off without; a Project
-## stage (after Print) the 2383 print view; a Lightbox a slide, seen through the
-## ACES view; a View stage its own. A recipe whose displayed stage does not reach
-## a File renders as shot, without film.
+## What `settings` render with: only their recipe's stages at work (a stage
+## not in it leaves its sections at their defaults; the Grade its curves, the
+## Easel its guides), and the view as the output has it: a projected print the
+## 2383 print view, paper the paper view, a slide on a lightbox the ACES view.
 pub func compile(settings: const Settings*) -> Settings:
-    return compile_to(settings, settings.recipe.display)
-
-## What `settings` render with shown at stage `target` instead: output B, the
-## compared stage, renders so.
-pub func compile_to(settings: const Settings*, target: i64) -> Settings:
     var out = *settings
-    var plan = settings.recipe
-    plan.display = target
+    let plan = settings.recipe
     let base = defaults()
     for at in 0..<parameter_count:
         let owner = recipe.owner_of(parameters[at].section)
-        if owner >= 0 and not plan.active(owner):
+        if owner >= 0 and not plan.has(owner):
             out.values[at] = base.values[at]
-    if not plan.active((i64)recipe.Stage.grade):
+    if not plan.has((i64)recipe.Stage.grade):
         for at in 0..<curve_count:
             out.curves[at] = Curve()
-    if not plan.active((i64)recipe.Stage.easel):
-        out.guide_count = 0
-    if not plan.active((i64)recipe.Stage.film):
-        out.set(.film_stock, 0.0)
-    if plan.active((i64)recipe.Stage.project) and plan.active((i64)recipe.Stage.print):
+    if plan.has((i64)recipe.Stage.project):
         out.set(.view, (f64)(i64)View.print)
-    elif plan.active((i64)recipe.Stage.paper):
+    elif plan.has((i64)recipe.Stage.paper):
         out.set(.view, (f64)(i64)View.paper)
-    elif plan.active((i64)recipe.Stage.lightbox):
-        out.set(.view, (f64)(i64)View.aces)
-    elif not plan.active((i64)recipe.Stage.view):
-        out.set(.view, (f64)(i64)View.aces)
     return out
 
 ## Mode `at` (recipe.mode_names) as settings text to stack on a photo: its
@@ -305,21 +282,15 @@ pub func text_of(settings: const Settings*, out: Buffer*) -> !:
                     try out.put_byte(',')
                 try put_decimal(out, value)
     # The recipe, when it is not the default one.
-    var mine: Buffer
-    defer mine.destroy()
-    try recipe.text_of(&settings.recipe, &mine)
-    var usual: Buffer
-    defer usual.destroy()
-    let fallback = recipe.default_recipe()
-    try recipe.text_of(&fallback, &usual)
-    if mine.text() != usual.text():
+    let usual = recipe.default_recipe()
+    if not settings.recipe.equals(&usual):
         if out.length() > 0:
             try out.put_byte(';')
         try out.put_text("recipe=")
-        try out.put_text(mine.text())
+        try recipe.text_of(&settings.recipe, out)
 
 ## Settings from their text form; unknown names and malformed pairs are passed
-## over, so text from a newer version still opens.
+## over.
 pub func parse(text: str) -> Settings:
     var out = defaults()
     parse_into(&out, text)
@@ -530,53 +501,12 @@ pub struct Look:
 
     # mark: the recipe ------------------------------------------------------------
 
-    ## Whether stage `stage` (recipe.Stage) is in the recipe, where it sits, the
-    ## stage its input comes from (-1 none), and whether it is bypassed.
+    ## Whether stage `stage` (recipe.Stage) is in the recipe.
     pub func has_stage(stage: i64) -> bool:
         return self.settings.recipe.has(stage)
-    pub func stage_x(stage: i64) -> f64:
-        return self.settings.recipe.nodes[(usize)stage].x if self.settings.recipe.has(stage) else 0.0
-    pub func stage_y(stage: i64) -> f64:
-        return self.settings.recipe.nodes[(usize)stage].y if self.settings.recipe.has(stage) else 0.0
-    pub func stage_source(stage: i64) -> i64:
-        return self.settings.recipe.nodes[(usize)stage].input if self.settings.recipe.has(stage) else -1
-    pub func stage_bypassed(stage: i64) -> bool:
-        return self.settings.recipe.has(stage) and self.settings.recipe.nodes[(usize)stage].bypassed
-    ## The displayed stage (-1 none), and whether it reaches a File.
-    pub func display_stage() -> i64:
-        return self.settings.recipe.display
-    pub func recipe_works() -> bool:
-        return self.settings.recipe.path().count > 0
-    ## Whether `stage` is at work: on the path to the displayed stage, not bypassed.
-    pub func stage_active(stage: i64) -> bool:
-        return self.settings.recipe.active(stage)
-
-    pub func add_stage(stage: i64, x: f64, y: f64) -> bool:
-        return self.settings.recipe.add(stage, x, y)
-    pub func remove_stage(stage: i64):
-        self.settings.recipe.remove(stage)
-    ## Wire `source` into `target`; whether the media matched (and it made no loop).
-    pub func connect(source: i64, target: i64) -> bool:
-        return self.settings.recipe.connect(source, target)
-    pub func disconnect(to: i64):
-        self.settings.recipe.disconnect(to)
-    pub func move_stage(stage: i64, x: f64, y: f64):
-        self.settings.recipe.move(stage, x, y)
-    pub func set_bypassed(stage: i64, bypassed: bool):
-        self.settings.recipe.set_bypassed(stage, bypassed)
-    pub func set_display(stage: i64):
-        self.settings.recipe.set_display(stage)
-    ## Output B: the stage compared beside the displayed one (-1 none), and
-    ## whether the viewer compares.
-    pub func compare_stage() -> i64:
-        return self.settings.recipe.compare
-    pub func set_compare(stage: i64):
-        self.settings.recipe.set_compare(stage)
-    pub func comparing() -> bool:
-        return self.settings.recipe.comparing()
 
     ## The recipe as a part of settings text, "recipe=…", even when it is the
-    ## default one (a saved recipe names its graph whatever it is).
+    ## default one (a saved preset names its recipe whatever it is).
     pub func recipe_text() -> interop.Owned[str]!:
         var out: Buffer
         defer out.destroy()
@@ -584,45 +514,16 @@ pub struct Look:
         try recipe.text_of(&self.settings.recipe, &out)
         return try interop.copy_text(out.text())
 
-    ## The output the recipe goes to (recipe.output_names).
+    ## The output the recipe goes to (recipe.output_names), and going to output
+    ## `at`, keeping the camera's stages.
     pub func output() -> i64:
-        return (i64)recipe.output_of(&self.settings.recipe)
-
-    ## Go to output `at`, keeping the camera's stages.
+        return (i64)self.settings.recipe.output
     pub func set_output(at: i64):
-        let now = self.settings.recipe
-        self.settings.recipe = recipe.chain((usize)at, now.has((i64)recipe.Stage.white_balance), now.has((i64)recipe.Stage.lens),
-                                            now.has((i64)recipe.Stage.filter))
+        self.settings.recipe.output = (usize)math.clamp((f64)at, 0.0, (f64)(recipe.output_count - 1))
 
-    ## Put an optional camera stage (white balance, lens, filter) in or take it
-    ## out, keeping the output.
+    ## Put an optional camera stage (white balance, lens, filter) in or take it out.
     pub func set_stage_used(stage: i64, used: bool):
-        let now = self.settings.recipe
-        var balance = now.has((i64)recipe.Stage.white_balance)
-        var lens = now.has((i64)recipe.Stage.lens)
-        var filter = now.has((i64)recipe.Stage.filter)
-        if stage == (i64)recipe.Stage.white_balance:
-            balance = used
-        elif stage == (i64)recipe.Stage.lens:
-            lens = used
-        elif stage == (i64)recipe.Stage.filter:
-            filter = used
-        self.settings.recipe = recipe.chain(recipe.output_of(&now), balance, lens, filter)
-
-    ## Start from mode `at` (recipe.mode_names): its stages, its stock and the
-    ## other settings it sets.
-    pub func use_mode(at: i64):
-        self.settings.recipe = recipe.mode((usize)at)
-        self.settings.set(.film_stock, recipe.mode_stock((usize)at))
-        let extras = parse(recipe.mode_extra((usize)at))
-        let base = defaults()
-        for index in 0..<parameter_count:
-            if extras.values[index] != base.values[index]:
-                self.settings.values[index] = extras.values[index]
-
-    ## A copy, for undo or copy and paste.
-    pub func copy() -> interop.Reference[Look]!:
-        return try adopt(self.settings)
+        self.settings.recipe.set_used(stage, used)
 
     ## The settings, for Base code holding a Look.
     pub func value() -> Settings:
@@ -674,6 +575,12 @@ pub func default_of(at: i64) -> f64:
 pub func decimals_of(at: i64) -> i64:
     return parameters[(usize)at].decimals
 
+## How many tone curves there are, and curve `at`'s name in the text form.
+pub func curve_total() -> i64:
+    return (i64)curve_count
+pub func curve_name(at: i64) -> str:
+    return curve_names[(usize)at]
+
 test "settings round-trip through their text, naming only changes":
     var out: Buffer
     defer out.destroy()
@@ -693,7 +600,8 @@ test "settings round-trip through their text, naming only changes":
     assert(back.curve(0).count == 3 and back.curve(0).ys[1] == 0.25)
     let odd = parse("exposure=9;glow=3;contrast=;temperature=900;saturation=-12.5;curve_red=0,0 1;curve_blue=0,0 1,1")
     assert(odd.get(.exposure) == 6.0 and odd.get(.contrast) == 0.0 and odd.get(.temperature) == 1667.0 and odd.get(.saturation) == -12.5)
-    assert(odd.curves_untouched())
+    for curve in odd.curves:
+        assert(curve.count == 0)
     let guided = parse("guides=0.1,0.2,0.15,0.9 0.5,0.5,0.9,0.52;exposure=1")
     assert(guided.guides().length == 2 and guided.guides()[0].vertical() and not guided.guides()[1].vertical() and guided.get(.exposure) == 1.0)
     try text_of(&guided, &out)
@@ -712,35 +620,32 @@ test "curves pass their points and never overshoot":
         assert(y >= previous and y <= 1.0)
         previous = y
 
-test "a recipe compiles to the stages at work and its mode":
+test "a recipe compiles to its stages and its output's view":
     var wanted = defaults()
     wanted.set(.contrast, 20.0)
     wanted.set(.film_grain, 50.0)
     wanted.set(.lens_vignetting, 30.0)
-    # Television: film, graded, through the ACES view.
+    # Television: film, graded, through the ACES view; no Lens, no vignetting.
     var out = compile(&wanted)
-    assert(out.get(.contrast) == 20.0)
-    assert(out.get(.film_stock) == 3.0)
-    assert(out.get(.view) == (f64)(i64)View.aces)
-    # Without a Lens, no vignetting; a bypassed Exposure leaves its stops out
-    # and keeps them for later.
-    assert(out.get(.lens_vignetting) == 0.0)
-    wanted.set(.exposure, 1.5)
-    wanted.recipe.set_bypassed((i64)recipe.Stage.exposure, true)
-    out = compile(&wanted)
-    assert(out.get(.exposure) == 0.0)
-    assert(wanted.get(.exposure) == 1.5)
+    assert(out.get(.contrast) == 20.0 and out.get(.film_stock) == 3.0)
+    assert(out.get(.view) == (f64)(i64)View.aces and out.get(.lens_vignetting) == 0.0)
+    wanted.recipe.lens = true
+    assert(compile(&wanted).get(.lens_vignetting) == 30.0)
     # Cinema: printed and projected, nothing graded.
     wanted.recipe = recipe.mode(1)
     out = compile(&wanted)
-    assert(out.get(.contrast) == 0.0)
-    assert(out.get(.film_grain) == 50.0)
+    assert(out.get(.contrast) == 0.0 and out.get(.film_grain) == 50.0)
     assert(out.get(.view) == (f64)(i64)View.print)
-    # Output B at Develop compiles as if Develop were shown: no print yet.
-    wanted.recipe.set_compare((i64)recipe.Stage.develop)
-    let compared = compile_to(&wanted, wanted.recipe.compare)
-    assert(compared.get(.film_stock) == 3.0 and compared.get(.view) != (f64)(i64)View.print)
-    # Shown before the film: no film at all.
-    wanted.recipe.set_display((i64)recipe.Stage.exposure)
-    out = compile(&wanted)
-    assert(out.get(.film_stock) == 0.0)
+    # A Lightbox: a slide through the ACES view; the View stage's own setting not at work.
+    wanted.set(.view, 1.0)
+    wanted.recipe = recipe.mode(2)
+    assert(compile(&wanted).get(.view) == (f64)(i64)View.aces)
+
+test "the recipe is named only when it is not the default":
+    var out: Buffer
+    defer out.destroy()
+    var mine = defaults()
+    mine.recipe.output = 1
+    try text_of(&mine, &out)
+    assert(out.text() == "recipe=release_print|white_balance")
+    assert(parse(out.text()).recipe.output == 1)

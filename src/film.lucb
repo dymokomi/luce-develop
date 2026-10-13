@@ -147,7 +147,7 @@ pub let scan_widths: usize[5] = [1920, 720, 2048, 4096, 6144]
 ## the negative, or a slide on a lightbox), so the film is sampled at the photo's
 ## pixels.
 pub func scan_samples(settings: const Settings*) -> usize:
-    if not settings.recipe.active((i64)recipe.Stage.scan):
+    if not settings.recipe.has((i64)recipe.Stage.scan):
         return 0
     return scan_widths[(usize)math.clamp(settings.get(.scan_resolution), 0.0, 4.0)]
 
@@ -159,7 +159,7 @@ pub func scan_samples(settings: const Settings*) -> usize:
 let interimage: f64[9] = [0.0, 0.18, 0.08, 0.15, 0.0, 0.15, 0.06, 0.18, 0.0]
 
 
-## Filters on the camera, by the Filter node's Balance: Matched (the light
+## Filters on the camera, by the Filter stage's Balance: Matched (the light
 ## balanced to the stock, as a white balance does), None, a Wratten 85, which
 ## warms daylight (5500 K) to about tungsten's 3200 K and takes 2/3 of a stop,
 ## the lighter warming 81A and 81EF (Kodak's mired shifts, +18 and +52, 1/3 and
@@ -228,7 +228,7 @@ pub let no_printing: i64 = 0
 pub let onto_print: i64 = 1
 pub let onto_paper: i64 = 2
 pub func printing_onto(settings: const Settings*) -> i64:
-    if settings.recipe.active((i64)recipe.Stage.scan) or settings.recipe.active((i64)recipe.Stage.record):
+    if settings.recipe.has((i64)recipe.Stage.scan):
         return no_printing
     if settings.get(.view) == (f64)(i64)View.print:
         return onto_print
@@ -1522,14 +1522,8 @@ pub func finish(film: const Film*, amounts: f64[3], unbias: f64[3], matrix: bool
 pub func scanned(film: const Film*, amounts: f64[3]) -> f64[3]:
     return silver(film, film.scanned_lut(amounts, film.value(6)[1]))
 
-## The light behind what the scanner read, `d`: a negative's transmittance, a
-## slide's light (its table holds it asinh-encoded); `reading_of` turns it back.
-## Averaged over a pixel's area, light is what a scanner sees.
-pub func light_of(film: const Film*, d: f64[3]) -> f64[3]:
-    if film.value(17)[3] == 1.0:
-        return [math.sinh(d[0]) / 256.0, math.sinh(d[1]) / 256.0, math.sinh(d[2]) / 256.0]
-    return [math.pow(10.0, -d[0]), math.pow(10.0, -d[1]), math.pow(10.0, -d[2])]
-
+## What a scanner reads from `light` (a negative's transmittance, a slide's
+## light averaged over a pixel's area): density, or a slide's asinh encoding.
 pub func reading_of(film: const Film*, light: f64[3]) -> f64[3]:
     if film.value(17)[3] == 1.0:
         return [asinh(256.0 * light[0]), asinh(256.0 * light[1]), asinh(256.0 * light[2])]
