@@ -168,19 +168,30 @@ pixel size only decides how finely the film is sampled.
    2.6, the bath's exchange by surface renewal (Kodak EP 0564598). Each stock
    is calibrated under its reference process: each record's developable
    halide is solved so a large even patch makes the published curve (within
-   0.1 %). Development's rate and induction period (0.05 /s, 95 s) are fitted
-   to Kodak Z-131's ±40 s chart (six numbers, within 0.03 D; a soft start
-   could not make its asymmetry, a loss 1.6 times the gain).
+   0.1 %). Coupling uses Kodak US 5,104,776's measured effective rates for
+   milled dispersions with CD-4 (yellow 1.25, magenta 4.45, masking 17, DIR
+   7.3 per mM·s; cyan unmeasured, 2.4 an estimate; the assay's temperature
+   unverified), as rate = k·[coupler]·[oxidized developer], with no partition
+   coefficient on top (that would count the dispersion twice: k_eff = k_oil·K_O
+   fixes only the product). The oxidized developer is integrated exactly
+   over each step (it lives milliseconds). Development's rate and a delay
+   (0.06 /s, 90 s) are fitted to Kodak Z-131's ±40 s chart (six numbers,
+   within 0.03 D; a soft start could not make its asymmetry, a loss 1.6 times
+   the gain). The delay is an empirical residual, not a measured C-41
+   induction period: none is published (Kodak US 3,964,912's 0–10 s are other
+   emulsions, agents and pH), and transport onset, chemical induction and
+   growth are not times that add.
 
    Predicted, not fitted (Portra 400 in C-41):
-   - agitation: a tank inverted every 30 s lowers HD − LD 8 %, stand 20 %,
+   - agitation: a tank inverted every 30 s lowers HD − LD 7 %, stand 20 %,
      against a machine's flow; in a dilute developer dense areas lose most
      (compensation, from the developer's balance alone);
-   - interimage: a single colour's gamma 1.03 / 0.97 / 1.04 of the neutral's,
+   - interimage: a single colour's gamma 1.03 / 1.08 / 1.03 of the neutral's,
      weak against the 1.1–1.3 colour negatives are designed for;
    - an edge against Kodak Gold 200's measured trace (Rajkowski and Nowak,
-     digitised in dev/film/edges): the border 3 % of the step (Gold 23 %),
-     13 µm in (Gold 12), the fringe 2 % (Gold 2.4 %).
+     digitised in dev/film/edges): the border 2.6 % of the step (Gold 23 %),
+     13 µm in (Gold 12), the fringe 1.7 % (Gold 2.4 %). The measured coupling
+     rates did not move it: coupling's speed is not what is missing.
 
    The edge says what is missing. Raising the inhibitor's restraint (an
    estimate, 1 /mM) to 4–64 brings interimage to 1.10–1.29 but lifts the
@@ -188,9 +199,10 @@ pixel size only decides how finely the film is sampled.
    its fringe: the inhibitor alone cannot make it. Something acting on the
    dense side, the supply of developer or of oxidized developer to the
    couplers, is underweighted. The fast path's edge (fitted to MTF) is 18 %.
-   Next: the oxidized developer's partition into the coupler dispersions
-   (Texter, Ross and Matsubara), and fitting the restraint on Gold's edge
-   with interimage held out. Each step releases inhibitor with the
+   Next: Kodak's disclosed interimage coatings as validation packages
+   (US 6,190,848's bilayer, R_γ 1.23 with no modifier; US 6,309,811's
+   twelve layers ML-1–4), then fitting the restraint on Gold's edge with
+   interimage held out. Each step releases inhibitor with the
    dye it forms under the inhibitor already released (DIR couplers react as
    dye forms); the developed curve is solved so an even field still develops
    to the published one (fixed point, damped; cached per development).

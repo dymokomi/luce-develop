@@ -66,6 +66,10 @@ pub struct Layer:
     pub var coupler: f64 = 0.0
     pub var dir_coupler: f64 = 0.0
     pub var equivalence: f64 = 4.0
+    ## Its couplers' effective coupling rates with oxidized developer
+    ## (1/(mM·s)): image, DIR; 0 takes the chemistry's.
+    pub var k_couple: f64 = 0.0
+    pub var k_dir: f64 = 0.0
     ## Whether its DIR coupler releases through a timing group (a precursor
     ## that moves, then frees the inhibitor at `Chemistry.k_release`), or
     ## directly.
@@ -89,9 +93,12 @@ pub struct Chemistry:
     pub var half_developer: f64 = 2.0
     pub var bromide_restraint: f64 = 0.02
     pub var inhibitor_restraint: f64 = 1.0
-    ## Coupling (1/(mM·s)): image coupler, DIR coupler.
-    pub var k_couple: f64 = 50.0
-    pub var k_dir: f64 = 50.0
+    ## Coupling (1/(mM·s)), where a layer does not give its own: Kodak
+    ## US 5,104,776's effective rates for milled dispersions with CD-4 (a
+    ## magenta image coupler 4.45, a DIR coupler 7.3; the assay's temperature
+    ## unverified), rate = k·[coupler, layer average]·[oxidized developer].
+    pub var k_couple: f64 = 4.45
+    pub var k_dir: f64 = 7.3
     ## Oxidized developer lost to sulfite (1/s).
     pub var k_sulfite: f64 = 1.0
     ## A timed DIR's precursor's release (1/s): ln 2 over 1 s, an estimate
@@ -282,20 +289,26 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             let rate = chemistry.k_develop * started * c_r / (chemistry.half_developer + c_r) / restraint
             var r_dev = a_amount * (1.0 - math.exp(-rate * dt)) / dt
             r_dev = math.min(r_dev, 2.0 * r_amount / dt)
-            # What uses the oxidized developer, scaled to what there is (with
-            # what this step makes).
-            var r_cpl = chemistry.k_couple * c_o * (q_amount / wet) * wet
-            var r_dir = chemistry.k_dir * c_o * (g_amount / wet) * wet
-            var r_lost = (chemistry.k_sulfite + layer.scavenger) * c_o * wet
+            # The oxidized developer: made at half the development's rate,
+            # used first order in itself (coupling, DIR coupling, sulfite and
+            # scavenger, each at its rate times what it reacts with), so over
+            # the step it settles toward made/used exactly; what it used is
+            # shared by the rates.
+            let k_cpl = layer.k_couple if layer.k_couple > 0.0 else chemistry.k_couple
+            let k_dir = layer.k_dir if layer.k_dir > 0.0 else chemistry.k_dir
+            let by_coupler = 0.5 * layer.equivalence * k_cpl * q_amount / wet
+            let by_dir = k_dir * g_amount / wet
+            let by_loss = chemistry.k_sulfite + layer.scavenger
+            let using = by_coupler + by_dir + by_loss
+            let making = 0.5 * r_dev
+            let settled = making / using
+            let o_end = settled + (o_amount - settled) * math.exp(-using * dt)
+            let used = o_amount + making * dt - o_end
+            var r_cpl = used * by_coupler / using / (0.5 * layer.equivalence) / dt
+            var r_dir = used * by_dir / using / dt
+            let r_lost = used * by_loss / using / dt
             r_cpl = math.min(r_cpl, q_amount / dt)
             r_dir = math.min(r_dir, g_amount / dt)
-            let wanted = 0.5 * layer.equivalence * r_cpl + r_dir + r_lost
-            let available = o_amount / dt + 0.5 * r_dev
-            if wanted > available and wanted > 0.0:
-                let scale = available / wanted
-                r_cpl *= scale
-                r_dir *= scale
-                r_lost *= scale
             # The precursor's release (or the DIR's own, with no timing group).
             let r_release = chemistry.k_release * p_amount
             # Binding to the grains' sites, and back.
@@ -309,7 +322,7 @@ func react(grid: Grid*, chemistry: const Chemistry*, begun: f64, dt: f64):
             grid.fixed[dir_coupler * n + at] = g_amount - r_dir * dt
             grid.fixed[dye * n + at] += r_cpl * dt
             grid.mobile[developer * n + at] = r_amount - 0.5 * r_dev * dt
-            grid.mobile[oxidized * n + at] = math.max(o_amount + (0.5 * r_dev - 0.5 * layer.equivalence * r_cpl - r_dir - r_lost) * dt, 0.0)
+            grid.mobile[oxidized * n + at] = math.max(o_amount + (making - 0.5 * layer.equivalence * r_cpl - r_dir - r_lost) * dt, 0.0)
             grid.mobile[bromide * n + at] = b_amount + r_dev * dt
             let to_precursor = r_dir if layer.timed else 0.0
             let to_inhibitor = 0.0 if layer.timed else r_dir

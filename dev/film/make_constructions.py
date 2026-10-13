@@ -17,6 +17,11 @@ Per layer, top (bath side) first:
 - DIR coupler: DIR and DIAR couplers (any dye), released through a timing
   group (film_chemistry's k_release) when most of the layer's carry one,
   else directly;
+- coupling rates (1/(mM·s)): Kodak US 5,104,776's effective constants for
+  milled dispersions with CD-4, by class (not these patents' molecules):
+  yellow image 1.25, magenta image 4.45, masking 17, DIR 7.3; cyan image
+  couplers, unmeasured, 2.4 (the two image couplers' geometric mean, an
+  estimate); a layer's, the µmol-weighted mean of its couplers';
 - scavenger: a hydroquinone-type scavenger (didodecylhydroquinone; Chem-5;
   Chem-2, whose role the patent does not state) as a first-order rate on
   oxidized developer, 1 /(mM·s) times its concentration in the swollen layer
@@ -108,6 +113,7 @@ def build(name):
         record = record_of(raw.get('role', ''))
         coupler = 0.0
         silver_per_dye = 0.0
+        rate_sum = 0.0
         dir_total = 0.0
         timed = 0.0
         scavenger_umol = 0.0
@@ -130,6 +136,15 @@ def build(name):
             colour = str(c.get('dye_color') or '')
             if record >= 0 and colour.startswith(COLOURS[record]):
                 coupler += umol
+                if 'masking' in role:
+                    rate = 17.0
+                elif record == 2:
+                    rate = 1.25
+                elif record == 1:
+                    rate = 4.45
+                else:
+                    rate = 2.4
+                rate_sum += umol * rate
                 silver_per_dye += umol * (4.0 if str(c.get('equivalence', '')).startswith('4') else 2.0)
         if dry <= 0.0:
             dry = 1.0
@@ -143,6 +158,8 @@ def build(name):
             'coupler': round(coupler, 3),
             'equivalence': round(silver_per_dye / coupler, 3) if coupler > 0 else 4.0,
             'dir': round(dir_total, 3),
+            'k_couple': round(rate_sum / coupler, 4) if coupler > 0 else 0.0,
+            'k_dir': 7.3 if dir_total > 0 else 0.0,
             'timed': 'true' if dir_total > 0 and timed > dir_total / 2 else 'false',
             'scavenger': round(1.0 * scavenger_umol / wet, 4),
             'halide': round(halide, 2),
@@ -158,7 +175,7 @@ def emit(func, label, layers):
     for L in layers:
         rows.append(f"        # {L['name']}: {L['role']}\n"
                     f"        Layer(dry = {L['dry']}, record = {L['record']}, coupler = {L['coupler']}, equivalence = {L['equivalence']}, "
-                    f"dir_coupler = {L['dir']}, timed = {L['timed']}, scavenger = {L['scavenger']}, halide = {L['halide']}, "
+                    f"k_couple = {L['k_couple']}, k_dir = {L['k_dir']}, dir_coupler = {L['dir']}, timed = {L['timed']}, scavenger = {L['scavenger']}, halide = {L['halide']}, "
                     f"sites = {L['sites']}, cells = {L['cells']})")
     return (f"## {label}\npub func {func}() -> Layer[{len(layers)}]:\n    return [\n" + ",\n".join(rows) + "]\n")
 
@@ -180,4 +197,4 @@ if __name__ == '__main__':
         print(name)
         for L in layers:
             print(f"  {L['name']:10s} rec {L['record']:2d} dry {L['dry']:6.2f} coupler {L['coupler']:8.1f} nu {L['equivalence']:.2f} "
-                  f"dir {L['dir']:6.1f} timed {L['timed']} scav {L['scavenger']:7.3f} halide {L['halide']:8.0f} sites {L['sites']:6.2f}")
+                  f"k {L['k_couple']:5.2f} dir {L['dir']:6.1f} timed {L['timed']} scav {L['scavenger']:7.3f} halide {L['halide']:8.0f} sites {L['sites']:6.2f}")
