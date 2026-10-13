@@ -8,6 +8,12 @@
 ## A recipe with two outputs (A displayed, B compared) develops the scene twice,
 ## each with its own tables, film and view, and draws A left of the split and B
 ## right of it.
+##
+## What the settings make on the CPU (the tables, the film's atlas: its model,
+## its development, and for the stochastic render its grains, the better part
+## of a second) is made on a second thread, so the window never waits for it:
+## until it is done the last develop stays shown, `busy` says so, and the
+## thread wakes the window (`tell`) when it is.
 import interop
 import memory
 import time
@@ -27,6 +33,7 @@ import film_print
 import lens
 from parameters import Parameter
 import film
+import film_exposure
 from film import Film
 from film_gpu import FilmPasses
 from shaders import develop_frag_words, develop_frag_msl
@@ -97,12 +104,167 @@ func load(context: void*?):
         if let hook = told:
             hook.call(hook.context)
 
+## One output's preparation asked for: its settings, what the film needs of the
+## scene, whether the stochastic render's grains are wanted too, and its serial
+## (0: nothing asked).
+struct Asked:
+    var settings: Settings
+    var input: film_exposure.Input
+    var grains: bool
+    var serial: u64
+    ## The view the window has up (`view_key`): baked again only when it differs.
+    var view_known: i64
+
+## One output's preparation done: the tables as half floats (heap, the window
+## takes them), its film ready in `Preparing.films`, and the serial it answers.
+struct Prepared:
+    var tables: f16[]
+    var settings: Settings
+    var grains: bool
+    var serial: u64
+    var ready: bool
+    ## The view's table or the print and paper views' data (heap; empty when
+    ## the window's is still right), and the view they are of.
+    var view_table: f16[]
+    var print_data: f32[]
+    var view_key: i64
+
+    func discard():
+        if self.tables.length > 0:
+            free(self.tables) in memory.heap
+        if self.view_table.length > 0:
+            free(self.view_table) in memory.heap
+        if self.print_data.length > 0:
+            free(self.print_data) in memory.heap
+        self.tables = no_tables()
+        self.view_table = no_tables()
+        self.print_data = no_data()
+        self.ready = false
+
+## What the window and the preparing thread share, guarded by `lock`: per
+## output (A 0, B 1) the newest preparation asked for and the last one done,
+## and the films the thread prepares, which the window swaps with its own
+## when it takes a preparation (so neither side ever touches the other's).
+struct Preparing:
+    var lock: sync.Mutex
+    var wake: sync.Condition
+    ## Signalled when the thread finishes a preparation (`settle` waits on it).
+    var finished: sync.Condition
+    var asked: Asked[2]
+    var done: Prepared[2]
+    var films: Film[2]
+    ## The serial the thread is working on per output (0: none).
+    var working: u64[2]
+    var stopping: bool
+    var told: Wake?
+
+    ## Whether output `k` has a preparation asked for and not yet done.
+    func outstanding(k: usize) -> bool:
+        return self.asked[k].serial != 0 and (self.working[k] == self.asked[k].serial or self.done[k].serial < self.asked[k].serial)
+
+func prepare_work(context: void*?):
+    let shared = (Preparing*)(context else return)
+    var taken: u64[2] = [0, 0]
+    while true:
+        shared.lock.lock()
+        var k: usize = 2
+        while not shared.stopping:
+            for output in 0..<(usize)2:
+                if k == 2 and shared.asked[output].serial > taken[output]:
+                    k = output
+            if k != 2:
+                break
+            shared.wake.wait(&shared.lock)
+        if shared.stopping:
+            shared.lock.unlock()
+            return
+        let job = shared.asked[k]
+        taken[k] = job.serial
+        shared.working[k] = job.serial
+        # A newer preparation supersedes one the window has not taken.
+        shared.done[k].discard()
+        shared.lock.unlock()
+        var good = true
+        var made = Prepared(tables = no_tables(), settings = job.settings, grains = job.grains, serial = job.serial, ready = true,
+                            view_table = no_tables(), print_data = no_data(), view_key = view_key(&job.settings))
+        made.tables = prepared_tables(&job.settings) catch failure:
+            good = false
+            recover no_tables()
+        if good and made.view_key != job.view_known:
+            bake_view(&made) catch failure:
+                good = false
+        if good:
+            prepare_film(&shared.films[k], &job) catch failure:
+                good = false
+        shared.lock.lock()
+        shared.working[k] = 0
+        if good:
+            shared.done[k] = made
+        else:
+            made.discard()
+            # Answered, though nothing can be shown for it: the window keeps
+            # what it shows.
+            shared.done[k].serial = job.serial
+        let told = shared.told
+        shared.lock.unlock()
+        shared.finished.broadcast()
+        if let hook = told:
+            hook.call(hook.context)
+
+func nothing_asked() -> Asked:
+    return Asked(settings = defaults(), input = film_exposure.Input())
+
+func nothing_done() -> Prepared:
+    return Prepared(tables = no_tables(), settings = defaults(), view_table = no_tables(), print_data = no_data())
+
+func no_tables() -> f16[]:
+    var empty: f16[]
+    return empty
+
+func no_data() -> f32[]:
+    var empty: f32[]
+    return empty
+
+## The view `made`'s settings show through: the ACES, Standard or Linear view's
+## table, or the print and paper views' data (computed per pixel, not tabled).
+func bake_view(made: Prepared*) -> !:
+    let settings = &made.settings
+    let shown_view = (View)(i64)settings.get(.view)
+    if shown_view == View.print or shown_view == View.paper:
+        made.print_data = try new f32[film_print.print_atlas_width * film_print.print_atlas_rows * 4] --- in memory.heap
+        view.pack(shown_view, made.print_data, silver = film_print.silver_kept(settings.get(.print_silver)), paper = film.paper_settings(settings),
+                  material = (i64)settings.get(.print_material))
+        return
+    let n = view.lut_size
+    made.view_table = try new f16[n * n * n * 4] --- in memory.heap
+    view.bake(shown_view, made.view_table)
+
+## The develop's tables for `settings`, as half floats on the heap.
+func prepared_tables(settings: const Settings*) -> f16[]!:
+    let built = tables.build(settings)
+    let texels = try new f16[tables.table_width * tables.table_rows * 4] --- in memory.heap
+    tables.half(&built, texels)
+    return texels
+
+func prepare_film(made: Film*, job: const Asked*) -> !:
+    try made.prepare(&job.settings, job.input)
+    if job.grains:
+        try made.fit_grains()
+
 ## One develop of the shown scene: its settings, compiled for one output, and
 ## the GPU state they make (the tables, the view's table, the film's atlas and
 ## the passes that film the scene, whose result is theirs).
 struct Developing:
+    ## The settings the GPU state is of (what is drawn), and the newest asked
+    ## for, sent to the preparing thread when `tables_stale`; the serial of the
+    ## last preparation asked for and of the one shown.
     var settings: Settings
+    var wanted: Settings
     var tables_stale: bool
+    var asked_serial: u64
+    var shown_serial: u64
+    ## Whether the last preparation asked for is only the grains for what is shown.
+    var asked_grains: bool
     var view_baked: i64
     var tables_texture: gpu.Texture?
     var view_texture: gpu.Texture?
@@ -121,7 +283,7 @@ struct Developing:
     var scanned_rows: usize
 
     func take(settings: Settings):
-        self.settings = settings
+        self.wanted = settings
         self.tables_stale = true
 
     func release():
@@ -155,11 +317,14 @@ pub let refine_target: u32 = 256
 let frame_work: f64 = 4096.0
 
 func developing() -> Developing:
-    return Developing(settings = defaults(), view_baked = -1)
+    return Developing(settings = defaults(), wanted = defaults(), view_baked = -1)
 
 pub struct Renderer:
     var loading: Loading*?
     var worker: thread.Handle
+    ## The preparing thread and what it shares.
+    var preparing: Preparing*?
+    var preparer: thread.Handle
     ## The scene shown, and whether its pixels still need to go up; the
     ## quarter turns its pixels have had, and the settings' (geometry_turn).
     var shown: Scene
@@ -347,6 +512,114 @@ pub struct Renderer:
         let wanted = self.refining and not self.watch_running and which.film.active() and which.settings.get(.film_grain) > 0.0
         return wanted and which.film_passes.samples < refine_target
 
+    ## Whether the develop shown is not yet what was asked for: a photo still
+    ## loading, settings still being prepared, or the film not yet on the
+    ## negative. The last develop stays shown meanwhile; draw again when the
+    ## renderer wakes the window (`tell`).
+    pub func busy() -> bool:
+        if let loading = self.loading:
+            loading.lock.lock()
+            let loading_now = loading.serial != 0 and loading.serial != loading.done_serial
+            loading.lock.unlock()
+            if loading_now:
+                return true
+        if not self.has_image():
+            return false
+        for (k, which) in [((usize)0, &self.a), ((usize)1, &self.b)]:
+            if k == 1 and not self.comparing:
+                continue
+            if which.tables_stale or which.shown_serial == 0 or (self.outstanding(k) and not which.asked_grains):
+                return true
+            if which.film.active() and (which.filmed == none or which.film_stale):
+                return true
+        return false
+
+    ## Whether output A has anything to draw yet (until then a window shows
+    ## what it had, a preview).
+    pub func ready() -> bool:
+        if not self.has_image() or self.a.shown_serial == 0 or self.a.tables_texture == none or self.a.film_texture == none:
+            return false
+        return not self.a.film.active() or self.a.filmed != none
+
+    ## Wait until the preparing thread has done everything asked of it (for
+    ## tests and off-screen renders: the next draw then takes it).
+    pub func settle():
+        let shared = self.preparing else return
+        shared.lock.lock()
+        while shared.outstanding(0) or shared.outstanding(1):
+            shared.finished.wait(&shared.lock)
+        shared.lock.unlock()
+
+    func outstanding(k: usize) -> bool:
+        let shared = self.preparing else return false
+        shared.lock.lock()
+        defer shared.lock.unlock()
+        return shared.outstanding(k)
+
+    ## Ask the preparing thread for output `k`'s settings `wanted` (with the
+    ## stochastic render's grains when `grains`).
+    func ask(k: usize, which: Developing*, wanted: const Settings*, grains: bool) -> !:
+        let shared = self.preparing else return
+        let camera = film.camera_settings(wanted)
+        let input = try self.shown.film_input(&camera)
+        shared.lock.lock()
+        which.asked_serial += 1
+        which.asked_grains = grains
+        shared.asked[k] = Asked(settings = *wanted, input = input, grains = grains, serial = which.asked_serial, view_known = which.view_baked)
+        shared.lock.unlock()
+        shared.wake.signal()
+
+    ## Take output `k`'s finished preparation, if a newer one is ready: its film
+    ## swapped in, its tables and atlas up; whether one was.
+    func take_prepared(device: gpu.Device, k: usize, which: Developing*) -> bool!:
+        let shared = self.preparing else return false
+        shared.lock.lock()
+        let done = &shared.done[k]
+        if not done.ready or done.serial <= which.shown_serial:
+            shared.lock.unlock()
+            return false
+        let kept = which.film
+        which.film = shared.films[k]
+        shared.films[k] = kept
+        let texels = done.tables
+        let view_table = done.view_table
+        let print_data = done.print_data
+        let baked = done.view_key
+        done.tables = no_tables()
+        done.view_table = no_tables()
+        done.print_data = no_data()
+        done.ready = false
+        # A grains preparation is asked for with the settings shown (`refine_develop`).
+        let grains_only = done.grains and which.shown_serial > 0
+        which.settings = done.settings
+        which.shown_serial = done.serial
+        shared.lock.unlock()
+        defer free(texels) in memory.heap
+        if view_table.length > 0:
+            defer free(view_table) in memory.heap
+            if which.view_texture == none:
+                which.view_texture = try gpu.Texture.create(device, (u32)(view.lut_size * view.lut_size), (u32)view.lut_size, gpu.Format.rgba16_float)
+            let view_held = which.view_texture else return false
+            try view_held.upload(u8[]((u8*)view_table.data, view_table.length * 2))
+            which.view_baked = baked
+        if print_data.length > 0:
+            defer free(print_data) in memory.heap
+            if which.print_texture == none:
+                which.print_texture = try gpu.Texture.create(device, (u32)film_print.print_atlas_width, (u32)film_print.print_atlas_rows,
+                                                             gpu.Format.rgba32_float)
+            let print_held = which.print_texture else return false
+            try print_held.upload(u8[]((u8*)print_data.data, print_data.length * 4))
+            which.view_baked = baked
+        if which.tables_texture == none:
+            which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
+        let held = which.tables_texture else return false
+        try held.upload(u8[]((u8*)texels.data, texels.length * 2))
+        try upload_atlas(device, which)
+        # Grains fitted for what is shown: the filmed scene stays, the render refines on.
+        if not grains_only:
+            which.film_stale = true
+        return true
+
     ## Whether outputs A and B are both shown, and where B begins across the
     ## photo (0..1 of its width).
     pub func is_comparing() -> bool:
@@ -502,8 +775,10 @@ pub struct Renderer:
             try texture.upload(self.shown.bytes())
             self.scene_texture = texture
             self.upload = false
+            # A new scene: its film input changes the film's exposure too.
             for which in [&self.a, &self.b]:
                 which.film_stale = true
+                which.tables_stale = true
                 which.scanned_columns = 0
         # While development is being watched, how much of it is still to come
         # (both outputs alike, the last frame the developed film).
@@ -515,52 +790,20 @@ pub struct Renderer:
                 which.film_stale = true
             if remaining <= 0.0:
                 self.watch_running = false
-        try self.prepare_develop(device, &self.a)
+        try self.prepare_develop(device, 0, &self.a)
         if self.comparing:
-            try self.prepare_develop(device, &self.b)
+            try self.prepare_develop(device, 1, &self.b)
 
     ## `which`'s tables, view table, film atlas and filmed scene, made or
     ## refreshed for what changed.
-    func prepare_develop(device: gpu.Device, which: Developing*) -> !:
-        if which.tables_texture == none or which.tables_stale:
-            let built = tables.build(&which.settings)
-            let texels = try new f16[tables.table_width * tables.table_rows * 4] --- in memory.heap
-            defer free(texels) in memory.heap
-            tables.half(&built, texels)
-            if which.tables_texture == none:
-                which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
-            let held = which.tables_texture else return
-            try held.upload(u8[]((u8*)texels.data, texels.length * 2))
-            let camera = film.camera_settings(&which.settings)
-            try which.film.prepare(&which.settings, try self.shown.film_input(&camera))
-            try upload_atlas(device, which)
+    func prepare_develop(device: gpu.Device, k: usize, which: Developing*) -> !:
+        # New settings go to the preparing thread; what it has done comes in.
+        if which.tables_stale:
             which.tables_stale = false
-            which.film_stale = true
-        # The view and what its table depends on, as one key.
-        let baked = view_key(&which.settings)
-        let shown_view = (View)(i64)which.settings.get(.view)
-        let printed_view = shown_view == View.print or shown_view == View.paper
-        if printed_view and (which.print_texture == none or which.view_baked != baked):
-            let data = try new f32[film_print.print_atlas_width * film_print.print_atlas_rows * 4] --- in memory.heap
-            defer free(data) in memory.heap
-            view.pack(shown_view, data, silver = film_print.silver_kept(which.settings.get(.print_silver)),
-                      paper = film.paper_settings(&which.settings), material = (i64)which.settings.get(.print_material))
-            if which.print_texture == none:
-                which.print_texture = try gpu.Texture.create(device, (u32)film_print.print_atlas_width, (u32)film_print.print_atlas_rows,
-                                                             gpu.Format.rgba32_float)
-            let held = which.print_texture else return
-            try held.upload(u8[]((u8*)data.data, data.length * 4))
-            which.view_baked = baked
-        elif not printed_view and (which.view_texture == none or which.view_baked != baked):
-            let n = view.lut_size
-            let table = try new f16[n * n * n * 4] --- in memory.heap
-            defer free(table) in memory.heap
-            view.bake((View)(i64)which.settings.get(.view), table)
-            if which.view_texture == none:
-                which.view_texture = try gpu.Texture.create(device, (u32)(n * n), (u32)n, gpu.Format.rgba16_float)
-            let held = which.view_texture else return
-            try held.upload(u8[]((u8*)table.data, table.length * 2))
-            which.view_baked = baked
+            try self.ask(k, which, &which.wanted, false)
+        _ = try self.take_prepared(device, k, which)
+        if which.shown_serial == 0:
+            return
         # Film the scene on the negative when it or the settings changed.
         if which.film.active() and (which.film_stale or which.filmed == none):
             let scene_texture = self.scene_texture else return
@@ -581,7 +824,7 @@ pub struct Renderer:
                                                    try self.scene_matrix(which), aspect, (u32)columns, (u32)rows, try self.veil_of(which))
             which.film_stale = false
         elif self.still_refining(which):
-            try self.refine_develop(device, which)
+            try self.refine_develop(device, k, which)
 
     ## The shown scene at `columns` samples across for `which`, made when it is not.
     func scanned(device: gpu.Device, which: Developing*, columns: usize) -> gpu.Texture!:
@@ -601,13 +844,14 @@ pub struct Renderer:
         which.scanned_rows = (usize)sampled.height()
         return texture
 
-    ## More of `which`'s stochastic render (a frame's share), its grains fitted
-    ## first; shown once it has enough.
-    func refine_develop(device: gpu.Device, which: Developing*) -> !:
+    ## More of `which`'s stochastic render (a frame's share), once the
+    ## preparing thread has fitted its grains; shown once it has enough.
+    func refine_develop(device: gpu.Device, k: usize, which: Developing*) -> !:
         let tables_texture = which.tables_texture else return
         if not which.film.has_grains():
-            try which.film.fit_grains()
-            try upload_atlas(device, which)
+            if not self.outstanding(k) and not which.tables_stale:
+                try self.ask(k, which, &which.settings, true)
+            return
         let film_texture = which.film_texture else return
         if let resolved = try which.film_passes.refine(device, tables_texture, film_texture, refine_target, frame_work):
             which.filmed = resolved
@@ -615,10 +859,14 @@ pub struct Renderer:
     ## Stop the loading thread and let every texture go.
     ## Tell `hook` whenever a scene this renderer loads is ready (none: nobody).
     pub func tell(hook: Wake?):
-        let loading = self.loading else return
-        loading.lock.lock()
-        loading.told = hook
-        loading.lock.unlock()
+        if let loading = self.loading:
+            loading.lock.lock()
+            loading.told = hook
+            loading.lock.unlock()
+        if let shared = self.preparing:
+            shared.lock.lock()
+            shared.told = hook
+            shared.lock.unlock()
 
     pub func close():
         if let loading = self.loading:
@@ -633,6 +881,18 @@ pub struct Renderer:
                 strings.release(loading.wanted)
             free(loading) in memory.heap
         self.loading = none
+        if let shared = self.preparing:
+            shared.lock.lock()
+            shared.stopping = true
+            shared.lock.unlock()
+            shared.wake.broadcast()
+            self.preparer.join() catch failure:
+                trap("the renderer's preparing thread could not be joined")
+            for k in 0..<(usize)2:
+                shared.done[k].discard()
+                shared.films[k].release()
+            free(shared) in memory.heap
+        self.preparing = none
         self.shown.close()
         self.a.release()
         self.b.release()
@@ -677,15 +937,25 @@ func upload_atlas(device: gpu.Device, which: Developing*) -> !:
 pub func create(format: gpu.Format? = none) -> Renderer!:
     let loading = try new Loading in memory.heap
     errdefer free(loading) in memory.heap
+    let shared = try new Preparing(asked = [nothing_asked(), nothing_asked()], done = [nothing_done(), nothing_done()]) in memory.heap
+    errdefer free(shared) in memory.heap
     let worker = try thread.spawn(load, (void*)loading, name = "luce-develop load")
-    return Renderer(loading = loading, worker = worker, a = developing(), b = developing(), split = 0.5, format = format, geometry_shown = true, crop_shown = true,
-                    refining = true)
+    let preparer = thread.spawn(prepare_work, (void*)shared, name = "luce-develop prepare") catch failure:
+        loading.lock.lock()
+        loading.stopping = true
+        loading.lock.unlock()
+        loading.wake.broadcast()
+        worker.join() catch joined:
+            trap("the renderer's loading thread could not be joined")
+        error(failure.code, failure.message)
+    return Renderer(loading = loading, worker = worker, preparing = shared, preparer = preparer, a = developing(), b = developing(), split = 0.5, format = format,
+                    geometry_shown = true, crop_shown = true, refining = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
-    let renderer = new Renderer(loading = made.loading, worker = made.worker, a = developing(), b = developing(), split = 0.5, geometry_shown = true, crop_shown = true,
-                                refining = true) in memory.heap catch failure:
+    let renderer = new Renderer(loading = made.loading, worker = made.worker, preparing = made.preparing, preparer = made.preparer, a = developing(),
+                                b = developing(), split = 0.5, geometry_shown = true, crop_shown = true, refining = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

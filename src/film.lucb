@@ -330,10 +330,13 @@ pub struct Film:
     var paper: i64
     var paper_table: f64[]
     ## The granularity wanted (rms through 48 µm, over the effective log H, per
-    ## layer) as the development leaves it, and whether `fit_grains` has made
-    ## the stochastic render's grains for it.
+    ## layer) as the development leaves it; what the grains depend on in the
+    ## settings last prepared (`grain_key`), and what `fit_grains` last made
+    ## the stochastic render's grains for (0: none). Exposure, the light and
+    ## the scan's timing leave them alone, so a slider there keeps them.
     var granularity: f64[]
-    var grains_fitted: bool
+    var grains_wanted: i64
+    var grains_fitted: i64
     ## What the developed row was last solved for (`development_key`).
     var developed_key: i64
 
@@ -372,7 +375,7 @@ pub struct Film:
             for at in 0..<self.texels.length:
                 self.texels[at] = 0.0f32
             self.granularity = try new f64[curve_samples * 3] --- in memory.heap
-        self.grains_fitted = false
+        self.grains_wanted = 0
         if choice == 0:
             self.on = false
             self.put(values_row, 7, 0.0, 0.0, 0.0, 0.0)
@@ -398,6 +401,7 @@ pub struct Film:
         self.on = true
         self.fill_settings(settings)
         self.fill_exposure(settings, &input)
+        self.grains_wanted = grain_key(choice, cross, printing, settings)
 
     ## The exposure (film_exposure.lucb). The light on set is the White
     ## Balance's Temperature and Tint, or the photo's as shot. What reaches the
@@ -842,7 +846,7 @@ pub struct Film:
     ## to its granularity, at each effective log H. Slower than `prepare` (a
     ## fraction of a second), so done only when the render begins.
     pub func fit_grains() -> !:
-        if self.grains_fitted or not self.on:
+        if self.has_grains() or not self.on:
             return
         let kind = self.model.stock.kind
         let layers: usize = 1 if kind == 2 else 3
@@ -889,7 +893,7 @@ pub struct Film:
         for at in 0..<film_grains.covariance_count:
             let shares = film_grains.pixel_covariance(film_grains.covariance_width(at))
             self.put(values_row, 390 + at, shares[0], shares[1], shares[2], 0.0)
-        self.grains_fitted = true
+        self.grains_fitted = self.grains_wanted
 
     ## The scan's reading of dye `amounts` (the retained silver included) as
     ## density (a slide's light too).
@@ -939,7 +943,7 @@ pub struct Film:
 
     ## Whether `fit_grains` has fitted the grains for the settings last prepared.
     pub func has_grains() -> bool:
-        return self.grains_fitted
+        return self.on and self.grains_wanted != 0 and self.grains_fitted == self.grains_wanted
 
     ## The grains' populations as the atlas holds them (as the GPU reads them).
     pub func grain_geometry() -> film_grains.Geometry[9]:
@@ -1288,6 +1292,18 @@ func development_key(stock: i64, cross: bool, settings: const Settings*) -> i64:
                       Parameter.film_interimage, Parameter.develop_silver]:
         key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 1000.0)
     return key + 1
+
+## What the stochastic render's grains depend on (`Film.fit_grains`), as one
+## number: the development (its curve and granularity), the duplicates' grain,
+## and what reads the negative (the scan's or the print material's table, the
+## silver it sees).
+func grain_key(stock: i64, cross: bool, printing: i64, settings: const Settings*) -> i64:
+    var key = development_key(stock, cross, settings) *% 1000003 +% printing
+    for parameter in [Parameter.print_generations, Parameter.print_optical, Parameter.print_silver, Parameter.print_material,
+                      Parameter.scan_calibration, Parameter.paper_stock, Parameter.paper_grade, Parameter.paper_enlarger,
+                      Parameter.paper_exposure, Parameter.paper_surface, Parameter.paper_yellow, Parameter.paper_magenta, Parameter.paper_cyan]:
+        key = key *% 1000003 +% (i64)math.round(settings.get(parameter) * 1000.0)
+    return key if key != 0 else 1
 
 ## A place on the developed negative: each layer's dye, and the effective log
 ## H it developed at (which sets its granularity).

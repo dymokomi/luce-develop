@@ -56,6 +56,23 @@ let cases: str[28] = [
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
                        "../luce-raw/build/samples/sony_a7m2_14c.arw"]
 
+## Draw `drawer` into all of `texture` until what it shows is what it was
+## asked for: the settings are prepared on the renderer's own thread, and each
+## draw takes what it has finished (as a window's frames do).
+func develop_into(drawer: renderer.Renderer*, texture: gpu.Texture, width: u32, height: u32) -> !:
+    var draws = 0
+    while true:
+        let frame = try texture.frame()
+        defer frame.release()
+        let target = try frame.value().target()
+        defer target.release()
+        try drawer.draw(target, 0.0, 0.0, (f64)width, (f64)height)
+        _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+        draws += 1
+        if not drawer.busy() or draws > 20:
+            return
+        drawer.settle()
+
 ## Develop the file at `path` both ways with every case; how many failed.
 func check_file(device: gpu.Device, path: str) -> i64!:
     var failed: i64 = 0
@@ -73,12 +90,7 @@ func check_file(device: gpu.Device, path: str) -> i64!:
         drawer.set_settings(settings)
         var texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba8)
         defer texture.destroy()
-        let frame = try texture.frame()
-        defer frame.release()
-        let target = try frame.value().target()
-        defer target.release()
-        try drawer.draw(target, 0.0, 0.0, (f64)width, (f64)height)
-        _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+        try develop_into(&drawer, texture, width, height)
         let shown = try new u8[(usize)(width * height * 4)] in memory.heap
         defer free(shown) in memory.heap
         try texture.read(shown)
@@ -133,6 +145,8 @@ func check_stochastic(device: gpu.Device, path: str) -> i64!:
         defer texture.destroy()
         var draws = 0
         while drawer.refined_samples() < 64 and draws < 400:
+            # The grains are fitted on the renderer's thread first.
+            drawer.settle()
             let frame = try texture.frame()
             defer frame.release()
             let target = try frame.value().target()
@@ -215,12 +229,7 @@ func check_compare(device: gpu.Device, path: str) -> i64!:
     drawer.set_split(0.4)
     var texture = try gpu.Texture.create(device, width, height, gpu.Format.rgba8)
     defer texture.destroy()
-    let frame = try texture.frame()
-    defer frame.release()
-    let target = try frame.value().target()
-    defer target.release()
-    try drawer.draw(target, 0.0, 0.0, (f64)width, (f64)height)
-    _ = try frame.value().present(gpu.Color(0.0, 0.0, 0.0, 1.0))
+    try develop_into(&drawer, texture, width, height)
     let shown = try new u8[(usize)(width * height * 4)] in memory.heap
     defer free(shown) in memory.heap
     try texture.read(shown)
