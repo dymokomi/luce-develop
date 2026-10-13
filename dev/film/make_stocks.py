@@ -10,6 +10,8 @@ spectra, so its dye shapes are EXR 200T 5293's, the same ECN-2 dye set, and it m
 no normal exposure, so its grey is Vision 500T 5279's, the same speed. The others
 come from their sheets' vector graphs, exactly. 5279's sheet draws no D-min, so it
 takes 5298's."""
+import copy
+import math
 import json
 from pathlib import Path
 
@@ -360,7 +362,7 @@ def geometry(key, data):
         return GRAIN[key]
     if key.startswith('kodak_52') or key in ('kodak_5298', 'kodak_5293', 'kodak_5279', 'kodak_5277'):
         return (8.0, 0.5)
-    return grain_geometry(data['ei'], key in CRISP)
+    return grain_geometry(data.get('grain_ei', data['ei']), key in CRISP)
 
 
 DEVELOPMENT = json.load(open(here / 'development.json'))
@@ -386,6 +388,8 @@ BASES = {
     'fuji_velvia_50': (127.0, 1.48, 1), 'fuji_velvia_100': (127.0, 1.48, 1),
     'fuji_acros_ii': (125.0, 1.48, 2), 'kodak_tri_x_400': (125.0, 1.48, 1), 'kodak_tmax_100': (125.0, 1.48, 1),
     'ilford_hp5_plus': (125.0, 1.48, 1), 'eastman_double_x_5222': (132.0, 1.48, 2),
+    # CineStill: Vision3 with its rem-jet taken off, so nothing stops halation.
+    'cinestill_800t': (132.0, 1.48, 3), 'cinestill_50d': (132.0, 1.48, 3),
 }
 
 
@@ -405,7 +409,50 @@ def kinetics(key, data):
     return DEVELOPMENT['reversal' if kind == 'reversal' else 'color_negative']
 
 
+# CineStill's films are Kodak Vision3 motion picture negatives with the rem-jet
+# backing removed (CineStill's own account), sold for C-41: the emulsion is the
+# Vision3 stock's, so its grain, kinetics and reciprocity are too.
+DONORS = {'cinestill_800t': 'kodak_vision3_500t_5219', 'cinestill_50d': 'kodak_vision3_50d_5203'}
+
+
+# What C-41 does to motion picture film against ECN-2, as film_develop.lucb's
+# process table has it: a third of a stop faster, 1.17 times the contrast,
+# 1.15 times the grain.
+C41_SHIFT = 0.30103 * 0.33
+C41_CONTRAST = 1.17
+C41_GRAIN = 1.15
+
+
+def cinestill(key, name, ei):
+    """CineStill `name` from its Vision3 donor's sheet: the same emulsion, grain
+    clouds, dyes and spectra, without rem-jet; developed in C-41, as it is sold,
+    its curves and granularity the donor's carried from ECN-2 to C-41 as the
+    develop model carries them; rated `ei`, so metered at that speed grey gets
+    log10(ei / the donor's) less light than the donor's normal exposure."""
+    donor = from_color(DONORS[key])
+    data = copy.deepcopy(donor)
+    data['name'] = name
+    data['ei'] = ei
+    data['grain_ei'] = donor['ei']
+    data['process'] = 'C-41'
+    data['grey_log_h'] = donor['grey_log_h'] - math.log10(ei / donor['ei'])
+    char = data['characteristic']
+    for c in CHANNELS:
+        fog = min(char[c])
+        char[c] = [fog + C41_CONTRAST * (d - fog) for d in char[c]]
+    char['log_h'] = [x - C41_SHIFT for x in char['log_h']]
+    grains = data['granularity']
+    for c in CHANNELS:
+        grains[c] = [g * C41_GRAIN for g in grains[c]]
+    grains['log_h'] = [x - C41_SHIFT for x in grains['log_h']]
+    data['source'] = (f'{donor["name"]} without its rem-jet (no backing), developed in C-41 (its curves and '
+                      f'granularity carried from ECN-2 by film_develop\'s C-41: +1/3 stop, ×1.17 contrast, ×1.15 grain) '
+                      f'and rated EI {ei:g}; dyes and spectra its: ' + donor['source'])
+    return data
+
+
 def stock(key, data, d_min_from=None):
+    emulsion = DONORS.get(key, key)
     log_h, curves = thinned(*full_rows(data['characteristic'], 'log_h'), CURVE_MOST)
     grain_h, grains = thinned(*full_rows(data['granularity'], 'log_h'), GRAIN_MOST)
     freqs, mtf = thinned(*full_rows(data['mtf'], 'cycles_per_mm'), MTF_MOST)
@@ -417,14 +464,14 @@ def stock(key, data, d_min_from=None):
     d_min_data = data.get('d_min') or d_min_from
     d_min = spectral(d_min_data['nm'], d_min_data['density'], 0.0)
     pad = lambda table, n, most: sum((list(table[c]) + [table[c][-1]] * (most - n) for c in CHANNELS), [])
-    developing = kinetics(key, data)
+    developing = kinetics(emulsion, data)
     return f'''## {data['name']}: {data['source']}.{' D-min: Kodak EXR 500T 5298 (none drawn).' if 'd_min' not in data else ''}
 pub func {key}() -> Stock:
     return Stock(
         name = "{data['name']}",
         kind = {KINDS[data.get('kind', 'negative')]},
-        grain_cell = {number(geometry(key, data)[0])},
-        grain_width = {number(geometry(key, data)[1])},
+        grain_cell = {number(geometry(emulsion, data)[0])},
+        grain_width = {number(geometry(emulsion, data)[1])},
         process = "{data.get('process', '')}",
         minutes = {number(data.get('minutes', 0.0))},
         speed = {number(data['ei'])},
@@ -450,7 +497,7 @@ pub func {key}() -> Stock:
         induction = {number(developing['induction'])},
         fog_rate = {block(developing['fog_rate'], 3)},
         # Reciprocity failure per layer: dev/film/reciprocity.py.
-        reciprocity = {block(reciprocity(key, data.get('kind', 'negative')), 9)},
+        reciprocity = {block(reciprocity(emulsion, data.get('kind', 'negative')), 9)},
         base_thickness = {number(base_of(key)[0])},
         base_index = {number(base_of(key)[1])},
         backing = {base_of(key)[2]})
@@ -486,6 +533,8 @@ STOCKS = [
                                         spread_um=2.0, rms=16.0)),
     ('eastman_color_negative_5251', from_1960s()),
     ('eastman_color_negative_5254', from_5254()),
+    ('cinestill_800t', cinestill('cinestill_800t', 'CineStill 800T', 800.0)),
+    ('cinestill_50d', cinestill('cinestill_50d', 'CineStill 50D', 50.0)),
 ]
 
 header = f'''## Generated by dev/film/make_stocks.py; do not edit. The film stocks the film

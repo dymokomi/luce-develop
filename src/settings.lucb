@@ -218,6 +218,23 @@ pub func compile(settings: const Settings*) -> Settings:
         out.set(.view, (f64)(i64)View.paper)
     return out
 
+## What `settings` show before the film, for comparing: the camera's stages
+## alone (the light, its white balance and exposure, the lens and the filter
+## where the recipe has them), no film, through the ACES view, framed and
+## vignetted as the photo is.
+pub func before_film(settings: const Settings*) -> Settings:
+    var out = compile(settings)
+    let base = defaults()
+    for at in 0..<parameter_count:
+        let owner = recipe.owner_of(parameters[at].section)
+        if owner > (i64)recipe.Stage.filter and owner != (i64)recipe.Stage.easel:
+            out.values[at] = base.values[at]
+    for at in 0..<curve_count:
+        out.curves[at] = Curve()
+    out.set(.film_stock, 0.0)
+    out.set(.view, (f64)(i64)View.aces)
+    return out
+
 ## Mode `at` (recipe.mode_names) as settings text to stack on a photo: its
 ## recipe and its stock.
 pub func mode_text(at: i64) -> interop.Owned[str]!:
@@ -640,6 +657,16 @@ test "a recipe compiles to its stages and its output's view":
     wanted.set(.view, 1.0)
     wanted.recipe = recipe.mode(2)
     assert(compile(&wanted).get(.view) == (f64)(i64)View.aces)
+
+test "before the film: the camera's stages and the frame only":
+    var wanted = defaults()
+    wanted.set(.exposure, 1.0)
+    wanted.set(.contrast, 30.0)
+    wanted.set(.crop_left, 0.2)
+    wanted.recipe = recipe.mode(1)
+    let before = before_film(&wanted)
+    assert(before.get(.exposure) == 1.0 and before.get(.crop_left) == 0.2)
+    assert(before.get(.film_stock) == 0.0 and before.get(.contrast) == 0.0 and before.get(.view) == (f64)(i64)View.aces)
 
 test "the recipe is named only when it is not the default":
     var out: Buffer

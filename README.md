@@ -185,6 +185,9 @@ Stocks, 22 of them, each from its maker's sheet:
 - **Television's 1990s tungsten negatives:** Kodak EXR 500T 5298 and EXR 200T
   5293, Vision 500T 5279 and Vision 320T 5277.
 - **Cinema today:** Vision3 500T 5219, 200T 5213, 250D 5207 and 50D 5203.
+- **CineStill:** 800T and 50D, Vision3 5219 and 5203 with the rem-jet taken
+  off, developed in C-41 and rated as sold. Nothing stops the light the base
+  sends back, so highlights get CineStill's red-orange halo.
 - **Still color negatives (C-41):** Portra 160, 400 and 800, Ektar 100,
   Fujifilm Pro 400H.
 - **Slides (E-6):** Fujifilm Velvia 50 and 100, Kodak Ektachrome E100.

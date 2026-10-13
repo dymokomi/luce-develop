@@ -5,6 +5,10 @@
 ## textures: the develop's tables (tables.lucb), rebuilt when the settings change,
 ## and the ACES view's table, baked once.
 ##
+## Comparing, the photo before its film (settings.before_film: the camera's
+## light, white balance and exposure, unfilmed) shows left of a split and the
+## develop right of it; having no film, it is prepared on the window's thread.
+##
 ## What the settings make on the CPU (the tables, the film's atlas: its model,
 ## its development, and for the stochastic render its grains, the better part
 ## of a second) is made on a second thread, so the window never waits for it:
@@ -19,7 +23,7 @@ import sync
 import thread
 from luce_gpu import gpu
 from luce_std import math
-from settings import Settings, View, Look, defaults, compile
+from settings import Settings, View, Look, defaults, compile, before_film
 from scene import Scene
 import scene
 import tables
@@ -322,8 +326,12 @@ pub struct Renderer:
     var turn_wanted: i64
     var shown_serial: u64
     var upload: bool
-    ## The develop drawn.
+    ## The develop drawn; and the photo before its film, drawn left of `split`
+    ## (0..1 of the photo's width) while `comparing`.
     var develop: Developing
+    var before: Developing
+    var comparing: bool
+    var split: f64
     ## Watching development: each change of the settings develops the film
     ## again over `watch_seconds`, frame by frame, from nothing (when it began,
     ## ns, and whether it is still going).
@@ -455,6 +463,7 @@ pub struct Renderer:
             self.watch_running = true
         self.turn_wanted = (i64)settings.get(.geometry_turn)
         self.develop.take(compile(&settings))
+        self.before.take(before_film(&settings))
 
     ## Watch the film develop: after each change, over a couple of seconds, the
     ## negative (or what is made from it) as development runs its course.
@@ -511,6 +520,16 @@ pub struct Renderer:
             return true
         return which.film.active() and (which.filmed == none or which.film_stale)
 
+    ## Compare the photo before its film (left of the split) with the develop.
+    pub func compare_before(on: bool):
+        self.comparing = on
+    pub func is_comparing() -> bool:
+        return self.comparing
+    pub func split_at() -> f64:
+        return self.split
+    pub func set_split(at: f64):
+        self.split = math.clamp(at, 0.0, 1.0)
+
     ## Whether the develop has anything to draw yet (until then a window shows
     ## what it had, a preview).
     pub func ready() -> bool:
@@ -558,10 +577,8 @@ pub struct Renderer:
         let kept = which.film
         which.film = shared.film
         shared.film = kept
-        let texels = done.tables
-        let view_table = done.view_table
-        let print_data = done.print_data
-        let baked = done.view_key
+        # The arrays move to `taken`; the thread's slot is left empty.
+        var taken = *done
         done.tables = no_tables()
         done.view_table = no_tables()
         done.print_data = no_data()
@@ -571,26 +588,8 @@ pub struct Renderer:
         which.settings = done.settings
         which.shown_serial = done.serial
         shared.lock.unlock()
-        defer free(texels) in memory.heap
-        if view_table.length > 0:
-            defer free(view_table) in memory.heap
-            if which.view_texture == none:
-                which.view_texture = try gpu.Texture.create(device, (u32)(view.lut_size * view.lut_size), (u32)view.lut_size, gpu.Format.rgba16_float)
-            let view_held = which.view_texture else return false
-            try view_held.upload(u8[]((u8*)view_table.data, view_table.length * 2))
-            which.view_baked = baked
-        if print_data.length > 0:
-            defer free(print_data) in memory.heap
-            if which.print_texture == none:
-                which.print_texture = try gpu.Texture.create(device, (u32)film_print.print_atlas_width, (u32)film_print.print_atlas_rows,
-                                                             gpu.Format.rgba32_float)
-            let print_held = which.print_texture else return false
-            try print_held.upload(u8[]((u8*)print_data.data, print_data.length * 4))
-            which.view_baked = baked
-        if which.tables_texture == none:
-            which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
-        let held = which.tables_texture else return false
-        try held.upload(u8[]((u8*)texels.data, texels.length * 2))
+        defer taken.discard()
+        try upload_prepared(device, which, &taken)
         try upload_atlas(device, which)
         # Grains fitted for what is shown: the filmed scene stays, the render refines on.
         if not grains_only:
@@ -619,7 +618,12 @@ pub struct Renderer:
         let checked = try target.get()
         try self.prepare(checked)
         let pipeline = self.pipeline else return
-        try self.shade(checked, pipeline, &self.develop, x, y, width, height, x, width)
+        if not self.comparing:
+            try self.shade(checked, pipeline, &self.develop, x, y, width, height, x, width)
+            return
+        let middle = width * self.split
+        try self.shade(checked, pipeline, &self.before, x, y, width, height, x, middle)
+        try self.shade(checked, pipeline, &self.develop, x, y, width, height, x + middle, width - middle)
 
     ## One develop pass of `which` into `target` with `pipeline`: the photo
     ## placed at `x`, `y`, `width` × `height`, drawn only from `left` across
@@ -742,6 +746,7 @@ pub struct Renderer:
             self.develop.film_stale = true
             self.develop.tables_stale = true
             self.develop.scanned_columns = 0
+            self.before.tables_stale = true
         # While development is being watched, how much of it is still to come
         # (the last frame the developed film).
         if self.watch_running:
@@ -752,6 +757,8 @@ pub struct Renderer:
             if remaining <= 0.0:
                 self.watch_running = false
         try self.prepare_develop(device, &self.develop)
+        if self.comparing:
+            try self.prepare_before(device)
 
     ## `which`'s tables, view table, film atlas and filmed scene, made or
     ## refreshed for what changed.
@@ -784,6 +791,24 @@ pub struct Renderer:
             which.film_stale = false
         elif self.still_refining(which):
             try self.refine_develop(device, which)
+
+    ## The photo before its film: no film, so its tables, its (empty) film atlas
+    ## and its view are made here, at once.
+    func prepare_before(device: gpu.Device) -> !:
+        let which = &self.before
+        if which.tables_stale or which.shown_serial == 0:
+            which.tables_stale = false
+            which.settings = which.wanted
+            which.shown_serial = 1
+            var made = Prepared(tables = try prepared_tables(&which.settings), settings = which.settings, ready = true,
+                                view_table = no_tables(), print_data = no_data(), view_key = view_key(&which.settings))
+            defer made.discard()
+            if made.view_key != which.view_baked:
+                try bake_view(&made)
+            let camera = film.camera_settings(&which.settings)
+            try which.film.prepare(&which.settings, try self.shown.film_input(&camera))
+            try upload_prepared(device, which, &made)
+            try upload_atlas(device, which)
 
     ## The shown scene at `columns` samples across for `which`, made when it is not.
     func scanned(device: gpu.Device, which: Developing*, columns: usize) -> gpu.Texture!:
@@ -853,6 +878,7 @@ pub struct Renderer:
         self.preparing = none
         self.shown.close()
         self.develop.release()
+        self.before.release()
         if let held = self.scene_texture:
             var gone = held
             gone.destroy()
@@ -877,6 +903,27 @@ pub struct Renderer:
         _ = context
 
 pub let renderer_type: interop.Type[Renderer] = interop.Type[Renderer]("Renderer", Renderer.close, Renderer.trace, closeable = true, main_thread = true)
+
+## What `made` holds onto the GPU for `which`: its view's table or the print
+## and paper views' data when it has them, and its tables.
+func upload_prepared(device: gpu.Device, which: Developing*, made: const Prepared*) -> !:
+    if made.view_table.length > 0:
+        if which.view_texture == none:
+            which.view_texture = try gpu.Texture.create(device, (u32)(view.lut_size * view.lut_size), (u32)view.lut_size, gpu.Format.rgba16_float)
+        let view_held = which.view_texture else return
+        try view_held.upload(u8[]((u8*)made.view_table.data, made.view_table.length * 2))
+        which.view_baked = made.view_key
+    if made.print_data.length > 0:
+        if which.print_texture == none:
+            which.print_texture = try gpu.Texture.create(device, (u32)film_print.print_atlas_width, (u32)film_print.print_atlas_rows,
+                                                         gpu.Format.rgba32_float)
+        let print_held = which.print_texture else return
+        try print_held.upload(u8[]((u8*)made.print_data.data, made.print_data.length * 4))
+        which.view_baked = made.view_key
+    if which.tables_texture == none:
+        which.tables_texture = try gpu.Texture.create(device, (u32)tables.table_width, (u32)tables.table_rows, gpu.Format.rgba16_float)
+    let held = which.tables_texture else return
+    try held.upload(u8[]((u8*)made.tables.data, made.tables.length * 2))
 
 ## `which`'s film atlas onto the GPU.
 func upload_atlas(device: gpu.Device, which: Developing*) -> !:
@@ -905,14 +952,14 @@ pub func create(format: gpu.Format? = none) -> Renderer!:
         worker.join() catch joined:
             trap("the renderer's loading thread could not be joined")
         error(failure.code, failure.message)
-    return Renderer(loading = loading, worker = worker, preparing = shared, preparer = preparer, develop = developing(), format = format,
+    return Renderer(loading = loading, worker = worker, preparing = shared, preparer = preparer, develop = developing(), before = developing(), split = 0.5, format = format,
                     geometry_shown = true, crop_shown = true, refining = true)
 
 ## A renderer for Luce, drawing into the window.
 pub func start() -> interop.Reference[Renderer]!:
     var made = try create()
     let renderer = new Renderer(loading = made.loading, worker = made.worker, preparing = made.preparing, preparer = made.preparer, develop = developing(),
-                                geometry_shown = true, crop_shown = true, refining = true) in memory.heap catch failure:
+                                before = developing(), split = 0.5, geometry_shown = true, crop_shown = true, refining = true) in memory.heap catch failure:
         made.close()
         error(failure.code, failure.message)
     return try interop.Reference[Renderer].adopt(renderer, renderer_type, memory.heap)

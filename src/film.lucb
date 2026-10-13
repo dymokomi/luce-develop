@@ -1631,6 +1631,9 @@ test "every stock builds, returns grey in place and keeps neutrals neutral":
         var settings = defaults_with_film()
         settings.set(.film_stock, (f64)choice)
         settings.set(.film_grain, 0.0)
+        # The curves and the scan's timing, without halation: on a stock with
+        # no backing (CineStill) even an even field halates, a little red.
+        settings.set(.film_halation, 0.0)
         var film = Film()
         film.prepare(&settings) catch failure:
             assert(false)
@@ -1654,6 +1657,16 @@ test "every stock builds, returns grey in place and keeps neutrals neutral":
         # blue 0.19 stop behind two stops over).
         let apart = 0.2 if stock.kind == 1 else 0.1
         assert(math.abs(math.log2(bright[0] / bright[1])) < apart and math.abs(math.log2(bright[2] / bright[1])) < apart)
+
+test "CineStill has no backing: its halation is red and far stronger than Vision3's":
+    let still = film_stocks.stock_at(23)
+    let vision = film_stocks.stock_at(6)
+    assert(still.name == "CineStill 800T" and vision.name == "Kodak Vision3 500T 5219")
+    let bare = film_halation.kernel(still.base_thickness, still.base_index, still.backing)
+    let backed = film_halation.kernel(vision.base_thickness, vision.base_index, vision.backing)
+    assert(still.backing == film_halation.no_backing)
+    assert(bare.strength[0] > 10.0 * backed.strength[0])
+    assert(bare.strength[0] > bare.strength[1] and bare.strength[1] > bare.strength[2])
 
 test "film saturates warm colors and keeps their hue near":
     # A scan matched to its stock, so colors of moderate saturation come back.
