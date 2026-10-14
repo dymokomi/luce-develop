@@ -612,7 +612,7 @@ func developed_scene(source: Film*, scene: const Scene*) -> Scene!:
     return try filmed(source, scene, identity, &built, 1.0)
 
 test "a large even patch developed in steps is the published curve's":
-    var negative = film_for("film_stock=3;film_grain=0") catch failure:
+    var negative = film_for("film_stock=Kodak Vision 500T 5279;film_grain=0") catch failure:
         assert(false)
         return
     defer negative.release()
@@ -635,8 +635,8 @@ test "stand development draws stronger edges than continuous agitation":
     # its neighbor's to spare (Eberhard, Kostinsky). Measured as the step's
     # overshoot on the scanned positive.
     var overshoot: f64[2]
-    let texts: str[2] = ["film_stock=18;film_grain=0;develop_process=5;develop_agitation=1",
-                         "film_stock=18;film_grain=0;develop_process=5;develop_agitation=3"]
+    let texts: str[2] = ["film_stock=Kodak Tri-X 400;film_grain=0;develop_process=D-76;develop_agitation=Continuous",
+                         "film_stock=Kodak Tri-X 400;film_grain=0;develop_process=D-76;develop_agitation=Stand"]
     for (index, text) in texts.indexed():
         var tri_x = film_for(text) catch failure:
             assert(false)
@@ -677,7 +677,7 @@ test "a colour negative's edges overshoot, fading within a few tens of µm":
     # Their 6.24 % (Gold 100) and 5.28 % (Gold 200) are the chemical spread's
     # weight in their combined spread function, not an edge's overshoot, so
     # they are not compared with this (docs/PHYSICAL-FILM.md, part 4).
-    var portra = film_for("film_stock=12;film_grain=0;film_halation=0") catch failure:
+    var portra = film_for("film_stock=Kodak Portra 400;film_grain=0;film_halation=0") catch failure:
         assert(false)
         return
     defer portra.release()
@@ -717,8 +717,8 @@ test "agitation changes edges, not contrast":
     # the edges' strength over even areas moved a dense patch 1.6 D (stand
     # against continuous), far more than real; docs/PHYSICAL-FILM.md, part 4.
     var reads: f64[2]
-    let texts: str[2] = ["film_stock=18;film_grain=0;develop_process=5;develop_agitation=1",
-                         "film_stock=18;film_grain=0;develop_process=5;develop_agitation=3"]
+    let texts: str[2] = ["film_stock=Kodak Tri-X 400;film_grain=0;develop_process=D-76;develop_agitation=Continuous",
+                         "film_stock=Kodak Tri-X 400;film_grain=0;develop_process=D-76;develop_agitation=Stand"]
     for (index, text) in texts.indexed():
         var tri_x = film_for(text) catch failure:
             assert(false)
@@ -736,7 +736,7 @@ test "agitation changes edges, not contrast":
     assert(math.abs(reads[1] / reads[0] - 1.0) < 0.01)
 
 test "part of the way through, a negative is thinner":
-    var negative = film_for("film_stock=3;film_grain=0") catch failure:
+    var negative = film_for("film_stock=Kodak Vision 500T 5279;film_grain=0") catch failure:
         assert(false)
         return
     defer negative.release()
@@ -800,7 +800,7 @@ test "the stochastic render reads grey as the curve and the stock's granularity"
     # density in every channel; the pixels' rms, scaled to a 48 µm aperture
     # (Selwyn: σ·√area), as the granularity the stock publishes there. A color
     # negative (5279), a slide (Velvia 50) and black and white (Tri-X).
-    let stocks: str[3] = ["film_stock=3", "film_stock=5", "film_stock=18"]
+    let stocks: str[3] = ["film_stock=Kodak Vision 500T 5279", "film_stock=Fujifilm Velvia 50", "film_stock=Kodak Tri-X 400"]
     for text in stocks:
         var negative = film_for(text) catch failure:
             assert(false)
@@ -878,7 +878,7 @@ test "Portra 160, 400 and 800 grain in Kodak's order, rendered":
     # 10.5); the stochastic render of a patch developed there (10 µm pixels)
     # keeps that order in each channel.
     var rms: f64[9]
-    let stocks: str[3] = ["film_stock=11", "film_stock=12", "film_stock=13"]
+    let stocks: str[3] = ["film_stock=Kodak Portra 160", "film_stock=Kodak Portra 400", "film_stock=Kodak Portra 800"]
     for (index, text) in stocks.indexed():
         var portra = film_for(text) catch failure:
             assert(false)
@@ -897,7 +897,7 @@ test "drawn pixels have the traced grains' variance and neighbours' correlation"
     # Tri-X at 4.4 µm pixels (a 45-megapixel scan of 35 mm), in its toe where a
     # pixel holds tens of developed grains: every grain traced (512 samples a
     # pixel) against the pixels drawn from their distribution.
-    var tri_x = film_for("film_stock=18") catch failure:
+    var tri_x = film_for("film_stock=Kodak Tri-X 400") catch failure:
         assert(false)
         return
     defer tri_x.release()

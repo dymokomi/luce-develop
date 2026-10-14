@@ -51,6 +51,7 @@ from luce_std.collections import Buffer
 from parameters import Parameter, parameters, parameter_count
 from recipe import Recipe
 import recipe
+import choices
 import codes
 
 pub let invalid: ErrorCode = codes.invalid
@@ -244,7 +245,7 @@ pub func mode_text(at: i64) -> interop.Owned[str]!:
     try out.put_text("recipe=")
     try recipe.text_of(&chosen, &out)
     try out.put_text(";film_stock=")
-    try put_decimal(&out, recipe.mode_stock((usize)at))
+    try put_value(&out, .film_stock, recipe.mode_stock((usize)at))
     if recipe.mode_extra((usize)at).length > 0:
         try out.put_byte(';')
         try out.put_text(recipe.mode_extra((usize)at))
@@ -271,7 +272,7 @@ pub func text_of(settings: const Settings*, out: Buffer*) -> !:
             try out.put_byte(';')
         try out.put_text(parameters[at].name)
         try out.put_byte('=')
-        try put_decimal(out, value)
+        try put_value(out, (Parameter)(u8)at, value)
     for at in 0..<curve_count:
         let curve = settings.curves[at]
         if curve.count == 0:
@@ -331,8 +332,12 @@ pub func parse_into(out: Settings*, text: str):
         let name = (str)pair[..<equals]
         let value = (str)pair[equals + 1..]
         if let which = named(name):
-            if let number = decimal(value):
-                out.set(which, number)
+            if choices.count(which) > 0:
+                if let chosen = choices.value_of(which, value):
+                    out.set(which, chosen)
+            else:
+                if let number = decimal(value):
+                    out.set(which, number)
             continue
         for at in 0..<curve_count:
             if curve_names[at] == name:
@@ -397,6 +402,14 @@ func parse_guides(settings: Settings*, text: str):
     settings.set_guides(guides[..<count])
 
 ## `value` with up to four decimals, trailing zeros dropped.
+## Parameter `which`'s `value` as the text form writes it: a choice by its name
+## (choices.lucb), a number as a decimal.
+pub func put_value(out: Buffer*, which: Parameter, value: f64) -> !:
+    if choices.count(which) > 0:
+        try out.put_text(choices.name(which, (usize)math.clamp(value, 0.0, (f64)(choices.count(which) - 1))))
+        return
+    try put_decimal(out, value)
+
 pub func put_decimal(out: Buffer*, value: f64) -> !:
     let scaled = math.round(math.abs(value) * 10000.0)
     if value < 0.0 and scaled > 0.0:
@@ -592,6 +605,25 @@ pub func default_of(at: i64) -> f64:
 pub func decimals_of(at: i64) -> i64:
     return parameters[(usize)at].decimals
 
+## How many choices parameter `name` has (0: it is a number), and choice
+## `at`'s name (choices.lucb): what its menu shows and its text form writes.
+pub func choice_total(name: str) -> i64:
+    let which = named(name) else return 0
+    return (i64)choices.count(which)
+pub func choice_name(name: str, at: i64) -> str:
+    let which = named(name) else return ""
+    return choices.name(which, (usize)at) if at >= 0 and at < (i64)choices.count(which) else ""
+
+## Parameter `name` at `value` as a part of settings text ("film_stock=CineStill 800T").
+pub func part_text(name: str, value: f64) -> interop.Owned[str]!:
+    let which = named(name) else error(invalid, "no such develop parameter")
+    var out: Buffer
+    defer out.destroy()
+    try out.put_text(name)
+    try out.put_byte('=')
+    try put_value(&out, which, value)
+    return try interop.copy_text(out.text())
+
 ## How many tone curves there are, and curve `at`'s name in the text form.
 pub func curve_total() -> i64:
     return (i64)curve_count
@@ -611,7 +643,7 @@ test "settings round-trip through their text, naming only changes":
     changed.set(.view, 2.0)
     try changed.set_curve(0, [0.0, 0.3, 1.0], [0.0, 0.25, 1.0])
     try text_of(&changed, &out)
-    assert(out.text() == "temperature=5600;exposure=0.75;contrast=-20;view=2;curve_rgb=0,0 0.3,0.25 1,1")
+    assert(out.text() == "temperature=5600;exposure=0.75;contrast=-20;view=Linear;curve_rgb=0,0 0.3,0.25 1,1")
     let back = parse(out.text())
     assert(back.get(.exposure) == 0.75 and back.get(.contrast) == -20.0 and back.get(.temperature) == 5600.0 and back.get(.view) == 2.0)
     assert(back.curve(0).count == 3 and back.curve(0).ys[1] == 0.25)

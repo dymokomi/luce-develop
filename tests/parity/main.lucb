@@ -24,31 +24,31 @@ let cases: str[28] = [
     "",
     "temperature=7000;tint=10;exposure=0.7;contrast=40;shadows=50;vibrance=60",
     "exposure=-1;highlights=-80;whites=30;blacks=-40;saturation=-50",
-    "view=2;exposure=1.5",
-    "view=0;exposure=1;contrast=20;vibrance=40",
-    "view=1;orange_hue=40;orange_saturation=-60;blue_luminance=-50;green_saturation=80;grade_shadows_hue=200;grade_shadows_saturation=40;grade_highlights_hue=40;grade_highlights_saturation=30;grade_global_luminance=10",
+    "view=Linear;exposure=1.5",
+    "view=ACES 2.0;exposure=1;contrast=20;vibrance=40",
+    "view=Standard;orange_hue=40;orange_saturation=-60;blue_luminance=-50;green_saturation=80;grade_shadows_hue=200;grade_shadows_saturation=40;grade_highlights_hue=40;grade_highlights_saturation=30;grade_global_luminance=10",
     "bw=1;bw_tint_hue=40;bw_tint_amount=30;bw_red=120;bw_blue=-80;levels_black=0.05;levels_gamma=1.3;curve_rgb=0,0 0.25,0.2 0.75,0.85 1,1;curve_blue=0,0.05 1,0.95;curve_luma=0,0 0.5,0.55 1,1",
     "lens_vignetting=60;lens_midpoint=30;vignette_amount=-60;vignette_feather=70;vignette_roundness=40",
-    "view=1;geometry_vertical=40;geometry_rotate=4;geometry_aspect=20;guides=0.1,0.1,0.12,0.9",
-    "view=1;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40",
-    "view=1;film_stock=1;film_grain=0",
-    "view=1;film_stock=1;develop_time=4.5;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=2",
-    "view=1;film_stock=3;film_halation=300;film_grain=0;exposure=2",
-    "view=3;exposure=0.5;saturation=20",
-    "view=3;film_stock=1;film_grain=0",
-    "view=1;film_stock=5;film_grain=0",
-    "view=1;film_stock=5;film_grain=80",
-    "view=1;film_stock=6;film_grain=120;develop_time=10;develop_temperature=22",
-    "view=1;film_stock=3;film_grain=0;develop_silver=100;exposure=-1",
-    "view=1;film_stock=6;film_grain=0;develop_process=13",
-    "view=1;film_stock=5;film_grain=0;develop_process=2",
-    "view=3;film_stock=1;film_grain=0;print_silver=2.4",
-    "view=1;film_stock=2;film_grain=0;film_flash=15;film_filter=5",
-    "recipe=telecine|lens;film_stock=0;lens_coating=2;lens_diffusion=4",
-    "recipe=telecine|lens;view=1;film_stock=3;film_grain=0;lens_coating=2;lens_diffusion=3",
-    "recipe=paper_print|filter;film_stock=18;film_grain=0;paper_grade=3.5;paper_enlarger=1",
-    "recipe=paper_print|white_balance;film_stock=12;film_grain=0;paper_stock=3;paper_yellow=20;paper_exposure=0.5",
-    "recipe=release_print|white_balance;film_stock=3;film_grain=60;print_generations=2;print_optical=1"]
+    "view=Standard;geometry_vertical=40;geometry_rotate=4;geometry_aspect=20;guides=0.1,0.1,0.12,0.9",
+    "view=Standard;geometry_rotate=3;crop_left=0.1;crop_top=0.2;crop_right=0.8;crop_bottom=0.9;vignette_amount=-40",
+    "view=Standard;film_stock=Kodak EXR 500T 5298;film_grain=0",
+    "view=Standard;film_stock=Kodak EXR 500T 5298;develop_time=4.5;film_interimage=180;film_warmth=40;film_tint=-20;film_contrast=30;film_black=60;film_format=16 mm",
+    "view=Standard;film_stock=Kodak Vision 500T 5279;film_halation=300;film_grain=0;exposure=2",
+    "view=Print;exposure=0.5;saturation=20",
+    "view=Print;film_stock=Kodak EXR 500T 5298;film_grain=0",
+    "view=Standard;film_stock=Fujifilm Velvia 50;film_grain=0",
+    "view=Standard;film_stock=Fujifilm Velvia 50;film_grain=80",
+    "view=Standard;film_stock=Fujifilm Neopan 100 Acros II;film_grain=120;develop_time=10;develop_temperature=22",
+    "view=Standard;film_stock=Kodak Vision 500T 5279;film_grain=0;develop_silver=100;exposure=-1",
+    "view=Standard;film_stock=Fujifilm Neopan 100 Acros II;film_grain=0;develop_process=Rodinal 1+100 stand",
+    "view=Standard;film_stock=Fujifilm Velvia 50;film_grain=0;develop_process=C-41",
+    "view=Print;film_stock=Kodak EXR 500T 5298;film_grain=0;print_silver=2.4",
+    "view=Standard;film_stock=Kodak EXR 200T 5293;film_grain=0;film_flash=15;film_filter=½ Coral",
+    "recipe=telecine|lens;film_stock=None;lens_coating=Uncoated;lens_diffusion=Low Contrast 3",
+    "recipe=telecine|lens;view=Standard;film_stock=Kodak Vision 500T 5279;film_grain=0;lens_coating=Uncoated;lens_diffusion=Low Contrast 2",
+    "recipe=paper_print|filter;film_stock=Kodak Tri-X 400;film_grain=0;paper_grade=3.5;paper_enlarger=Condenser",
+    "recipe=paper_print|white_balance;film_stock=Kodak Portra 400;film_grain=0;paper_stock=Kodak Endura Premier;paper_yellow=20;paper_exposure=0.5",
+    "recipe=release_print|white_balance;film_stock=Kodak Vision 500T 5279;film_grain=60;print_generations=2;print_optical=1"]
 
 ## luce-raw's samples, as tests are run from this package's folder.
 let samples: str[3] = ["../luce-raw/build/samples/leica_m240.dng", "../luce-raw/build/samples/fuji_xt2_xtrans_14c.raf",
@@ -127,7 +127,7 @@ func check_file(device: gpu.Device, path: str) -> i64!:
 ## effective log H itself (half floats, rounded a little differently), so a
 ## grain right at its threshold can develop on one and not the other, and a
 ## silver grain is nearly opaque: a mean within 1.5 levels, under 3 % over 6.
-let stochastic_cases: str[3] = ["film_stock=3", "film_stock=5;film_grain=150", "film_stock=18;develop_process=5"]
+let stochastic_cases: str[3] = ["film_stock=Kodak Vision 500T 5279", "film_stock=Fujifilm Velvia 50;film_grain=150", "film_stock=Kodak Tri-X 400;develop_process=D-76"]
 
 func check_stochastic(device: gpu.Device, path: str) -> i64!:
     var failed: i64 = 0

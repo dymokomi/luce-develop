@@ -151,7 +151,7 @@ let mode_recipes: Recipe[8] = [Recipe(output = 0, balance = true), Recipe(output
                                Recipe(output = 0, filter = true), Recipe(output = 1, balance = true), Recipe(output = 4, balance = true),
                                Recipe(output = 3, filter = true), Recipe(output = 3, balance = true)]
 let mode_stocks: f64[8] = [3.0, 1.0, 5.0, 6.0, 22.0, 3.0, 18.0, 12.0]
-let mode_extras: str[8] = ["", "", "", "", "film_format=3", "film_format=1", "paper_stock=0", "paper_stock=3"]
+let mode_extras: str[8] = ["", "", "", "", "film_format=65 mm 5-perf", "film_format=Super 35", "paper_stock=Ilford Multigrade IV RC", "paper_stock=Kodak Endura Premier"]
 
 pub func mode_total() -> i64:
     return (i64)mode_count

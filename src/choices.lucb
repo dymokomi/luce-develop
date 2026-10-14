@@ -1,0 +1,81 @@
+## The settings that pick one of a list, and each choice's name: what the
+## settings' text form writes for them (film_stock=CineStill 800T, not a
+## position in a list that may grow), and what menus show. A setting's value
+## is the choice's position; its name is how it is stored.
+import film_stocks
+import film_develop
+from parameters import Parameter
+
+let formats: str[6] = ["35 mm Academy", "Super 35", "16 mm", "65 mm 5-perf", "Super 16", "IMAX 15/70"]
+let balances: str[6] = ["Matched", "None", "85 (daylight)", "81A", "81EF", "½ Coral"]
+let color_filters: str[9] = ["None", "Yellow (8)", "Orange (21)", "Red (25)", "Green (11)", "Blue (47)", "Chocolate 1", "Chocolate 2", "Chocolate 3"]
+let agitations: str[4] = ["As the process", "Continuous", "Intermittent", "Stand"]
+let backings: str[2] = ["As made", "Removed"]
+let calibrations: str[2] = ["Reference (Vision3 250D)", "Matched to the stock"]
+let resolutions: str[5] = ["HD telecine (1920)", "SD telecine (720)", "2K scan", "4K scan", "6K scan"]
+let coatings: str[3] = ["Multi-coated", "Single-coated", "Uncoated"]
+let diffusions: str[7] = ["None", "Low Contrast ½", "Low Contrast 1", "Low Contrast 2", "Low Contrast 3", "Low Contrast 4", "Low Contrast 5"]
+let print_materials: str[2] = ["Kodak Vision 2383", "Technicolor dye transfer"]
+let enlargers: str[3] = ["Diffusion", "Condenser", "Contact print"]
+let surfaces: str[3] = ["Glossy", "Lustre", "Matte"]
+let views: str[5] = ["ACES 2.0", "Standard", "Linear", "Print", "Paper"]
+
+## How many choices `which` has (0: it is a number, not a choice).
+pub func count(which: Parameter) -> usize:
+    return match which:
+        .film_stock => film_stocks.stock_count + 1
+        .film_format => formats.length
+        .film_filter => balances.length
+        .film_color_filter => color_filters.length
+        .develop_process => film_develop.process_count + 1
+        .develop_agitation => agitations.length
+        .film_backing => backings.length
+        .scan_calibration => calibrations.length
+        .scan_resolution => resolutions.length
+        .lens_coating => coatings.length
+        .lens_diffusion => diffusions.length
+        .print_material => print_materials.length
+        .paper_stock => film_stocks.paper_count
+        .paper_enlarger => enlargers.length
+        .paper_surface => surfaces.length
+        .view => views.length
+        _ => 0
+
+## Choice `at`'s name (0 ≤ at < count(which)). The stock 0 is no film; the
+## process 0 is the stock's standard one.
+pub func name(which: Parameter, at: usize) -> str:
+    return match which:
+        .film_stock => "None" if at == 0 else film_stocks.stock_at(at - 1).name
+        .film_format => formats[at]
+        .film_filter => balances[at]
+        .film_color_filter => color_filters[at]
+        .develop_process => "Standard" if at == 0 else film_develop.processes[at - 1].name
+        .develop_agitation => agitations[at]
+        .film_backing => backings[at]
+        .scan_calibration => calibrations[at]
+        .scan_resolution => resolutions[at]
+        .lens_coating => coatings[at]
+        .lens_diffusion => diffusions[at]
+        .print_material => print_materials[at]
+        .paper_stock => film_stocks.paper_at(at).name
+        .paper_enlarger => enlargers[at]
+        .paper_surface => surfaces[at]
+        .view => views[at]
+        _ => ""
+
+## The value of `which`'s choice named `text`, or none.
+pub func value_of(which: Parameter, text: str) -> f64?:
+    for at in 0..<count(which):
+        if name(which, at) == text:
+            return (f64)at
+    return none
+
+test "every choice's name reads back as its value":
+    for which in [Parameter.film_stock, Parameter.film_format, Parameter.develop_process, Parameter.paper_stock, Parameter.view, Parameter.scan_resolution]:
+        for at in 0..<count(which):
+            if let back = value_of(which, name(which, at)):
+                assert(back == (f64)at)
+            else:
+                assert(false)
+    assert(count(Parameter.exposure) == 0)
+    assert(name(Parameter.film_stock, 24) == "CineStill 800T")
