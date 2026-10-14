@@ -420,7 +420,7 @@ func raw_scene(data: const u8[], edge: usize) -> Scene!:
             scene.pixels[out + 1] = (f16)(sum[1] * weight)
             scene.pixels[out + 2] = (f16)(sum[2] * weight)
             scene.pixels[out + 3] = (f16)1.0f32
-    try scene.orient((try raw.info(data)).orientation)
+    # luce-raw's develop turned it upright already (its size is the turned one).
     return scene
 
 ## The spectral sensitivities of the camera that made raw `data`, in its raw
